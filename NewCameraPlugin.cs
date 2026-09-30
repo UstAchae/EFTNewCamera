@@ -11,12 +11,12 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "新镜头";
-    public const string PluginVersion = "0.1.4";
+    public const string PluginVersion = "0.1.2";
 
     private void Awake()
     {
         ConfigEntry<bool> enabled = Config.Bind("新镜头", "总开关", false,
-            "打开后使用第三人称骨架。镜头保持游戏自己的位置，并跟上头部模型的摆动。");
+            "打开后使用第三人称骨架，并把游戏镜头挂在人物头部。");
         NewCameraSwitch.Enabled = enabled.Value;
         enabled.SettingChanged += (_, _) => NewCameraSwitch.Enabled = enabled.Value;
         BindDirection();
@@ -62,7 +62,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
     private ConfigEntry<float> BindDegrees(string section, string key, string description)
     {
         return Config.Bind(section, key, 0f,
-            new ConfigDescription(description, new AcceptableValueRange<float>(-180f, 180f)));
+            new ConfigDescription(description, new AcceptableValueRange<float>(-180f, 360f)));
     }
 
     private ConfigEntry<float> BindMeters(string section, string key, string description)
@@ -74,13 +74,11 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
     private void OnEnable()
     {
         Camera.onPreCull += NewCameraSwitch.OnCameraPreCull;
-        Camera.onPreRender += NewCameraSwitch.OnCameraPreRender;
     }
 
     private void OnDisable()
     {
         Camera.onPreCull -= NewCameraSwitch.OnCameraPreCull;
-        Camera.onPreRender -= NewCameraSwitch.OnCameraPreRender;
     }
 
     private void LateUpdate()
@@ -94,28 +92,15 @@ internal static class NewCameraSwitch
     internal static bool Enabled;
 
     private static bool _applied;
-    private static bool _hasHeadBase;
-    private static Transform? _head;
-    private static Vector3 _headPosInCamera;
-    private static Quaternion _headRotInCamera;
-    private static int _gamePoseFrame = -1;
-    private static Vector3 _gamePosition;
-    private static Quaternion _gameRotation;
 
     internal static void LateUpdate()
     {
-        Camera.onPreCull -= OnCameraPreCull;
-        Camera.onPreCull += OnCameraPreCull;
-        Camera.onPreRender -= OnCameraPreRender;
-        Camera.onPreRender += OnCameraPreRender;
-
         Player? player = Singleton<GameWorld>.Instance?.MainPlayer;
         if (!Enabled)
         {
             if (_applied && player != null && player.IsYourPlayer && player.PointOfView != EPointOfView.FirstPerson)
                 player.PointOfView = EPointOfView.FirstPerson;
             _applied = false;
-            ClearHeadBase();
             return;
         }
 
@@ -133,45 +118,13 @@ internal static class NewCameraSwitch
         if (!Enabled || camera == null || !camera.CompareTag("MainCamera"))
             return;
 
-        _gamePosition = camera.transform.position;
-        _gameRotation = camera.transform.rotation;
-        _gamePoseFrame = Time.frameCount;
-    }
-
-    internal static void OnCameraPreRender(Camera camera)
-    {
-        if (!Enabled || camera == null || !camera.CompareTag("MainCamera"))
-            return;
-
         Player? player = Singleton<GameWorld>.Instance?.MainPlayer;
         Transform? head = player != null && player.IsYourPlayer ? player.PlayerBones?.Head?.Original : null;
         if (head == null)
             return;
 
-        // The game has already placed this camera. Keep that pose, then add the part of
-        // the head motion the camera did not already follow.
-        Vector3 gamePosition = _gamePoseFrame == Time.frameCount ? _gamePosition : camera.transform.position;
-        Quaternion gameRotation = _gamePoseFrame == Time.frameCount ? _gameRotation : camera.transform.rotation;
-        if (!_hasHeadBase || !ReferenceEquals(_head, head))
-        {
-            _head = head;
-            _headPosInCamera = Quaternion.Inverse(gameRotation) * (head.position - gamePosition);
-            _headRotInCamera = Quaternion.Inverse(gameRotation) * head.rotation;
-            _hasHeadBase = true;
-        }
-
-        Vector3 expectedHeadPosition = gamePosition + gameRotation * _headPosInCamera;
-        Quaternion expectedHeadRotation = gameRotation * _headRotInCamera;
-        Vector3 swayOffset = head.position - expectedHeadPosition;
-        Quaternion swayRotation = head.rotation * Quaternion.Inverse(expectedHeadRotation);
-        Quaternion rotation = CameraDirection.Resolve(swayRotation * gameRotation);
-        Vector3 position = CameraPosition.Resolve(gamePosition + swayOffset, rotation);
+        Quaternion rotation = CameraDirection.Resolve(head.rotation);
+        Vector3 position = CameraPosition.Resolve(head.position, rotation);
         camera.transform.SetPositionAndRotation(position, rotation);
-    }
-
-    private static void ClearHeadBase()
-    {
-        _hasHeadBase = false;
-        _head = null;
     }
 }
