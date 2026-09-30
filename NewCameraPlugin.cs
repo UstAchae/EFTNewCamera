@@ -11,12 +11,12 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "新镜头";
-    public const string PluginVersion = "0.1.2";
+    public const string PluginVersion = "0.1.3";
 
     private void Awake()
     {
         ConfigEntry<bool> enabled = Config.Bind("新镜头", "总开关", false,
-            "打开后使用第三人称骨架，并把游戏镜头挂在人物头部。");
+            "打开后使用第三人称骨架。镜头保持游戏自己的位置，并跟上头部模型的摆动。");
         NewCameraSwitch.Enabled = enabled.Value;
         enabled.SettingChanged += (_, _) => NewCameraSwitch.Enabled = enabled.Value;
         BindDirection();
@@ -92,6 +92,10 @@ internal static class NewCameraSwitch
     internal static bool Enabled;
 
     private static bool _applied;
+    private static bool _hasHeadBase;
+    private static Transform? _head;
+    private static Vector3 _baseLocalPosition;
+    private static Quaternion _baseLocalRotation;
 
     internal static void LateUpdate()
     {
@@ -101,6 +105,7 @@ internal static class NewCameraSwitch
             if (_applied && player != null && player.IsYourPlayer && player.PointOfView != EPointOfView.FirstPerson)
                 player.PointOfView = EPointOfView.FirstPerson;
             _applied = false;
+            ClearHeadBase();
             return;
         }
 
@@ -123,8 +128,30 @@ internal static class NewCameraSwitch
         if (head == null)
             return;
 
-        Quaternion rotation = CameraDirection.Resolve(head.rotation);
-        Vector3 position = CameraPosition.Resolve(head.position, rotation);
+        // The game has already placed this camera. That is the pose from before the head bind.
+        Vector3 gamePosition = camera.transform.position;
+        Quaternion gameRotation = camera.transform.rotation;
+        if (!_hasHeadBase || !ReferenceEquals(_head, head))
+        {
+            _head = head;
+            _baseLocalPosition = head.localPosition;
+            _baseLocalRotation = head.localRotation;
+            _hasHeadBase = true;
+        }
+
+        Vector3 localDelta = head.localPosition - _baseLocalPosition;
+        Quaternion localDeltaRotation = head.localRotation * Quaternion.Inverse(_baseLocalRotation);
+        Transform space = head.parent != null ? head.parent : head;
+        Vector3 swayOffset = space.TransformVector(localDelta);
+        Quaternion worldDelta = space.rotation * localDeltaRotation * Quaternion.Inverse(space.rotation);
+        Quaternion rotation = CameraDirection.Resolve(worldDelta * gameRotation);
+        Vector3 position = CameraPosition.Resolve(gamePosition + swayOffset, rotation);
         camera.transform.SetPositionAndRotation(position, rotation);
+    }
+
+    private static void ClearHeadBase()
+    {
+        _hasHeadBase = false;
+        _head = null;
     }
 }
