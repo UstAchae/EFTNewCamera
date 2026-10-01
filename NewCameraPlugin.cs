@@ -2,7 +2,6 @@ using BepInEx;
 using BepInEx.Configuration;
 using Comfort.Common;
 using EFT;
-using EFT.Settings;
 using UnityEngine;
 
 namespace EFTNewCamera;
@@ -12,7 +11,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "新镜头";
-    public const string PluginVersion = "0.1.8";
+    public const string PluginVersion = "0.1.7";
 
     private void Awake()
     {
@@ -124,9 +123,6 @@ internal static class NewCameraSwitch
     {
         if (!Enabled || camera == null || !camera.CompareTag("MainCamera"))
             return;
-
-        if (Singleton<SettingsManager>.Instantiated)
-            camera.fieldOfView = Singleton<SettingsManager>.Instance.Game.Settings.FieldOfView.Value;
 
         Player? player = Singleton<GameWorld>.Instance?.MainPlayer;
         if (player == null || !player.IsYourPlayer)
