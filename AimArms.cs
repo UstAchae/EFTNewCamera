@@ -41,7 +41,7 @@ internal static class AimArms
         if (animation == null || animation.ScopeAimTransforms == null || animation.ScopeAimTransforms.Count == 0)
             return;
 
-        Transform bone = animation.CurrentScope?.Bone;
+        Transform? bone = animation.CurrentScope?.Bone;
         PlayerBones bones = player.PlayerBones;
         if (bone == null || bones == null)
             return;

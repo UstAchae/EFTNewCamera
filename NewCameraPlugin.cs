@@ -125,7 +125,9 @@ internal static class NewCameraSwitch
             return;
 
         Player? player = Singleton<GameWorld>.Instance?.MainPlayer;
-        Transform? head = player != null && player.IsYourPlayer ? player.PlayerBones?.Head?.Original : null;
+        if (player == null || !player.IsYourPlayer)
+            return;
+        Transform? head = player.PlayerBones?.Head?.Original;
         if (head == null)
             return;
 
