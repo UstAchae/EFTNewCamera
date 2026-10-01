@@ -2,6 +2,7 @@ using BepInEx;
 using BepInEx.Configuration;
 using Comfort.Common;
 using EFT;
+using EFT.Settings;
 using UnityEngine;
 
 namespace EFTNewCamera;
@@ -11,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "新镜头";
-    public const string PluginVersion = "0.1.7";
+    public const string PluginVersion = "0.1.10";
 
     private void Awake()
     {
@@ -75,11 +76,13 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
     private void OnEnable()
     {
         Camera.onPreCull += NewCameraSwitch.OnCameraPreCull;
+        Camera.onPreRender += NewCameraSwitch.OnCameraPreRender;
     }
 
     private void OnDisable()
     {
         Camera.onPreCull -= NewCameraSwitch.OnCameraPreCull;
+        Camera.onPreRender -= NewCameraSwitch.OnCameraPreRender;
     }
 
     private void LateUpdate()
@@ -124,6 +127,7 @@ internal static class NewCameraSwitch
         if (!Enabled || camera == null || !camera.CompareTag("MainCamera"))
             return;
 
+        HoldFieldOfView(camera);
         Player? player = Singleton<GameWorld>.Instance?.MainPlayer;
         if (player == null || !player.IsYourPlayer)
             return;
@@ -135,5 +139,21 @@ internal static class NewCameraSwitch
         Vector3 position = CameraPosition.Resolve(head.position, rotation);
         camera.transform.SetPositionAndRotation(position, rotation);
         AimArms.AlignToCamera(player, position);
+    }
+
+    internal static void OnCameraPreRender(Camera camera)
+    {
+        if (!Enabled || camera == null || !camera.CompareTag("MainCamera"))
+            return;
+
+        HoldFieldOfView(camera);
+    }
+
+    private static void HoldFieldOfView(Camera camera)
+    {
+        if (!Singleton<SettingsManager>.Instantiated)
+            return;
+
+        camera.fieldOfView = Singleton<SettingsManager>.Instance.Game.Settings.FieldOfView.Value;
     }
 }
