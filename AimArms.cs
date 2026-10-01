@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using System.Reflection;
 using EFT;
 using EFT.Animations;
@@ -48,49 +47,22 @@ internal static class AimArms
             return;
 
         Vector3 displacement = cameraPosition - bone.position;
-        List<Transform> shoulders = new List<Transform>();
-        Consider(shoulders, bones.LeftShoulder?.Original);
-        Consider(shoulders, bones.RightShoulder?.Original);
-        Consider(shoulders, bones.Shoulders);
-        for (int i = shoulders.Count - 1; i >= 0; i--)
+        bool boneFollowsArms = false;
+        Transform[] upperarms = bones.Upperarms;
+        if (upperarms != null)
         {
-            for (int j = 0; j < shoulders.Count; j++)
+            foreach (Transform arm in upperarms)
             {
-                if (i != j && shoulders[i].IsChildOf(shoulders[j]))
-                {
-                    shoulders.RemoveAt(i);
-                    break;
-                }
+                if (arm == null)
+                    continue;
+                if (bone.IsChildOf(arm))
+                    boneFollowsArms = true;
+                arm.position += displacement;
             }
         }
 
-        foreach (Transform shoulder in shoulders)
-            shoulder.position += displacement;
-
-        Transform? weapon = bones.Weapon_Root_Anim;
-        if (weapon == null)
-            return;
-        foreach (Transform shoulder in shoulders)
-        {
-            if (weapon.IsChildOf(shoulder))
-                return;
-        }
-
-        weapon.position += displacement;
-    }
-
-    private static void Consider(List<Transform> roots, Transform? transform)
-    {
-        if (transform != null && !roots.Contains(transform))
-            roots.Add(transform);
-    }
-
-    private static void Consider(List<Transform> roots, Transform[]? transforms)
-    {
-        if (transforms == null)
-            return;
-        foreach (Transform transform in transforms)
-            Consider(roots, transform);
+        if (!boneFollowsArms && bones.Weapon_Root_Anim != null)
+            bones.Weapon_Root_Anim.position += displacement;
     }
 
     internal static void Release(Player? player)

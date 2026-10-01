@@ -11,7 +11,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "新镜头";
-    public const string PluginVersion = "0.1.9";
+    public const string PluginVersion = "0.1.7";
 
     private void Awake()
     {
@@ -75,13 +75,11 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
     private void OnEnable()
     {
         Camera.onPreCull += NewCameraSwitch.OnCameraPreCull;
-        Camera.onPreRender += NewCameraSwitch.OnCameraPreRender;
     }
 
     private void OnDisable()
     {
         Camera.onPreCull -= NewCameraSwitch.OnCameraPreCull;
-        Camera.onPreRender -= NewCameraSwitch.OnCameraPreRender;
     }
 
     private void LateUpdate()
@@ -96,16 +94,8 @@ internal static class NewCameraSwitch
 
     private static bool _applied;
 
-    private static int _cameraFrame = -1;
-    private static Vector3 _cameraPosition;
-
     internal static void LateUpdate()
     {
-        Camera.onPreCull -= OnCameraPreCull;
-        Camera.onPreCull += OnCameraPreCull;
-        Camera.onPreRender -= OnCameraPreRender;
-        Camera.onPreRender += OnCameraPreRender;
-
         Player? player = Singleton<GameWorld>.Instance?.MainPlayer;
         if (!Enabled)
         {
@@ -144,19 +134,6 @@ internal static class NewCameraSwitch
         Quaternion rotation = CameraDirection.Resolve(head.rotation);
         Vector3 position = CameraPosition.Resolve(head.position, rotation);
         camera.transform.SetPositionAndRotation(position, rotation);
-        _cameraPosition = position;
-        _cameraFrame = Time.frameCount;
-    }
-
-    internal static void OnCameraPreRender(Camera camera)
-    {
-        if (!Enabled || camera == null || !camera.CompareTag("MainCamera") || _cameraFrame != Time.frameCount)
-            return;
-
-        Player? player = Singleton<GameWorld>.Instance?.MainPlayer;
-        if (player == null || !player.IsYourPlayer)
-            return;
-
-        AimArms.AlignToCamera(player, _cameraPosition);
+        AimArms.AlignToCamera(player, position);
     }
 }
