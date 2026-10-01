@@ -1,6 +1,8 @@
 using System.Reflection;
 using EFT;
+using EFT.Animations;
 using HarmonyLib;
+using UnityEngine;
 
 namespace EFTNewCamera;
 
@@ -28,6 +30,39 @@ internal static class AimArms
     {
         _suppress = true;
         player.MovementContext?.PlayerAnimator?.SetAiming(false);
+    }
+
+    internal static void AlignToCamera(Player player, Vector3 cameraPosition)
+    {
+        if (player.HandsController == null || !player.HandsController.IsAiming)
+            return;
+
+        ProceduralWeaponAnimation animation = player.ProceduralWeaponAnimation;
+        if (animation == null || animation.ScopeAimTransforms == null || animation.ScopeAimTransforms.Count == 0)
+            return;
+
+        Transform bone = animation.CurrentScope?.Bone;
+        PlayerBones bones = player.PlayerBones;
+        if (bone == null || bones == null)
+            return;
+
+        Vector3 displacement = cameraPosition - bone.position;
+        bool boneFollowsArms = false;
+        Transform[] upperarms = bones.Upperarms;
+        if (upperarms != null)
+        {
+            foreach (Transform arm in upperarms)
+            {
+                if (arm == null)
+                    continue;
+                if (bone.IsChildOf(arm))
+                    boneFollowsArms = true;
+                arm.position += displacement;
+            }
+        }
+
+        if (!boneFollowsArms && bones.Weapon_Root_Anim != null)
+            bones.Weapon_Root_Anim.position += displacement;
     }
 
     internal static void Release(Player? player)

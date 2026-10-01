@@ -11,7 +11,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "新镜头";
-    public const string PluginVersion = "0.1.6";
+    public const string PluginVersion = "0.1.7";
 
     private void Awake()
     {
@@ -132,5 +132,6 @@ internal static class NewCameraSwitch
         Quaternion rotation = CameraDirection.Resolve(head.rotation);
         Vector3 position = CameraPosition.Resolve(head.position, rotation);
         camera.transform.SetPositionAndRotation(position, rotation);
+        AimArms.AlignToCamera(player, position);
     }
 }
