@@ -11,12 +11,13 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "新镜头";
-    public const string PluginVersion = "0.1.5";
+    public const string PluginVersion = "0.1.6";
 
     private void Awake()
     {
         ConfigEntry<bool> enabled = Config.Bind("新镜头", "总开关", false,
             "打开后使用第三人称骨架，并把游戏镜头挂在人物头部。");
+        AimArms.Install();
         NewCameraSwitch.Enabled = enabled.Value;
         enabled.SettingChanged += (_, _) => NewCameraSwitch.Enabled = enabled.Value;
         BindDirection();
@@ -68,7 +69,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
     private ConfigEntry<float> BindMeters(string section, string key, float defaultValue, string description)
     {
         return Config.Bind(section, key, defaultValue,
-            new ConfigDescription(description, new AcceptableValueRange<float>(-0.05f, 0.05f)));
+            new ConfigDescription(description, new AcceptableValueRange<float>(-0.05f, 1f)));
     }
 
     private void OnEnable()
@@ -98,8 +99,12 @@ internal static class NewCameraSwitch
         Player? player = Singleton<GameWorld>.Instance?.MainPlayer;
         if (!Enabled)
         {
-            if (_applied && player != null && player.IsYourPlayer && player.PointOfView != EPointOfView.FirstPerson)
-                player.PointOfView = EPointOfView.FirstPerson;
+            if (_applied && player != null && player.IsYourPlayer)
+            {
+                AimArms.Release(player);
+                if (player.PointOfView != EPointOfView.FirstPerson)
+                    player.PointOfView = EPointOfView.FirstPerson;
+            }
             _applied = false;
             return;
         }
@@ -110,6 +115,7 @@ internal static class NewCameraSwitch
         if (player.PointOfView != EPointOfView.ThirdPerson)
             player.PointOfView = EPointOfView.ThirdPerson;
         HeadMotion.Apply(player);
+        AimArms.Apply(player);
         _applied = true;
     }
 
