@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Reflection;
 using EFT;
 using EFT.Animations;
@@ -47,22 +48,41 @@ internal static class AimArms
             return;
 
         Vector3 displacement = cameraPosition - bone.position;
-        bool boneFollowsArms = false;
-        Transform[] upperarms = bones.Upperarms;
-        if (upperarms != null)
+        List<Transform> roots = new List<Transform>();
+        Consider(roots, animation.HandsContainer?.TrackingTransform);
+        Consider(roots, bones.Weapon_Root_Anim);
+        Consider(roots, bones.LeftPalm);
+        Consider(roots, bones.RightPalm);
+        Consider(roots, bones.Shoulders);
+        Consider(roots, bones.Shoulders_Anim);
+        for (int i = roots.Count - 1; i >= 0; i--)
         {
-            foreach (Transform arm in upperarms)
+            for (int j = 0; j < roots.Count; j++)
             {
-                if (arm == null)
-                    continue;
-                if (bone.IsChildOf(arm))
-                    boneFollowsArms = true;
-                arm.position += displacement;
+                if (i != j && roots[i].IsChildOf(roots[j]))
+                {
+                    roots.RemoveAt(i);
+                    break;
+                }
             }
         }
 
-        if (!boneFollowsArms && bones.Weapon_Root_Anim != null)
-            bones.Weapon_Root_Anim.position += displacement;
+        foreach (Transform root in roots)
+            root.position += displacement;
+    }
+
+    private static void Consider(List<Transform> roots, Transform? transform)
+    {
+        if (transform != null && !roots.Contains(transform))
+            roots.Add(transform);
+    }
+
+    private static void Consider(List<Transform> roots, Transform[]? transforms)
+    {
+        if (transforms == null)
+            return;
+        foreach (Transform transform in transforms)
+            Consider(roots, transform);
     }
 
     internal static void Release(Player? player)
