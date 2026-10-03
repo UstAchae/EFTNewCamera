@@ -181,26 +181,70 @@ internal static class AimArms
         Vector3 up = cameraRotation * Vector3.up;
         Vector3 forward = cameraRotation * Vector3.forward;
         Vector3 fromSight = cameraPosition - active.position;
-        Transform? rearSlot = RearmostAimSlot(animation, weapon, cameraPosition, forward);
-        Vector3 fromDepth = rearSlot != null ? cameraPosition - rearSlot.position : fromSight;
+        Vector3 depthPoint = SightOnRearRail(animation, weapon, active, cameraPosition, forward);
+        Vector3 fromDepth = cameraPosition - depthPoint;
         signature = active.GetInstanceID();
         return right * Vector3.Dot(fromSight, right)
             + up * Vector3.Dot(fromSight, up)
             + forward * Vector3.Dot(fromDepth, forward);
     }
 
-    private static Transform? RearmostAimSlot(ProceduralWeaponAnimation animation, Transform? weapon, Vector3 cameraPosition, Vector3 cameraForward)
+    private static Vector3 SightOnRearRail(ProceduralWeaponAnimation animation, Transform? weapon, Transform active, Vector3 cameraPosition, Vector3 cameraForward)
     {
-        _collectionField ??= AccessTools.Field(typeof(ProceduralWeaponAnimation), "_ccv");
-        if (_collectionField?.GetValue(animation) is not ContainerCollectionView collection)
+        Slot? mountedSlot = CurrentSightSlot(animation);
+        if (mountedSlot == null || !IsRailSlot(mountedSlot.ID))
+            return active.position;
+
+        ContainerCollectionView? collection = WeaponSlots(animation);
+        if (collection == null)
+            return active.position;
+
+        Transform? mounted = SlotBone(collection, mountedSlot);
+        Transform? rear = RearmostRail(collection, weapon, cameraPosition, cameraForward);
+        if (mounted == null || rear == null)
+            return active.position;
+
+        return rear.position + (active.position - mounted.position);
+    }
+
+    private static Slot? CurrentSightSlot(ProceduralWeaponAnimation animation)
+    {
+        Item? item = animation.CurrentScope?.Mod?.Item;
+        if (item == null)
             return null;
 
+        try
+        {
+            return item.Parent.Container as Slot;
+        }
+        catch (System.Exception)
+        {
+            return null;
+        }
+    }
+
+    private static ContainerCollectionView? WeaponSlots(ProceduralWeaponAnimation animation)
+    {
+        _collectionField ??= AccessTools.Field(typeof(ProceduralWeaponAnimation), "_ccv");
+        return _collectionField?.GetValue(animation) as ContainerCollectionView;
+    }
+
+    private static Transform? SlotBone(ContainerCollectionView collection, Slot slot)
+    {
+        if (!collection.ContainerBones.TryGetValue(slot, out ContainerCollectionView.SlotView view))
+            return null;
+
+        return view?.Bone;
+    }
+
+    private static Transform? RearmostRail(ContainerCollectionView collection, Transform? weapon, Vector3 cameraPosition, Vector3 cameraForward)
+    {
         Transform? rear = null;
         float rearDepth = float.PositiveInfinity;
         foreach (System.Collections.Generic.KeyValuePair<IContainer, ContainerCollectionView.SlotView> pair in collection.ContainerBones)
         {
             Transform? bone = pair.Value?.Bone;
-            if (pair.Key is not Slot slot || bone == null || !IsAimSlot(slot.ID))
+            if (pair.Key is not Slot slot || bone == null || !IsRailSlot(slot.ID))
                 continue;
 
             float depth = SightDepth(weapon, bone, cameraPosition, cameraForward);
@@ -214,14 +258,9 @@ internal static class AimArms
         return rear;
     }
 
-    private static bool IsAimSlot(string? id)
+    private static bool IsRailSlot(string? id)
     {
-        if (id == null || id.Length == 0)
-            return false;
-
-        return id.IndexOf("mod_scope", System.StringComparison.Ordinal) >= 0
-            || id.IndexOf("mod_sight_rear", System.StringComparison.Ordinal) >= 0
-            || id.IndexOf("mod_sight_front", System.StringComparison.Ordinal) >= 0;
+        return id != null && id.IndexOf("mod_scope", System.StringComparison.Ordinal) >= 0;
     }
 
     private static float SightDepth(Transform? weapon, Transform bone, Vector3 cameraPosition, Vector3 cameraForward)
