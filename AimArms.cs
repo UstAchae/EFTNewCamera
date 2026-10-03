@@ -19,6 +19,8 @@ internal static class AimArms
         public bool UpdateWhenOffscreen;
     }
 
+    private const float ArmCarrySettleSeconds = 0.2f;
+
     private static bool _suppress;
     private static bool _patched;
     private static bool _replayingLaser;
@@ -29,6 +31,10 @@ internal static class AimArms
     private static int _skinOwnerId;
     private static readonly List<Transform> Upperarms = new();
     private static readonly List<SkinState> Skins = new();
+    private static bool _hasArmCarry;
+    private static int _armCarrySightId;
+    private static float _armCarryTime;
+    private static Vector3 _armCarryOffset;
 
     internal static void Install()
     {
@@ -85,6 +91,9 @@ internal static class AimArms
         if (player.HandsController == null || !player.HandsController.IsAiming)
         {
             _hasLaserDisplacement = false;
+            _hasArmCarry = false;
+            _armCarrySightId = 0;
+            _armCarryTime = 0f;
             return;
         }
 
@@ -98,6 +107,19 @@ internal static class AimArms
             return;
 
         Vector3 displacement = cameraPosition - VanillaAimPoint(animation, bone);
+        int sightId = bone.GetInstanceID();
+        if (!_hasArmCarry || sightId != _armCarrySightId)
+        {
+            _hasArmCarry = true;
+            _armCarrySightId = sightId;
+            _armCarryTime = 0f;
+        }
+        else
+        {
+            _armCarryTime += Time.deltaTime;
+        }
+
+        displacement = CarryOnArm(bones, displacement, _armCarryTime < ArmCarrySettleSeconds);
         _laserDisplacement = displacement;
         _hasLaserDisplacement = true;
         EnsureUpperarms(player);
@@ -172,6 +194,25 @@ internal static class AimArms
 
         local.y += animation._cameraShiftToLineOfSight.y;
         return parent.TransformPoint(local);
+    }
+
+    private static Vector3 CarryOnArm(PlayerBones bones, Vector3 solvedDisplacement, bool capture)
+    {
+        Transform? third = bones.Weapon_Root_Third;
+        Transform? weapon = bones.Weapon_Root_Anim;
+        if (third == null || weapon == null)
+            return solvedDisplacement;
+
+        Quaternion armRotation = third.rotation * bones.DeltaRotation;
+        Vector3 armPosition = third.position + third.rotation * bones.Offset;
+        if (capture)
+        {
+            Vector3 solved = weapon.position + solvedDisplacement;
+            _armCarryOffset = Quaternion.Inverse(armRotation) * (solved - armPosition);
+            return solvedDisplacement;
+        }
+
+        return armPosition + armRotation * _armCarryOffset - weapon.position;
     }
 
     internal static void ReplayLasers()
@@ -305,6 +346,9 @@ internal static class AimArms
 
     internal static void Release(Player? player)
     {
+        _hasArmCarry = false;
+        _armCarrySightId = 0;
+        _armCarryTime = 0f;
         RestoreSkins();
         if (!_suppress)
             return;
