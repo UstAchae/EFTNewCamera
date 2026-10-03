@@ -4,6 +4,7 @@ using Comfort.Common;
 using EFT;
 using EFT.Animations;
 using EFT.CameraControl;
+using EFT.InventoryLogic;
 using EFT.Settings;
 using HarmonyLib;
 using UnityEngine;
@@ -32,6 +33,7 @@ internal static class AimArms
     private static Vector3 _offset;
     private static Vector3 _blendFrom;
     private static MethodInfo? _laserLateUpdate;
+    private static FieldInfo? _collectionField;
     private static readonly List<MonoBehaviour> DeferredLasers = new();
     private static int _skinOwnerId;
     private static readonly List<Transform> Upperarms = new();
@@ -175,23 +177,51 @@ internal static class AimArms
             return Vector3.zero;
 
         Transform? weapon = animation.HandsContainer != null ? animation.HandsContainer.Weapon : null;
+        Vector3 right = cameraRotation * Vector3.right;
+        Vector3 up = cameraRotation * Vector3.up;
         Vector3 forward = cameraRotation * Vector3.forward;
-        float activeDepth = SightDepth(weapon, active, cameraPosition, forward);
-        float rearDepth = activeDepth;
-        for (int i = 0; i < animation.ScopeAimTransforms.Count; i++)
+        Vector3 fromSight = cameraPosition - active.position;
+        Transform? rearSlot = RearmostAimSlot(animation, weapon, cameraPosition, forward);
+        Vector3 fromDepth = rearSlot != null ? cameraPosition - rearSlot.position : fromSight;
+        signature = active.GetInstanceID();
+        return right * Vector3.Dot(fromSight, right)
+            + up * Vector3.Dot(fromSight, up)
+            + forward * Vector3.Dot(fromDepth, forward);
+    }
+
+    private static Transform? RearmostAimSlot(ProceduralWeaponAnimation animation, Transform? weapon, Vector3 cameraPosition, Vector3 cameraForward)
+    {
+        _collectionField ??= AccessTools.Field(typeof(ProceduralWeaponAnimation), "_ccv");
+        if (_collectionField?.GetValue(animation) is not ContainerCollectionView collection)
+            return null;
+
+        Transform? rear = null;
+        float rearDepth = float.PositiveInfinity;
+        foreach (System.Collections.Generic.KeyValuePair<IContainer, ContainerCollectionView.SlotView> pair in collection.ContainerBones)
         {
-            Transform? bone = animation.ScopeAimTransforms[i]?.Bone;
-            if (bone == null)
+            Transform? bone = pair.Value?.Bone;
+            if (pair.Key is not Slot slot || bone == null || !IsAimSlot(slot.ID))
                 continue;
 
-            float depth = SightDepth(weapon, bone, cameraPosition, forward);
-            if (depth < rearDepth)
-                rearDepth = depth;
+            float depth = SightDepth(weapon, bone, cameraPosition, cameraForward);
+            if (depth >= rearDepth)
+                continue;
+
+            rearDepth = depth;
+            rear = bone;
         }
 
-        float relief = Mathf.Max(0f, activeDepth - rearDepth);
-        signature = active.GetInstanceID();
-        return cameraPosition + forward * relief - active.position;
+        return rear;
+    }
+
+    private static bool IsAimSlot(string? id)
+    {
+        if (id == null || id.Length == 0)
+            return false;
+
+        return id.IndexOf("mod_scope", System.StringComparison.Ordinal) >= 0
+            || id.IndexOf("mod_sight_rear", System.StringComparison.Ordinal) >= 0
+            || id.IndexOf("mod_sight_front", System.StringComparison.Ordinal) >= 0;
     }
 
     private static float SightDepth(Transform? weapon, Transform bone, Vector3 cameraPosition, Vector3 cameraForward)
