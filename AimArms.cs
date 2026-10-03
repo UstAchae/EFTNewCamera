@@ -34,8 +34,6 @@ internal static class AimArms
     private static bool _blendAiming;
     private static bool _hasLocalAim;
     private static int _blendSightId;
-    private static int _localAimSightId;
-    private static int _localAimWeaponId;
     private static float _blend = 1f;
     private static Vector3 _localAim;
     private static Vector3 _offset;
@@ -126,12 +124,13 @@ internal static class AimArms
             _blend = 0f;
             _blendAiming = aiming;
             _blendSightId = sightId;
+            _hasLocalAim = false;
         }
 
         Vector3 target = Vector3.zero;
         Transform? weaponRoot = bones.Weapon_Root_Anim;
         if (aiming && sightId != 0 && animation != null && bone != null && weaponRoot != null)
-            target = AimDisplacement(animation, bone, weaponRoot, cameraPosition);
+            target = LockedDisplacement(animation, bone, weaponRoot, cameraPosition);
 
         if (_blend < 1f)
         {
@@ -223,15 +222,11 @@ internal static class AimArms
         return parent.TransformPoint(local);
     }
 
-    private static Vector3 AimDisplacement(ProceduralWeaponAnimation animation, Transform bone, Transform weapon, Vector3 cameraPosition)
+    private static Vector3 LockedDisplacement(ProceduralWeaponAnimation animation, Transform bone, Transform weapon, Vector3 cameraPosition)
     {
-        int sightId = bone.GetInstanceID();
-        int weaponId = weapon.GetInstanceID();
-        if (!_hasLocalAim || _localAimSightId != sightId || _localAimWeaponId != weaponId)
+        if (!_hasLocalAim)
         {
             _localAim = weapon.InverseTransformPoint(VanillaAimPoint(animation, bone));
-            _localAimSightId = sightId;
-            _localAimWeaponId = weaponId;
             _hasLocalAim = true;
         }
 
@@ -375,8 +370,6 @@ internal static class AimArms
         _blendAiming = false;
         _hasLocalAim = false;
         _blendSightId = 0;
-        _localAimSightId = 0;
-        _localAimWeaponId = 0;
         _blend = 1f;
         _offset = Vector3.zero;
         _blendFrom = Vector3.zero;
