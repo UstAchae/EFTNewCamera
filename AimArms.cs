@@ -16,8 +16,11 @@ internal static class AimArms
         public bool UpdateWhenOffscreen;
     }
 
+    private const float BlendSeconds = 0.2f;
+
     private static bool _suppress;
     private static bool _patched;
+    private static Vector3 _offset;
     private static int _skinOwnerId;
     private static readonly List<Transform> Upperarms = new();
     private static readonly List<SkinState> Skins = new();
@@ -45,19 +48,29 @@ internal static class AimArms
 
     internal static void AlignToCamera(Player player, Vector3 cameraPosition)
     {
-        if (player.HandsController == null || !player.HandsController.IsAiming)
-            return;
-
-        ProceduralWeaponAnimation animation = player.ProceduralWeaponAnimation;
-        if (animation == null || animation.ScopeAimTransforms == null || animation.ScopeAimTransforms.Count == 0)
-            return;
-
-        Transform? bone = animation.CurrentScope?.Bone;
         PlayerBones bones = player.PlayerBones;
-        if (bone == null || bones == null)
+        if (bones == null)
             return;
 
-        Vector3 displacement = cameraPosition - bone.position;
+        bool aiming = player.HandsController != null && player.HandsController.IsAiming;
+        Vector3 target = Vector3.zero;
+        if (aiming)
+        {
+            ProceduralWeaponAnimation animation = player.ProceduralWeaponAnimation;
+            Transform? bone = animation != null && animation.ScopeAimTransforms != null && animation.ScopeAimTransforms.Count > 0
+                ? animation.CurrentScope?.Bone
+                : null;
+            if (bone != null)
+                target = cameraPosition - bone.position;
+        }
+
+        float blend = 1f - Mathf.Pow(0.05f, Time.deltaTime / BlendSeconds);
+        _offset = Vector3.Lerp(_offset, target, blend);
+        if ((_offset - target).sqrMagnitude < 0.00000001f)
+            _offset = target;
+        if (_offset.sqrMagnitude < 0.00000001f)
+            return;
+
         EnsureUpperarms(player);
         for (int i = Upperarms.Count - 1; i >= 0; i--)
         {
@@ -82,7 +95,7 @@ internal static class AimArms
         foreach (Transform arm in Upperarms)
         {
             if (arm != null)
-                arm.position += displacement;
+                arm.position += _offset;
         }
 
         Transform? weapon = bones.Weapon_Root_Anim;
@@ -94,7 +107,7 @@ internal static class AimArms
                 return;
         }
 
-        weapon.position += displacement;
+        weapon.position += _offset;
     }
 
     private static void EnsureUpperarms(Player player)
@@ -158,6 +171,7 @@ internal static class AimArms
 
     internal static void Release(Player? player)
     {
+        _offset = Vector3.zero;
         RestoreSkins();
         if (!_suppress)
             return;
