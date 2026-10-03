@@ -18,9 +18,6 @@ internal static class AimArms
 
     private static bool _suppress;
     private static bool _patched;
-    private static bool _replayingLaser;
-    private static MethodInfo? _laserLateUpdate;
-    private static readonly HashSet<MonoBehaviour> DeferredLasers = new();
     private static int _skinOwnerId;
     private static readonly List<Transform> Upperarms = new();
     private static readonly List<SkinState> Skins = new();
@@ -36,21 +33,8 @@ internal static class AimArms
             return;
 
         Harmony harmony = new Harmony(NewCameraPlugin.PluginGuid + ".aimarms");
-        if (target != null && prefix != null)
-            harmony.Patch(target, prefix: new HarmonyMethod(prefix));
-        PatchLaser(harmony);
+        harmony.Patch(target, prefix: new HarmonyMethod(prefix));
         _patched = true;
-    }
-
-    private static void PatchLaser(Harmony harmony)
-    {
-        System.Type? laserType = AccessTools.TypeByName("LaserBeam");
-        _laserLateUpdate = laserType == null ? null : AccessTools.Method(laserType, "LateUpdate");
-        MethodInfo? laserPrefix = typeof(AimArms).GetMethod(nameof(LaserLateUpdatePrefix), BindingFlags.NonPublic | BindingFlags.Static);
-        if (_laserLateUpdate == null || laserPrefix == null)
-            return;
-
-        harmony.Patch(_laserLateUpdate, prefix: new HarmonyMethod(laserPrefix));
     }
 
     internal static void Apply(Player player)
@@ -111,44 +95,6 @@ internal static class AimArms
         }
 
         weapon.position += displacement;
-    }
-
-    internal static void ReplayLasers()
-    {
-        if (_laserLateUpdate == null || DeferredLasers.Count == 0)
-            return;
-
-        _replayingLaser = true;
-        try
-        {
-            foreach (MonoBehaviour laser in DeferredLasers)
-            {
-                if (laser == null || !laser.isActiveAndEnabled)
-                    continue;
-                _laserLateUpdate.Invoke(laser, null);
-            }
-        }
-        finally
-        {
-            DeferredLasers.Clear();
-            _replayingLaser = false;
-        }
-    }
-
-    private static bool LaserLateUpdatePrefix(MonoBehaviour __instance)
-    {
-        if (_replayingLaser || __instance == null || !NewCameraSwitch.Enabled)
-            return true;
-
-        Player? player = Comfort.Common.Singleton<GameWorld>.Instance?.MainPlayer;
-        Transform? playerRoot = player?.Transform?.Original;
-        if (player == null || !player.IsYourPlayer || playerRoot == null || !__instance.transform.IsChildOf(playerRoot))
-            return true;
-        if (player.HandsController == null || !player.HandsController.IsAiming)
-            return true;
-
-        DeferredLasers.Add(__instance);
-        return false;
     }
 
     private static void EnsureUpperarms(Player player)
