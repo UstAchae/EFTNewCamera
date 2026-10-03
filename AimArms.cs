@@ -148,6 +148,14 @@ internal static class AimArms
 
         Vector3 local = parent.InverseTransformPoint(bone.position);
         WeaponPrefab.AimPlane? plane = animation._currentAimingPlane;
+        float fovCompensation = animation._fovCompensatoryDistance;
+        if (animation.CurrentScope != null && animation.CurrentScope.IsOptic)
+        {
+            if (animation.HandsContainer.DefaultAimPlane != null)
+                plane = animation.HandsContainer.DefaultAimPlane;
+            fovCompensation = (1f - animation.Scale.y) * 0.075f;
+        }
+
         if (plane != null && animation.AimPointParent != null)
         {
             float depth = plane.Depth;
@@ -159,7 +167,7 @@ internal static class AimArms
             Vector3 point = toWorld.MultiplyPoint3x4(new Vector3(0f, 0f - depth, 0f));
             Matrix4x4 toParent = Matrix4x4.TRS(parent.position, parent.rotation, animation.Scale).inverse;
             float turnAway = animation.TurnAway != null ? animation.TurnAway.Position.y : 0f;
-            local.z = toParent.MultiplyPoint3x4(point).z + animation._fovCompensatoryDistance - turnAway + animation._cameraShiftToLineOfSight.x;
+            local.z = toParent.MultiplyPoint3x4(point).z + fovCompensation - turnAway + animation._cameraShiftToLineOfSight.x;
         }
 
         local.y += animation._cameraShiftToLineOfSight.y;
