@@ -19,11 +19,18 @@ internal static class AimArms
         public bool UpdateWhenOffscreen;
     }
 
+    private const float BlendSeconds = 0.2f;
+
     private static bool _suppress;
     private static bool _patched;
     private static bool _replayingLaser;
     private static bool _hasLaserDisplacement;
+    private static bool _blendAiming;
+    private static float _blend = 1f;
+    private static int _aimSignature;
     private static Vector3 _laserDisplacement;
+    private static Vector3 _offset;
+    private static Vector3 _blendFrom;
     private static MethodInfo? _laserLateUpdate;
     private static readonly List<MonoBehaviour> DeferredLasers = new();
     private static int _skinOwnerId;
@@ -82,24 +89,53 @@ internal static class AimArms
 
     internal static void AlignToCamera(Player player, Vector3 cameraPosition)
     {
-        if (player.HandsController == null || !player.HandsController.IsAiming)
+        PlayerBones bones = player.PlayerBones;
+        if (bones == null)
         {
             _hasLaserDisplacement = false;
             return;
         }
 
-        ProceduralWeaponAnimation animation = player.ProceduralWeaponAnimation;
-        if (animation == null || animation.ScopeAimTransforms == null || animation.ScopeAimTransforms.Count == 0)
-            return;
+        bool aiming = player.HandsController != null && player.HandsController.IsAiming;
+        int signature = 0;
+        Vector3 target = Vector3.zero;
+        if (aiming)
+        {
+            ProceduralWeaponAnimation? animation = player.ProceduralWeaponAnimation;
+            Transform? bone = animation != null && animation.ScopeAimTransforms != null && animation.ScopeAimTransforms.Count > 0
+                ? animation.CurrentScope?.Bone
+                : null;
+            if (bone != null && animation != null)
+            {
+                target = cameraPosition - VanillaAimPoint(animation, bone);
+                signature = bone.GetInstanceID();
+            }
+        }
 
-        Transform? bone = animation.CurrentScope?.Bone;
-        PlayerBones bones = player.PlayerBones;
-        if (bone == null || bones == null)
-            return;
+        if (signature != _aimSignature || aiming != _blendAiming)
+        {
+            _blendFrom = _offset;
+            _blend = 0f;
+            _aimSignature = signature;
+            _blendAiming = aiming;
+        }
 
-        Vector3 displacement = cameraPosition - VanillaAimPoint(animation, bone);
+        if (_blend < 1f)
+        {
+            _blend = Mathf.Min(1f, _blend + Time.deltaTime / BlendSeconds);
+            float t = _blend * _blend * (3f - 2f * _blend);
+            _offset = Vector3.Lerp(_blendFrom, target, t);
+        }
+        else
+        {
+            _offset = target;
+        }
+
+        Vector3 displacement = _offset;
         _laserDisplacement = displacement;
-        _hasLaserDisplacement = true;
+        _hasLaserDisplacement = displacement.sqrMagnitude >= 0.00000001f;
+        if (!_hasLaserDisplacement)
+            return;
         EnsureUpperarms(player);
         for (int i = Upperarms.Count - 1; i >= 0; i--)
         {
@@ -230,7 +266,8 @@ internal static class AimArms
         Player? player = Comfort.Common.Singleton<GameWorld>.Instance?.MainPlayer;
         if (player == null || !player.IsYourPlayer)
             return true;
-        if (player.HandsController == null || !player.HandsController.IsAiming)
+        bool aiming = player.HandsController != null && player.HandsController.IsAiming;
+        if (!aiming && _offset.sqrMagnitude < 0.00000001f)
             return true;
 
         Transform playerRoot = ((Component)player).transform;
@@ -305,6 +342,11 @@ internal static class AimArms
 
     internal static void Release(Player? player)
     {
+        _offset = Vector3.zero;
+        _blendFrom = Vector3.zero;
+        _blend = 1f;
+        _aimSignature = 0;
+        _blendAiming = false;
         RestoreSkins();
         if (!_suppress)
             return;
