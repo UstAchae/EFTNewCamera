@@ -32,9 +32,12 @@ internal static class AimArms
     private static readonly List<Transform> Upperarms = new();
     private static readonly List<SkinState> Skins = new();
     private static bool _blendAiming;
+    private static bool _hasLocalAim;
     private static int _blendSightId;
+    private static int _localAimSightId;
+    private static int _localAimWeaponId;
     private static float _blend = 1f;
-    private static Vector3 _armCarryOffset;
+    private static Vector3 _localAim;
     private static Vector3 _offset;
     private static Vector3 _blendFrom;
 
@@ -99,18 +102,16 @@ internal static class AimArms
 
         bool aiming = player.HandsController != null && player.HandsController.IsAiming;
         int sightId = 0;
-        Vector3 solved = Vector3.zero;
+        ProceduralWeaponAnimation? animation = null;
+        Transform? bone = null;
         if (aiming)
         {
-            ProceduralWeaponAnimation? animation = player.ProceduralWeaponAnimation;
-            Transform? bone = animation != null && animation.ScopeAimTransforms != null && animation.ScopeAimTransforms.Count > 0
+            animation = player.ProceduralWeaponAnimation;
+            bone = animation != null && animation.ScopeAimTransforms != null && animation.ScopeAimTransforms.Count > 0
                 ? animation.CurrentScope?.Bone
                 : null;
-            if (bone != null && animation != null)
-            {
-                solved = cameraPosition - VanillaAimPoint(animation, bone);
+            if (bone != null)
                 sightId = bone.GetInstanceID();
-            }
         }
 
         if (!_blendAiming && !aiming && _offset.sqrMagnitude < 0.00000001f && _blend >= 1f)
@@ -128,18 +129,9 @@ internal static class AimArms
         }
 
         Vector3 target = Vector3.zero;
-        if (aiming && sightId != 0)
-        {
-            if (_blend < 1f)
-            {
-                CarryOnArm(bones, solved, true);
-                target = solved;
-            }
-            else
-            {
-                target = CarryOnArm(bones, solved, false);
-            }
-        }
+        Transform? weaponRoot = bones.Weapon_Root_Anim;
+        if (aiming && sightId != 0 && animation != null && bone != null && weaponRoot != null)
+            target = AimDisplacement(animation, bone, weaponRoot, cameraPosition);
 
         if (_blend < 1f)
         {
@@ -231,23 +223,19 @@ internal static class AimArms
         return parent.TransformPoint(local);
     }
 
-    private static Vector3 CarryOnArm(PlayerBones bones, Vector3 solvedDisplacement, bool capture)
+    private static Vector3 AimDisplacement(ProceduralWeaponAnimation animation, Transform bone, Transform weapon, Vector3 cameraPosition)
     {
-        Transform? third = bones.Weapon_Root_Third;
-        Transform? weapon = bones.Weapon_Root_Anim;
-        if (third == null || weapon == null)
-            return solvedDisplacement;
-
-        Quaternion armRotation = third.rotation;
-        Vector3 armPosition = third.position;
-        if (capture)
+        int sightId = bone.GetInstanceID();
+        int weaponId = weapon.GetInstanceID();
+        if (!_hasLocalAim || _localAimSightId != sightId || _localAimWeaponId != weaponId)
         {
-            Vector3 solved = weapon.position + solvedDisplacement;
-            _armCarryOffset = Quaternion.Inverse(armRotation) * (solved - armPosition);
-            return solvedDisplacement;
+            _localAim = weapon.InverseTransformPoint(VanillaAimPoint(animation, bone));
+            _localAimSightId = sightId;
+            _localAimWeaponId = weaponId;
+            _hasLocalAim = true;
         }
 
-        return armPosition + armRotation * _armCarryOffset - weapon.position;
+        return cameraPosition - weapon.TransformPoint(_localAim);
     }
 
     internal static void ReplayLasers()
@@ -385,7 +373,10 @@ internal static class AimArms
     internal static void Release(Player? player)
     {
         _blendAiming = false;
+        _hasLocalAim = false;
         _blendSightId = 0;
+        _localAimSightId = 0;
+        _localAimWeaponId = 0;
         _blend = 1f;
         _offset = Vector3.zero;
         _blendFrom = Vector3.zero;
