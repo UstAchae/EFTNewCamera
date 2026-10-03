@@ -203,8 +203,8 @@ internal static class AimArms
         if (third == null || weapon == null)
             return solvedDisplacement;
 
-        Quaternion armRotation = third.rotation * bones.DeltaRotation;
-        Vector3 armPosition = third.position + third.rotation * bones.Offset;
+        Quaternion armRotation = third.rotation;
+        Vector3 armPosition = third.position;
         if (capture)
         {
             Vector3 solved = weapon.position + solvedDisplacement;
