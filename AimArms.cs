@@ -19,7 +19,7 @@ internal static class AimArms
         public bool UpdateWhenOffscreen;
     }
 
-    private const float BlendSeconds = 0.2f;
+    private const float ArmCarrySettleSeconds = 0.2f;
 
     private static bool _suppress;
     private static bool _patched;
@@ -31,13 +31,10 @@ internal static class AimArms
     private static int _skinOwnerId;
     private static readonly List<Transform> Upperarms = new();
     private static readonly List<SkinState> Skins = new();
-    private static bool _blendAiming;
-    private static bool _hasLocalAim;
-    private static int _blendSightId;
-    private static float _blend = 1f;
-    private static Vector3 _localAim;
-    private static Vector3 _offset;
-    private static Vector3 _blendFrom;
+    private static bool _hasArmCarry;
+    private static int _armCarrySightId;
+    private static float _armCarryTime;
+    private static Vector3 _armCarryOffset;
 
     internal static void Install()
     {
@@ -91,63 +88,40 @@ internal static class AimArms
 
     internal static void AlignToCamera(Player player, Vector3 cameraPosition)
     {
+        if (player.HandsController == null || !player.HandsController.IsAiming)
+        {
+            _hasLaserDisplacement = false;
+            _hasArmCarry = false;
+            _armCarrySightId = 0;
+            _armCarryTime = 0f;
+            return;
+        }
+
+        ProceduralWeaponAnimation animation = player.ProceduralWeaponAnimation;
+        if (animation == null || animation.ScopeAimTransforms == null || animation.ScopeAimTransforms.Count == 0)
+            return;
+
+        Transform? bone = animation.CurrentScope?.Bone;
         PlayerBones bones = player.PlayerBones;
-        if (bones == null)
-        {
-            _hasLaserDisplacement = false;
+        if (bone == null || bones == null)
             return;
-        }
 
-        bool aiming = player.HandsController != null && player.HandsController.IsAiming;
-        int sightId = 0;
-        ProceduralWeaponAnimation? animation = null;
-        Transform? bone = null;
-        if (aiming)
+        Vector3 displacement = cameraPosition - VanillaAimPoint(animation, bone);
+        int sightId = bone.GetInstanceID();
+        if (!_hasArmCarry || sightId != _armCarrySightId)
         {
-            animation = player.ProceduralWeaponAnimation;
-            bone = animation != null && animation.ScopeAimTransforms != null && animation.ScopeAimTransforms.Count > 0
-                ? animation.CurrentScope?.Bone
-                : null;
-            if (bone != null)
-                sightId = bone.GetInstanceID();
-        }
-
-        if (!_blendAiming && !aiming && _offset.sqrMagnitude < 0.00000001f && _blend >= 1f)
-        {
-            _hasLaserDisplacement = false;
-            return;
-        }
-
-        if (aiming != _blendAiming || sightId != _blendSightId)
-        {
-            _blendFrom = _offset;
-            _blend = 0f;
-            _blendAiming = aiming;
-            _blendSightId = sightId;
-            _hasLocalAim = false;
-        }
-
-        Vector3 target = Vector3.zero;
-        Transform? weaponRoot = bones.Weapon_Root_Anim;
-        if (aiming && sightId != 0 && animation != null && bone != null && weaponRoot != null)
-            target = LockedDisplacement(animation, bone, weaponRoot, cameraPosition);
-
-        if (_blend < 1f)
-        {
-            _blend = Mathf.Min(1f, _blend + Time.deltaTime / BlendSeconds);
-            float t = _blend * _blend * (3f - 2f * _blend);
-            _offset = Vector3.Lerp(_blendFrom, target, t);
+            _hasArmCarry = true;
+            _armCarrySightId = sightId;
+            _armCarryTime = 0f;
         }
         else
         {
-            _offset = target;
+            _armCarryTime += Time.deltaTime;
         }
 
-        Vector3 displacement = _offset;
+        displacement = CarryOnArm(bones, displacement, _armCarryTime < ArmCarrySettleSeconds);
         _laserDisplacement = displacement;
-        _hasLaserDisplacement = displacement.sqrMagnitude >= 0.00000001f;
-        if (!_hasLaserDisplacement)
-            return;
+        _hasLaserDisplacement = true;
         EnsureUpperarms(player);
         for (int i = Upperarms.Count - 1; i >= 0; i--)
         {
@@ -222,15 +196,23 @@ internal static class AimArms
         return parent.TransformPoint(local);
     }
 
-    private static Vector3 LockedDisplacement(ProceduralWeaponAnimation animation, Transform bone, Transform weapon, Vector3 cameraPosition)
+    private static Vector3 CarryOnArm(PlayerBones bones, Vector3 solvedDisplacement, bool capture)
     {
-        if (!_hasLocalAim)
+        Transform? third = bones.Weapon_Root_Third;
+        Transform? weapon = bones.Weapon_Root_Anim;
+        if (third == null || weapon == null)
+            return solvedDisplacement;
+
+        Quaternion armRotation = third.rotation;
+        Vector3 armPosition = third.position;
+        if (capture)
         {
-            _localAim = weapon.InverseTransformPoint(VanillaAimPoint(animation, bone));
-            _hasLocalAim = true;
+            Vector3 solved = weapon.position + solvedDisplacement;
+            _armCarryOffset = Quaternion.Inverse(armRotation) * (solved - armPosition);
+            return solvedDisplacement;
         }
 
-        return cameraPosition - weapon.TransformPoint(_localAim);
+        return armPosition + armRotation * _armCarryOffset - weapon.position;
     }
 
     internal static void ReplayLasers()
@@ -290,10 +272,7 @@ internal static class AimArms
         if (player == null || !player.IsYourPlayer)
             return true;
         if (player.HandsController == null || !player.HandsController.IsAiming)
-        {
-            if (_offset.sqrMagnitude < 0.00000001f)
-                return true;
-        }
+            return true;
 
         Transform playerRoot = ((Component)player).transform;
         Transform? weapon = player.PlayerBones?.Weapon_Root_Anim;
@@ -367,12 +346,9 @@ internal static class AimArms
 
     internal static void Release(Player? player)
     {
-        _blendAiming = false;
-        _hasLocalAim = false;
-        _blendSightId = 0;
-        _blend = 1f;
-        _offset = Vector3.zero;
-        _blendFrom = Vector3.zero;
+        _hasArmCarry = false;
+        _armCarrySightId = 0;
+        _armCarryTime = 0f;
         RestoreSkins();
         if (!_suppress)
             return;
