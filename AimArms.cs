@@ -18,6 +18,11 @@ internal static class AimArms
 
     private static bool _suppress;
     private static bool _patched;
+    private static bool _replayingLaser;
+    private static bool _hasLaserDisplacement;
+    private static Vector3 _laserDisplacement;
+    private static MethodInfo? _laserLateUpdate;
+    private static readonly List<MonoBehaviour> DeferredLasers = new();
     private static int _skinOwnerId;
     private static readonly List<Transform> Upperarms = new();
     private static readonly List<SkinState> Skins = new();
@@ -29,12 +34,22 @@ internal static class AimArms
 
         MethodInfo? target = AccessTools.Method(typeof(PlayerAnimator), nameof(PlayerAnimator.SetAiming));
         MethodInfo? prefix = typeof(AimArms).GetMethod(nameof(SetAimingPrefix), BindingFlags.NonPublic | BindingFlags.Static);
-        if (target == null || prefix == null)
+        Harmony harmony = new Harmony(NewCameraPlugin.PluginGuid + ".aimarms");
+        if (target != null && prefix != null)
+            harmony.Patch(target, prefix: new HarmonyMethod(prefix));
+        PatchLaser(harmony);
+        _patched = true;
+    }
+
+    private static void PatchLaser(Harmony harmony)
+    {
+        System.Type? laserType = AccessTools.TypeByName("LaserBeam");
+        _laserLateUpdate = laserType == null ? null : AccessTools.Method(laserType, "LateUpdate");
+        MethodInfo? laserPrefix = typeof(AimArms).GetMethod(nameof(LaserLateUpdatePrefix), BindingFlags.NonPublic | BindingFlags.Static);
+        if (_laserLateUpdate == null || laserPrefix == null)
             return;
 
-        Harmony harmony = new Harmony(NewCameraPlugin.PluginGuid + ".aimarms");
-        harmony.Patch(target, prefix: new HarmonyMethod(prefix));
-        _patched = true;
+        harmony.Patch(_laserLateUpdate, prefix: new HarmonyMethod(laserPrefix));
     }
 
     internal static void Apply(Player player)
@@ -46,7 +61,10 @@ internal static class AimArms
     internal static void AlignToCamera(Player player, Vector3 cameraPosition)
     {
         if (player.HandsController == null || !player.HandsController.IsAiming)
+        {
+            _hasLaserDisplacement = false;
             return;
+        }
 
         ProceduralWeaponAnimation animation = player.ProceduralWeaponAnimation;
         if (animation == null || animation.ScopeAimTransforms == null || animation.ScopeAimTransforms.Count == 0)
@@ -58,6 +76,8 @@ internal static class AimArms
             return;
 
         Vector3 displacement = cameraPosition - bone.position;
+        _laserDisplacement = displacement;
+        _hasLaserDisplacement = true;
         EnsureUpperarms(player);
         for (int i = Upperarms.Count - 1; i >= 0; i--)
         {
@@ -95,6 +115,76 @@ internal static class AimArms
         }
 
         weapon.position += displacement;
+    }
+
+    internal static void ReplayLasers()
+    {
+        if (_laserLateUpdate == null || DeferredLasers.Count == 0)
+        {
+            DeferredLasers.Clear();
+            _hasLaserDisplacement = false;
+            return;
+        }
+
+        _replayingLaser = true;
+        try
+        {
+            foreach (MonoBehaviour laser in DeferredLasers)
+            {
+                if (laser == null || !laser.isActiveAndEnabled)
+                    continue;
+
+                Transform emitter = laser.transform;
+                bool alreadyMoved = EmitterAlreadyMoved(emitter);
+                Vector3 saved = emitter.position;
+                if (_hasLaserDisplacement && !alreadyMoved)
+                    emitter.position = saved + _laserDisplacement;
+                _laserLateUpdate.Invoke(laser, null);
+                if (_hasLaserDisplacement && !alreadyMoved)
+                    emitter.position = saved;
+            }
+        }
+        finally
+        {
+            DeferredLasers.Clear();
+            _replayingLaser = false;
+            _hasLaserDisplacement = false;
+        }
+    }
+
+    private static bool EmitterAlreadyMoved(Transform emitter)
+    {
+        foreach (Transform arm in Upperarms)
+        {
+            if (arm != null && emitter.IsChildOf(arm))
+                return true;
+        }
+
+        Player? player = Comfort.Common.Singleton<GameWorld>.Instance?.MainPlayer;
+        Transform? weapon = player?.PlayerBones?.Weapon_Root_Anim;
+        return weapon != null && emitter.IsChildOf(weapon);
+    }
+
+    private static bool LaserLateUpdatePrefix(MonoBehaviour __instance)
+    {
+        if (_replayingLaser || __instance == null || !NewCameraSwitch.Enabled)
+            return true;
+
+        Player? player = Comfort.Common.Singleton<GameWorld>.Instance?.MainPlayer;
+        if (player == null || !player.IsYourPlayer)
+            return true;
+        if (player.HandsController == null || !player.HandsController.IsAiming)
+            return true;
+
+        Transform playerRoot = ((Component)player).transform;
+        Transform? weapon = player.PlayerBones?.Weapon_Root_Anim;
+        bool onPlayer = __instance.transform.IsChildOf(playerRoot);
+        bool onWeapon = weapon != null && __instance.transform.IsChildOf(weapon);
+        if (!onPlayer && !onWeapon)
+            return true;
+
+        DeferredLasers.Add(__instance);
+        return false;
     }
 
     private static void EnsureUpperarms(Player player)
