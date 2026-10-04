@@ -23,6 +23,9 @@ internal static class AimArms
     private const float BlendSeconds = 0.2f;
 
     internal static float ForwardDistance;
+    internal static float ConeTrajectory = 0.35f;
+
+    private static readonly FieldInfo? DisplacementField = AccessTools.Field(typeof(ProceduralWeaponAnimation), "_displacementStr");
 
     private static bool _suppress;
     private static bool _blendAiming;
@@ -101,14 +104,17 @@ internal static class AimArms
         bool aiming = player.HandsController != null && player.HandsController.IsAiming;
         int sightId = 0;
         Vector3 target = Vector3.zero;
+        ProceduralWeaponAnimation? animation = null;
+        Transform? sight = null;
         if (aiming && bones != null)
         {
-            ProceduralWeaponAnimation? animation = player.ProceduralWeaponAnimation;
+            animation = player.ProceduralWeaponAnimation;
             Transform? bone = animation != null && animation.ScopeAimTransforms != null && animation.ScopeAimTransforms.Count > 0
                 ? animation.CurrentScope?.Bone
                 : null;
             if (bone != null && animation != null)
             {
+                sight = bone;
                 sightId = bone.GetInstanceID();
                 float relief = SightRelief(animation, bone);
                 target = cameraPosition - bone.position + cameraRotation * new Vector3(0f, 0f, ForwardDistance + relief);
@@ -177,15 +183,78 @@ internal static class AimArms
         }
 
         Transform? weapon = bones.Weapon_Root_Anim;
-        if (weapon == null)
-            return;
-        foreach (Transform arm in Upperarms)
+        bool weaponUnderArm = false;
+        if (weapon != null)
         {
-            if (arm != null && weapon.IsChildOf(arm))
-                return;
+            foreach (Transform arm in Upperarms)
+            {
+                if (arm != null && weapon.IsChildOf(arm))
+                {
+                    weaponUnderArm = true;
+                    break;
+                }
+            }
+
+            if (!weaponUnderArm)
+                weapon.position += displacement;
         }
 
-        weapon.position += displacement;
+        if (aiming && sight != null && animation != null)
+            ApplyConeSprings(animation, sight, weapon, weaponUnderArm);
+    }
+
+    // The sight is already on the camera. Hands and gun then share the weapon springs:
+    // hands position, hands rotation, and the sway spring. The slider scales that motion.
+    private static void ApplyConeSprings(ProceduralWeaponAnimation animation, Transform sight, Transform? weapon, bool weaponUnderArm)
+    {
+        PlayerSpring? hands = animation.HandsContainer;
+        if (hands?.HandsPosition == null || hands.HandsRotation == null)
+            return;
+
+        float scale = Mathf.Clamp01(ConeTrajectory);
+        Vector3 sway = hands.SwaySpring.Value;
+        float displace = DisplacementField?.GetValue(animation) is float strength ? strength : 0f;
+        Vector3 rotation = hands.HandsRotation.Get() - hands.HandsRotation.Zero;
+        rotation += displace * (animation.IsAiming ? animation.AimingDisplacementStr : 1f) * new Vector3(sway.x, 0f, sway.z);
+        rotation += sway;
+        Vector3 position = (hands.HandsPosition.Get() - hands.HandsPosition.Zero) * scale;
+        Transform space = weapon != null && weapon.parent != null ? weapon.parent : sight;
+        Vector3 worldMove = space.TransformVector(position);
+        Quaternion full = Swing(rotation);
+        Quaternion scaled = Swing(rotation * scale);
+        Quaternion delta = space.rotation * (scaled * Quaternion.Inverse(full)) * Quaternion.Inverse(space.rotation);
+
+        foreach (Transform arm in Upperarms)
+        {
+            if (arm != null)
+                arm.position += worldMove;
+        }
+
+        if (weapon != null && !weaponUnderArm)
+            weapon.position += worldMove;
+
+        Vector3 pivot = sight.position;
+        foreach (Transform arm in Upperarms)
+        {
+            if (arm != null)
+                TurnAround(arm, pivot, delta);
+        }
+
+        if (weapon != null && !weaponUnderArm)
+            TurnAround(weapon, pivot, delta);
+
+        _laserDisplacement += worldMove;
+    }
+
+    private static Quaternion Swing(Vector3 euler)
+    {
+        return Quaternion.Euler(euler.x, 0f, euler.z) * Quaternion.Euler(0f, euler.y, 0f);
+    }
+
+    private static void TurnAround(Transform target, Vector3 pivot, Quaternion turn)
+    {
+        target.position = pivot + turn * (target.position - pivot);
+        target.rotation = turn * target.rotation;
     }
 
     private static float SightRelief(ProceduralWeaponAnimation animation, Transform bone)
