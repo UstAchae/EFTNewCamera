@@ -23,6 +23,10 @@ internal static class AimArms
     private const float BlendSeconds = 0.2f;
 
     internal static float ForwardDistance;
+    internal static float ConeTrajectory = 0.35f;
+
+    private const float ConeRestSeconds = 0.75f;
+    private const float ConeSnapDegrees = 12f;
 
     private static bool _suppress;
     private static bool _blendAiming;
@@ -39,6 +43,10 @@ internal static class AimArms
     private static int _laserFrame = -1;
     private static readonly List<MonoBehaviour> DeferredLasers = new();
     private static int _skinOwnerId;
+    private static bool _coneReady;
+    private static int _coneSightId;
+    private static float _coneYawRest;
+    private static float _conePitchRest;
     private static readonly List<Transform> Upperarms = new();
     private static readonly List<SkinState> Skins = new();
 
@@ -101,6 +109,7 @@ internal static class AimArms
         bool aiming = player.HandsController != null && player.HandsController.IsAiming;
         int sightId = 0;
         Vector3 target = Vector3.zero;
+        Transform? sight = null;
         if (aiming && bones != null)
         {
             ProceduralWeaponAnimation? animation = player.ProceduralWeaponAnimation;
@@ -109,6 +118,7 @@ internal static class AimArms
                 : null;
             if (bone != null && animation != null)
             {
+                sight = bone;
                 sightId = bone.GetInstanceID();
                 float relief = SightRelief(animation, bone);
                 target = cameraPosition - bone.position + cameraRotation * new Vector3(0f, 0f, ForwardDistance + relief);
@@ -118,12 +128,14 @@ internal static class AimArms
         if (!aiming && !_blendAiming && _offset.sqrMagnitude < 0.00000001f && _blend >= 1f)
         {
             _hasLaserDisplacement = false;
+            _coneReady = false;
             return;
         }
 
         if (bones == null)
         {
             _hasLaserDisplacement = false;
+            _coneReady = false;
             return;
         }
 
@@ -177,15 +189,108 @@ internal static class AimArms
         }
 
         Transform? weapon = bones.Weapon_Root_Anim;
-        if (weapon == null)
-            return;
-        foreach (Transform arm in Upperarms)
+        bool weaponMoved = false;
+        if (weapon != null)
         {
-            if (arm != null && weapon.IsChildOf(arm))
-                return;
+            bool underArm = false;
+            foreach (Transform arm in Upperarms)
+            {
+                if (arm != null && weapon.IsChildOf(arm))
+                {
+                    underArm = true;
+                    break;
+                }
+            }
+
+            if (!underArm)
+            {
+                weapon.position += displacement;
+                weaponMoved = true;
+            }
         }
 
-        weapon.position += displacement;
+        if (aiming && sight != null && _blend >= 1f)
+            ApplyCone(sight, cameraRotation, sightId, weaponMoved ? weapon : null);
+        else
+            _coneReady = false;
+    }
+
+    // The sight stays on the camera. What remains is the gun swinging around that point.
+    // 0 keeps the resting point. 1 keeps the swing the pose already has.
+    private static void ApplyCone(Transform sight, Quaternion cameraRotation, int sightId, Transform? looseWeapon)
+    {
+        Transform? origin = ConeOrigin(sight, looseWeapon);
+        if (origin == null)
+            return;
+
+        Vector3 pivot = sight.position;
+        Vector3 dir = pivot - origin.position;
+        if (dir.sqrMagnitude < 0.0001f)
+            return;
+
+        Vector3 up = cameraRotation * Vector3.up;
+        Vector3 forward = cameraRotation * Vector3.forward;
+        Vector3 flatDir = Vector3.ProjectOnPlane(dir, up);
+        Vector3 flatForward = Vector3.ProjectOnPlane(forward, up);
+        if (flatDir.sqrMagnitude < 0.0000001f || flatForward.sqrMagnitude < 0.0000001f)
+            return;
+
+        float yaw = Vector3.SignedAngle(flatForward, flatDir, up);
+        Vector3 pitchAxis = Vector3.Cross(up, flatDir.normalized);
+        if (pitchAxis.sqrMagnitude < 0.0000001f)
+            pitchAxis = cameraRotation * Vector3.right;
+        float pitch = Vector3.SignedAngle(flatDir, dir, pitchAxis);
+        if (!_coneReady || _coneSightId != sightId)
+        {
+            _coneYawRest = yaw;
+            _conePitchRest = pitch;
+            _coneSightId = sightId;
+            _coneReady = true;
+            return;
+        }
+
+        float yawGap = Mathf.Abs(Mathf.DeltaAngle(_coneYawRest, yaw));
+        float pitchGap = Mathf.Abs(Mathf.DeltaAngle(_conePitchRest, pitch));
+        float follow = yawGap > ConeSnapDegrees || pitchGap > ConeSnapDegrees
+            ? 1f
+            : 1f - Mathf.Exp(-Time.deltaTime / ConeRestSeconds);
+        _coneYawRest = Mathf.LerpAngle(_coneYawRest, yaw, follow);
+        _conePitchRest = Mathf.LerpAngle(_conePitchRest, pitch, follow);
+
+        float scale = Mathf.Clamp01(ConeTrajectory);
+        float yawDelta = Mathf.DeltaAngle(yaw, Mathf.LerpAngle(_coneYawRest, yaw, scale));
+        float pitchDelta = Mathf.DeltaAngle(pitch, Mathf.LerpAngle(_conePitchRest, pitch, scale));
+        if (Mathf.Abs(yawDelta) < 0.02f && Mathf.Abs(pitchDelta) < 0.02f)
+            return;
+
+        Quaternion turn = Quaternion.AngleAxis(yawDelta, up) * Quaternion.AngleAxis(pitchDelta, pitchAxis);
+        TurnAround(origin, pivot, turn);
+        if (looseWeapon != null && looseWeapon != origin && !looseWeapon.IsChildOf(origin))
+            TurnAround(looseWeapon, pivot, turn);
+    }
+
+    private static Transform? ConeOrigin(Transform sight, Transform? looseWeapon)
+    {
+        Transform? found = null;
+        foreach (Transform arm in Upperarms)
+        {
+            if (arm == null || !sight.IsChildOf(arm))
+                continue;
+            if (found == null || arm.IsChildOf(found))
+                found = arm;
+        }
+
+        if (found != null)
+            return found;
+        if (looseWeapon != null && (sight == looseWeapon || sight.IsChildOf(looseWeapon)))
+            return looseWeapon;
+        return null;
+    }
+
+    private static void TurnAround(Transform target, Vector3 pivot, Quaternion turn)
+    {
+        target.position = pivot + turn * (target.position - pivot);
+        target.rotation = turn * target.rotation;
     }
 
     private static float SightRelief(ProceduralWeaponAnimation animation, Transform bone)
@@ -371,6 +476,7 @@ internal static class AimArms
     {
         _blendAiming = false;
         _blendSightId = 0;
+        _coneReady = false;
         _blend = 1f;
         _offset = Vector3.zero;
         _blendFrom = Vector3.zero;
