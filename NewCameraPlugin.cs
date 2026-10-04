@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "新镜头";
-    public const string PluginVersion = "0.1.35";
+    public const string PluginVersion = "0.1.36";
 
     private void Awake()
     {
@@ -86,12 +86,14 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
     {
         Camera.onPreCull += NewCameraSwitch.OnCameraPreCull;
         Camera.onPreRender += NewCameraSwitch.OnCameraPreRender;
+        Camera.onPostRender += NewCameraSwitch.OnCameraPostRender;
     }
 
     private void OnDisable()
     {
         Camera.onPreCull -= NewCameraSwitch.OnCameraPreCull;
         Camera.onPreRender -= NewCameraSwitch.OnCameraPreRender;
+        Camera.onPostRender -= NewCameraSwitch.OnCameraPostRender;
     }
 
     private void LateUpdate()
@@ -116,6 +118,7 @@ internal static class NewCameraSwitch
         {
             if (_applied && player != null && player.IsYourPlayer)
             {
+                OpticPicture.RestorePose();
                 OpticPicture.Release();
                 AimArms.Release(player);
                 if (player.PointOfView != EPointOfView.FirstPerson)
@@ -172,16 +175,35 @@ internal static class NewCameraSwitch
 
         if (main && _poseFrame == Time.frameCount)
             camera.transform.SetPositionAndRotation(_posePosition, _poseRotation);
+        if (optic)
+            OpticPicture.PlaceOnDrawnScope(camera, player);
 
         AimArms.ReplayLasers(camera);
     }
 
     internal static void OnCameraPreRender(Camera camera)
     {
-        if (!Enabled || camera == null || !camera.CompareTag("MainCamera"))
+        if (!Enabled || camera == null)
             return;
 
-        HoldFieldOfView(camera);
+        if (camera.CompareTag("MainCamera"))
+        {
+            HoldFieldOfView(camera);
+            return;
+        }
+
+        if (!OpticPicture.IsCamera(camera))
+            return;
+
+        Player? player = Singleton<GameWorld>.Instance?.MainPlayer;
+        if (player != null && player.IsYourPlayer)
+            OpticPicture.PlaceOnDrawnScope(camera, player);
+    }
+
+    internal static void OnCameraPostRender(Camera camera)
+    {
+        if (camera != null && OpticPicture.IsCamera(camera))
+            OpticPicture.RestorePose();
     }
 
     private static void HoldFieldOfView(Camera camera)
