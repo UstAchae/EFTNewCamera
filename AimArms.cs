@@ -19,9 +19,16 @@ internal static class AimArms
         public bool UpdateWhenOffscreen;
     }
 
+    private const float BlendSeconds = 0.2f;
+
     internal static float ForwardDistance;
 
     private static bool _suppress;
+    private static bool _blendAiming;
+    private static int _blendSightId;
+    private static float _blend = 1f;
+    private static Vector3 _offset;
+    private static Vector3 _blendFrom;
     private static bool _patched;
     private static bool _replayingLaser;
     private static bool _hasLaserDisplacement;
@@ -86,29 +93,56 @@ internal static class AimArms
 
     internal static void AlignToCamera(Player player, Vector3 cameraPosition, Quaternion cameraRotation)
     {
-        if (player.HandsController == null || !player.HandsController.IsAiming)
-        {
-            _hasLaserDisplacement = false;
-            return;
-        }
-
-        ProceduralWeaponAnimation animation = player.ProceduralWeaponAnimation;
-        if (animation == null || animation.ScopeAimTransforms == null || animation.ScopeAimTransforms.Count == 0)
-        {
-            _hasLaserDisplacement = false;
-            return;
-        }
-
-        Transform? bone = animation.CurrentScope?.Bone;
         PlayerBones bones = player.PlayerBones;
-        if (bone == null || bones == null)
+        bool aiming = player.HandsController != null && player.HandsController.IsAiming;
+        int sightId = 0;
+        Vector3 target = Vector3.zero;
+        if (aiming && bones != null)
+        {
+            ProceduralWeaponAnimation? animation = player.ProceduralWeaponAnimation;
+            Transform? bone = animation != null && animation.ScopeAimTransforms != null && animation.ScopeAimTransforms.Count > 0
+                ? animation.CurrentScope?.Bone
+                : null;
+            if (bone != null && animation != null)
+            {
+                sightId = bone.GetInstanceID();
+                float relief = SightRelief(animation, bone);
+                target = cameraPosition - bone.position + cameraRotation * new Vector3(0f, 0f, ForwardDistance + relief);
+            }
+        }
+
+        if (!aiming && !_blendAiming && _offset.sqrMagnitude < 0.00000001f && _blend >= 1f)
         {
             _hasLaserDisplacement = false;
             return;
         }
 
-        float relief = SightRelief(animation, bone);
-        Vector3 displacement = cameraPosition - bone.position + cameraRotation * new Vector3(0f, 0f, ForwardDistance + relief);
+        if (bones == null)
+        {
+            _hasLaserDisplacement = false;
+            return;
+        }
+
+        if (aiming != _blendAiming || sightId != _blendSightId)
+        {
+            _blendFrom = _offset;
+            _blend = 0f;
+            _blendAiming = aiming;
+            _blendSightId = sightId;
+        }
+
+        if (_blend < 1f)
+        {
+            _blend = Mathf.Min(1f, _blend + Time.deltaTime / BlendSeconds);
+            float t = _blend * _blend * (3f - 2f * _blend);
+            _offset = Vector3.Lerp(_blendFrom, target, t);
+        }
+        else
+        {
+            _offset = target;
+        }
+
+        Vector3 displacement = _offset;
         _laserDisplacement = displacement;
         _hasLaserDisplacement = displacement.sqrMagnitude >= 0.00000001f;
         EnsureUpperarms(player);
@@ -223,7 +257,8 @@ internal static class AimArms
         Player? player = Comfort.Common.Singleton<GameWorld>.Instance?.MainPlayer;
         if (player == null || !player.IsYourPlayer)
             return true;
-        if (player.HandsController == null || !player.HandsController.IsAiming)
+        bool aiming = player.HandsController != null && player.HandsController.IsAiming;
+        if (!aiming && _offset.sqrMagnitude < 0.00000001f)
             return true;
 
         Transform playerRoot = ((Component)player).transform;
@@ -298,6 +333,11 @@ internal static class AimArms
 
     internal static void Release(Player? player)
     {
+        _blendAiming = false;
+        _blendSightId = 0;
+        _blend = 1f;
+        _offset = Vector3.zero;
+        _blendFrom = Vector3.zero;
         RestoreSkins();
         if (!_suppress)
             return;
