@@ -1,7 +1,10 @@
 using System.Collections.Generic;
 using System.Reflection;
+using Comfort.Common;
 using EFT;
 using EFT.Animations;
+using EFT.CameraControl;
+using EFT.Settings;
 using HarmonyLib;
 using UnityEngine;
 
@@ -40,7 +43,26 @@ internal static class AimArms
         Harmony harmony = new Harmony(NewCameraPlugin.PluginGuid + ".aimarms");
         harmony.Patch(target, prefix: new HarmonyMethod(prefix));
         PatchLaser(harmony);
+        PatchFieldOfView(harmony);
         _patched = true;
+    }
+
+    private static void PatchFieldOfView(Harmony harmony)
+    {
+        MethodInfo? setFov = AccessTools.Method(typeof(CameraManager), nameof(CameraManager.SetFov), new[] { typeof(float), typeof(float), typeof(bool) });
+        MethodInfo? prefix = typeof(AimArms).GetMethod(nameof(SetFovPrefix), BindingFlags.NonPublic | BindingFlags.Static);
+        if (setFov == null || prefix == null)
+            return;
+
+        harmony.Patch(setFov, prefix: new HarmonyMethod(prefix));
+    }
+
+    private static void SetFovPrefix(ref float x)
+    {
+        if (!NewCameraSwitch.Enabled || !Singleton<SettingsManager>.Instantiated)
+            return;
+
+        x = Singleton<SettingsManager>.Instance.Game.Settings.FieldOfView.Value;
     }
 
     private static void PatchLaser(Harmony harmony)
