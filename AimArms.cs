@@ -105,7 +105,7 @@ internal static class AimArms
             return;
         }
 
-        Vector3 displacement = cameraPosition - VanillaAimPoint(animation, bone);
+        Vector3 displacement = cameraPosition - bone.position;
         _laserDisplacement = displacement;
         _hasLaserDisplacement = displacement.sqrMagnitude >= 0.00000001f;
         EnsureUpperarms(player);
@@ -145,41 +145,6 @@ internal static class AimArms
         }
 
         weapon.position += displacement;
-    }
-
-    private static Vector3 VanillaAimPoint(ProceduralWeaponAnimation animation, Transform bone)
-    {
-        Transform? weaponRoot = animation.HandsContainer != null ? animation.HandsContainer.WeaponRoot : null;
-        Transform? parent = weaponRoot != null ? weaponRoot.parent : null;
-        if (parent == null || animation.HandsContainer == null || animation.HandsContainer.Weapon == null)
-            return bone.position;
-
-        Vector3 local = parent.InverseTransformPoint(bone.position);
-        WeaponPrefab.AimPlane? plane = animation._currentAimingPlane;
-        float fovCompensation = animation._fovCompensatoryDistance;
-        if (animation.CurrentScope != null && animation.CurrentScope.IsOptic)
-        {
-            if (animation.HandsContainer.DefaultAimPlane != null)
-                plane = animation.HandsContainer.DefaultAimPlane;
-            fovCompensation = (1f - animation.Scale.y) * 0.075f;
-        }
-
-        if (plane != null && animation.AimPointParent != null)
-        {
-            float depth = plane.Depth;
-            WeaponPrefab.AimPlane? far = animation._farPlane;
-            if (far != null)
-                depth = Mathf.Min(depth, far.Depth - animation.HandsContainer.Weapon.localPosition.y);
-
-            Matrix4x4 toWorld = Matrix4x4.TRS(animation.AimPointParent.position, animation.AimPointParent.rotation, animation.Scale);
-            Vector3 point = toWorld.MultiplyPoint3x4(new Vector3(0f, 0f - depth, 0f));
-            Matrix4x4 toParent = Matrix4x4.TRS(parent.position, parent.rotation, animation.Scale).inverse;
-            float turnAway = animation.TurnAway != null ? animation.TurnAway.Position.y : 0f;
-            local.z = toParent.MultiplyPoint3x4(point).z + fovCompensation - turnAway + animation._cameraShiftToLineOfSight.x;
-        }
-
-        local.y += animation._cameraShiftToLineOfSight.y;
-        return parent.TransformPoint(local);
     }
 
     internal static void ReplayLasers()
