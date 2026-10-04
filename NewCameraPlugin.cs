@@ -12,13 +12,14 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "新镜头";
-    public const string PluginVersion = "0.1.32";
+    public const string PluginVersion = "0.1.33";
 
     private void Awake()
     {
         ConfigEntry<bool> enabled = Config.Bind("新镜头", "总开关", false,
             "打开后使用第三人称骨架，并把游戏镜头挂在人物头部。");
         AimArms.Install();
+        FirstPersonAudio.Install();
         NewCameraSwitch.Enabled = enabled.Value;
         enabled.SettingChanged += (_, _) => NewCameraSwitch.Enabled = enabled.Value;
         BindDirection();
