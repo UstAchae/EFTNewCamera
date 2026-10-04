@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "新镜头";
-    public const string PluginVersion = "0.1.34";
+    public const string PluginVersion = "0.1.35";
 
     private void Awake()
     {
@@ -105,6 +105,9 @@ internal static class NewCameraSwitch
     internal static bool Enabled;
 
     private static bool _applied;
+    private static int _poseFrame = -1;
+    private static Vector3 _posePosition;
+    private static Quaternion _poseRotation;
 
     internal static void LateUpdate()
     {
@@ -134,30 +137,43 @@ internal static class NewCameraSwitch
 
     internal static void OnCameraPreCull(Camera camera)
     {
-        if (!Enabled || camera == null || !camera.CompareTag("MainCamera"))
+        if (!Enabled || camera == null)
             return;
 
-        HoldFieldOfView(camera);
+        bool main = camera.CompareTag("MainCamera");
+        bool optic = OpticPicture.IsCamera(camera);
+        if (!main && !optic)
+            return;
+
+        if (main)
+            HoldFieldOfView(camera);
+
         Player? player = Singleton<GameWorld>.Instance?.MainPlayer;
         if (player == null || !player.IsYourPlayer)
         {
-            AimArms.ReplayLasers();
+            AimArms.ReplayLasers(camera);
             return;
         }
 
-        OpticPicture.Apply(player);
-        Transform? head = player.PlayerBones?.Head?.Original;
-        if (head == null)
+        if (main)
+            OpticPicture.Apply(player);
+
+        if (_poseFrame != Time.frameCount)
         {
-            AimArms.ReplayLasers();
-            return;
+            Transform? head = player.PlayerBones?.Head?.Original;
+            if (head != null)
+            {
+                _poseRotation = CameraDirection.Resolve(head.rotation);
+                _posePosition = CameraPosition.Resolve(head.position, _poseRotation);
+                AimArms.AlignToCamera(player, _posePosition, _poseRotation);
+                _poseFrame = Time.frameCount;
+            }
         }
 
-        Quaternion rotation = CameraDirection.Resolve(head.rotation);
-        Vector3 position = CameraPosition.Resolve(head.position, rotation);
-        camera.transform.SetPositionAndRotation(position, rotation);
-        AimArms.AlignToCamera(player, position, rotation);
-        AimArms.ReplayLasers();
+        if (main && _poseFrame == Time.frameCount)
+            camera.transform.SetPositionAndRotation(_posePosition, _poseRotation);
+
+        AimArms.ReplayLasers(camera);
     }
 
     internal static void OnCameraPreRender(Camera camera)

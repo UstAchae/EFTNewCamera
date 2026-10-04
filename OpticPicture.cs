@@ -10,6 +10,19 @@ internal static class OpticPicture
     private static int _frame = -1;
     private static OpticSight? _held;
 
+    internal static bool IsCamera(Camera camera)
+    {
+        try
+        {
+            Camera? optic = CameraManager.Instance?.OpticCameraManager?.Camera;
+            return optic != null && optic.GetInstanceID() == camera.GetInstanceID();
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     internal static void Apply(Player player)
     {
         if (_frame == Time.frameCount)

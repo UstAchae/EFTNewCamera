@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Reflection;
+using System.Reflection.Emit;
 using Comfort.Common;
 using EFT;
 using EFT.Animations;
@@ -34,6 +35,8 @@ internal static class AimArms
     private static bool _hasLaserDisplacement;
     private static Vector3 _laserDisplacement;
     private static MethodInfo? _laserLateUpdate;
+    private static Camera? _drawCamera;
+    private static int _laserFrame = -1;
     private static readonly List<MonoBehaviour> DeferredLasers = new();
     private static int _skinOwnerId;
     private static readonly List<Transform> Upperarms = new();
@@ -79,10 +82,11 @@ internal static class AimArms
         System.Type? laserType = AccessTools.TypeByName("LaserBeam");
         _laserLateUpdate = laserType == null ? null : AccessTools.Method(laserType, "LateUpdate");
         MethodInfo? laserPrefix = typeof(AimArms).GetMethod(nameof(LaserLateUpdatePrefix), BindingFlags.NonPublic | BindingFlags.Static);
-        if (_laserLateUpdate == null || laserPrefix == null)
+        MethodInfo? laserTranspiler = typeof(AimArms).GetMethod(nameof(DrawForReplayCamera), BindingFlags.NonPublic | BindingFlags.Static);
+        if (_laserLateUpdate == null || laserPrefix == null || laserTranspiler == null)
             return;
 
-        harmony.Patch(_laserLateUpdate, prefix: new HarmonyMethod(laserPrefix));
+        harmony.Patch(_laserLateUpdate, prefix: new HarmonyMethod(laserPrefix), transpiler: new HarmonyMethod(laserTranspiler));
     }
 
     internal static void Apply(Player player)
@@ -201,15 +205,12 @@ internal static class AimArms
         return boneDepth - plane.Depth;
     }
 
-    internal static void ReplayLasers()
+    internal static void ReplayLasers(Camera camera)
     {
         if (_laserLateUpdate == null || DeferredLasers.Count == 0)
-        {
-            DeferredLasers.Clear();
-            _hasLaserDisplacement = false;
             return;
-        }
 
+        _drawCamera = camera;
         _replayingLaser = true;
         try
         {
@@ -230,10 +231,39 @@ internal static class AimArms
         }
         finally
         {
-            DeferredLasers.Clear();
             _replayingLaser = false;
-            _hasLaserDisplacement = false;
+            _drawCamera = null;
         }
+    }
+
+    public static Camera? GetDrawCamera()
+    {
+        return _drawCamera;
+    }
+
+    private static IEnumerable<CodeInstruction> DrawForReplayCamera(IEnumerable<CodeInstruction> instructions)
+    {
+        List<CodeInstruction> list = new List<CodeInstruction>(instructions);
+        MethodInfo? getCamera = typeof(AimArms).GetMethod(nameof(GetDrawCamera), BindingFlags.Public | BindingFlags.Static);
+        if (getCamera == null)
+            return list;
+
+        for (int i = 0; i < list.Count; i++)
+        {
+            if (list[i].opcode != OpCodes.Call || list[i].operand is not MethodInfo called || called.Name != nameof(Graphics.DrawMesh))
+                continue;
+
+            for (int previous = i - 1; previous >= 0 && previous >= i - 8; previous--)
+            {
+                if (list[previous].opcode != OpCodes.Ldnull)
+                    continue;
+
+                list[previous] = new CodeInstruction(OpCodes.Call, getCamera);
+                break;
+            }
+        }
+
+        return list;
     }
 
     private static bool EmitterAlreadyMoved(Transform emitter)
@@ -253,6 +283,12 @@ internal static class AimArms
     {
         if (_replayingLaser || __instance == null || !NewCameraSwitch.Enabled)
             return true;
+
+        if (_laserFrame != Time.frameCount)
+        {
+            DeferredLasers.Clear();
+            _laserFrame = Time.frameCount;
+        }
 
         Player? player = Comfort.Common.Singleton<GameWorld>.Instance?.MainPlayer;
         if (player == null || !player.IsYourPlayer)
