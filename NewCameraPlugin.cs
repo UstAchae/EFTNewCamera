@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "新镜头";
-    public const string PluginVersion = "0.1.10";
+    public const string PluginVersion = "0.1.27";
 
     private void Awake()
     {
@@ -130,15 +130,22 @@ internal static class NewCameraSwitch
         HoldFieldOfView(camera);
         Player? player = Singleton<GameWorld>.Instance?.MainPlayer;
         if (player == null || !player.IsYourPlayer)
+        {
+            AimArms.ReplayLasers();
             return;
+        }
         Transform? head = player.PlayerBones?.Head?.Original;
         if (head == null)
+        {
+            AimArms.ReplayLasers();
             return;
+        }
 
         Quaternion rotation = CameraDirection.Resolve(head.rotation);
         Vector3 position = CameraPosition.Resolve(head.position, rotation);
         camera.transform.SetPositionAndRotation(position, rotation);
         AimArms.AlignToCamera(player, position);
+        AimArms.ReplayLasers();
     }
 
     internal static void OnCameraPreRender(Camera camera)
