@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "新镜头";
-    public const string PluginVersion = "0.1.38";
+    public const string PluginVersion = "0.1.39";
 
     private void Awake()
     {
@@ -25,15 +25,6 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         BindDirection();
         BindPosition();
         BindAimDistance();
-        BindCone();
-    }
-
-    private void BindCone()
-    {
-        ConfigEntry<float> trajectory = Config.Bind("瞄准", "锥体轨迹", 0.35f,
-            new ConfigDescription("瞄准时枪绕准心摆动的幅度。0 是一个点，1 是枪原来算出的摆动。", new AcceptableValueRange<float>(0f, 1f)));
-        trajectory.SettingChanged += (_, _) => AimArms.ConeTrajectory = trajectory.Value;
-        AimArms.ConeTrajectory = trajectory.Value;
     }
 
     private void BindDirection()
