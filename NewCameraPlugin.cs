@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "新镜头";
-    public const string PluginVersion = "0.1.33";
+    public const string PluginVersion = "0.1.34";
 
     private void Awake()
     {
@@ -113,6 +113,7 @@ internal static class NewCameraSwitch
         {
             if (_applied && player != null && player.IsYourPlayer)
             {
+                OpticPicture.Release();
                 AimArms.Release(player);
                 if (player.PointOfView != EPointOfView.FirstPerson)
                     player.PointOfView = EPointOfView.FirstPerson;
@@ -143,6 +144,8 @@ internal static class NewCameraSwitch
             AimArms.ReplayLasers();
             return;
         }
+
+        OpticPicture.Apply(player);
         Transform? head = player.PlayerBones?.Head?.Original;
         if (head == null)
         {
