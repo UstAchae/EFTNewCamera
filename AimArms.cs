@@ -107,7 +107,8 @@ internal static class AimArms
             return;
         }
 
-        Vector3 displacement = cameraPosition - bone.position + cameraRotation * new Vector3(0f, 0f, ForwardDistance);
+        float relief = SightRelief(animation, bone);
+        Vector3 displacement = cameraPosition - bone.position + cameraRotation * new Vector3(0f, 0f, ForwardDistance + relief);
         _laserDisplacement = displacement;
         _hasLaserDisplacement = displacement.sqrMagnitude >= 0.00000001f;
         EnsureUpperarms(player);
@@ -147,6 +148,23 @@ internal static class AimArms
         }
 
         weapon.position += displacement;
+    }
+
+    private static float SightRelief(ProceduralWeaponAnimation animation, Transform bone)
+    {
+        if (animation.HandsContainer == null || animation.HandsContainer.Weapon == null)
+            return 0f;
+
+        WeaponPrefab.AimPlane? plane = animation._currentAimingPlane;
+        if (animation.CurrentScope != null && animation.CurrentScope.IsOptic)
+            plane = animation.HandsContainer.DefaultAimPlane;
+        if (plane == null)
+            plane = animation.HandsContainer.DefaultAimPlane;
+        if (plane == null)
+            return 0f;
+
+        float boneDepth = 0f - animation.HandsContainer.Weapon.InverseTransformPoint(bone.position).y;
+        return boneDepth - plane.Depth;
     }
 
     internal static void ReplayLasers()
