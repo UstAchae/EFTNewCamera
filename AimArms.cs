@@ -19,6 +19,8 @@ internal static class AimArms
         public bool UpdateWhenOffscreen;
     }
 
+    internal static float ForwardDistance;
+
     private static bool _suppress;
     private static bool _patched;
     private static bool _replayingLaser;
@@ -82,7 +84,7 @@ internal static class AimArms
         player.MovementContext?.PlayerAnimator?.SetAiming(false);
     }
 
-    internal static void AlignToCamera(Player player, Vector3 cameraPosition)
+    internal static void AlignToCamera(Player player, Vector3 cameraPosition, Quaternion cameraRotation)
     {
         if (player.HandsController == null || !player.HandsController.IsAiming)
         {
@@ -105,7 +107,7 @@ internal static class AimArms
             return;
         }
 
-        Vector3 displacement = cameraPosition - bone.position;
+        Vector3 displacement = cameraPosition - bone.position + cameraRotation * new Vector3(0f, 0f, ForwardDistance);
         _laserDisplacement = displacement;
         _hasLaserDisplacement = displacement.sqrMagnitude >= 0.00000001f;
         EnsureUpperarms(player);

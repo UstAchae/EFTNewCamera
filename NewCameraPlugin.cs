@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "新镜头";
-    public const string PluginVersion = "0.1.28";
+    public const string PluginVersion = "0.1.30";
 
     private void Awake()
     {
@@ -23,6 +23,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         enabled.SettingChanged += (_, _) => NewCameraSwitch.Enabled = enabled.Value;
         BindDirection();
         BindPosition();
+        BindAimDistance();
     }
 
     private void BindDirection()
@@ -59,6 +60,13 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         vertical.SettingChanged += (_, _) => Refresh();
         forward.SettingChanged += (_, _) => Refresh();
         Refresh();
+    }
+
+    private void BindAimDistance()
+    {
+        ConfigEntry<float> distance = BindMeters("瞄准", "前后距离", 0f, "瞄准后沿镜头前方向移动枪，单位为米。正值让枪离镜头更远。");
+        distance.SettingChanged += (_, _) => AimArms.ForwardDistance = distance.Value;
+        AimArms.ForwardDistance = distance.Value;
     }
 
     private ConfigEntry<float> BindDegrees(string section, string key, float defaultValue, string description)
@@ -144,7 +152,7 @@ internal static class NewCameraSwitch
         Quaternion rotation = CameraDirection.Resolve(head.rotation);
         Vector3 position = CameraPosition.Resolve(head.position, rotation);
         camera.transform.SetPositionAndRotation(position, rotation);
-        AimArms.AlignToCamera(player, position);
+        AimArms.AlignToCamera(player, position, rotation);
         AimArms.ReplayLasers();
     }
 
