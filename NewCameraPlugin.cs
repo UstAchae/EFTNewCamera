@@ -12,19 +12,42 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "新镜头";
-    public const string PluginVersion = "0.1.36";
+    public const string PluginVersion = "0.1.37";
 
     private void Awake()
     {
         ConfigEntry<bool> enabled = Config.Bind("新镜头", "总开关", false,
             "打开后使用第三人称骨架，并把游戏镜头挂在人物头部。");
         AimArms.Install();
+        AimSway.Install();
         FirstPersonAudio.Install();
         NewCameraSwitch.Enabled = enabled.Value;
         enabled.SettingChanged += (_, _) => NewCameraSwitch.Enabled = enabled.Value;
         BindDirection();
         BindPosition();
         BindAimDistance();
+        BindAimSway();
+    }
+
+    private void BindAimSway()
+    {
+        ConfigEntry<float> overall = BindUnit("瞄准", "晃动幅度", 0.6f, "瞄准时枪的整体晃动。1 为原来的幅度，0 为停掉这几项晃动。");
+        ConfigEntry<float> horizontal = BindUnit("瞄准", "走路水平摆动", 0.5f, "瞄准时走路造成的枪水平摆动。1 为原来的幅度，0 为停掉。");
+        void Refresh()
+        {
+            AimSway.Overall = overall.Value;
+            AimSway.WalkHorizontal = horizontal.Value;
+        }
+
+        overall.SettingChanged += (_, _) => Refresh();
+        horizontal.SettingChanged += (_, _) => Refresh();
+        Refresh();
+    }
+
+    private ConfigEntry<float> BindUnit(string section, string key, float defaultValue, string description)
+    {
+        return Config.Bind(section, key, defaultValue,
+            new ConfigDescription(description, new AcceptableValueRange<float>(0f, 1f)));
     }
 
     private void BindDirection()
