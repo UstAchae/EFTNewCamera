@@ -20,8 +20,6 @@ internal static class AimArms
         public bool UpdateWhenOffscreen;
     }
 
-    private const float BlendSeconds = 0.2f;
-
     internal static float ForwardDistance;
     internal static float HoldSeconds = 0.6f;
 
@@ -29,11 +27,7 @@ internal static class AimArms
     private static Quaternion _aimHoldResidual = Quaternion.identity;
     private static float _aimHoldPitchSign = 1f;
     private static bool _suppress;
-    private static bool _blendAiming;
-    private static int _blendSightId;
-    private static float _blend = 1f;
     private static Vector3 _offset;
-    private static Vector3 _blendFrom;
     private static bool _patched;
     private static bool _replayingLaser;
     private static bool _hasLaserDisplacement;
@@ -103,7 +97,6 @@ internal static class AimArms
     {
         PlayerBones bones = player.PlayerBones;
         bool aiming = player.HandsController != null && player.HandsController.IsAiming;
-        int sightId = 0;
         Vector3 target = Vector3.zero;
         Transform? weapon = bones?.Weapon_Root_Anim;
         bool placeWeapon = false;
@@ -116,7 +109,6 @@ internal static class AimArms
                 : null;
             if (bone != null && animation != null)
             {
-                sightId = bone.GetInstanceID();
                 float relief = SightRelief(animation, bone);
                 Vector3 boneLocalPosition = Quaternion.Inverse(weapon.rotation) * (bone.position - weapon.position);
                 Quaternion boneLocalRotation = Quaternion.Inverse(weapon.rotation) * bone.rotation;
@@ -129,87 +121,17 @@ internal static class AimArms
             }
         }
 
-        if (!aiming && !_blendAiming && _offset.sqrMagnitude < 0.00000001f && _blend >= 1f)
+        if (!placeWeapon || bones == null || weapon == null)
         {
+            _offset = Vector3.zero;
             _hasLaserDisplacement = false;
             return;
         }
 
-        if (bones == null)
-        {
-            _hasLaserDisplacement = false;
-            return;
-        }
-
-        if (aiming != _blendAiming || sightId != _blendSightId)
-        {
-            _blendFrom = _offset;
-            _blend = 0f;
-            _blendAiming = aiming;
-            _blendSightId = sightId;
-        }
-
-        if (_blend < 1f)
-        {
-            _blend = Mathf.Min(1f, _blend + Time.deltaTime / BlendSeconds);
-            float t = _blend * _blend * (3f - 2f * _blend);
-            _offset = Vector3.Lerp(_blendFrom, target, t);
-        }
-        else
-        {
-            _offset = target;
-        }
-
-        float placed = _blend >= 1f ? 1f : _blend * _blend * (3f - 2f * _blend);
-        Vector3 displacement = _offset;
-        _laserDisplacement = displacement;
-        _hasLaserDisplacement = displacement.sqrMagnitude >= 0.00000001f;
-        EnsureUpperarms(player);
-        for (int i = Upperarms.Count - 1; i >= 0; i--)
-        {
-            Transform arm = Upperarms[i];
-            if (arm == null)
-            {
-                Upperarms.RemoveAt(i);
-                continue;
-            }
-
-            for (int j = 0; j < Upperarms.Count; j++)
-            {
-                Transform other = Upperarms[j];
-                if (i != j && other != null && arm.IsChildOf(other))
-                {
-                    Upperarms.RemoveAt(i);
-                    break;
-                }
-            }
-        }
-
-        Vector3 weaponOrigin = weapon != null ? weapon.position : Vector3.zero;
-        Quaternion weaponOriginRotation = weapon != null ? weapon.rotation : Quaternion.identity;
-        foreach (Transform arm in Upperarms)
-        {
-            if (arm != null)
-                arm.position += displacement;
-        }
-
-        if (weapon != null && placeWeapon)
-            weapon.SetPositionAndRotation(weaponOrigin + displacement, Quaternion.Slerp(weaponOriginRotation, targetWeaponRotation, placed));
-        else if (weapon != null)
-        {
-            bool weaponFollowsArm = false;
-            foreach (Transform arm in Upperarms)
-            {
-                if (arm != null && weapon.IsChildOf(arm))
-                {
-                    weaponFollowsArm = true;
-                    break;
-                }
-            }
-
-            if (!weaponFollowsArm)
-                weapon.position += displacement;
-        }
+        _offset = target;
+        _laserDisplacement = target;
+        _hasLaserDisplacement = target.sqrMagnitude >= 0.00000001f;
+        weapon.SetPositionAndRotation(weapon.position + target, targetWeaponRotation);
 
     }
 
@@ -295,17 +217,16 @@ internal static class AimArms
             return false;
         }
 
-        Quaternion alignment = CameraDirection.Resolve(Quaternion.identity);
         if (Mathf.Abs(pitch) > 5f)
         {
-            Quaternion positive = Quaternion.Euler(pitch, yaw, 0f) * alignment;
-            Quaternion negative = Quaternion.Euler(-pitch, yaw, 0f) * alignment;
+            Quaternion positive = Quaternion.Euler(pitch, yaw, 0f);
+            Quaternion negative = Quaternion.Euler(-pitch, yaw, 0f);
             _aimHoldPitchSign = Quaternion.Angle(positive, liveCameraRotation) <= Quaternion.Angle(negative, liveCameraRotation)
                 ? 1f
                 : -1f;
         }
 
-        look = Quaternion.Euler(pitch * _aimHoldPitchSign, yaw, 0f) * alignment;
+        look = Quaternion.Euler(pitch * _aimHoldPitchSign, yaw, 0f);
         return true;
     }
 
@@ -490,11 +411,7 @@ internal static class AimArms
 
     internal static void Release(Player? player)
     {
-        _blendAiming = false;
-        _blendSightId = 0;
-        _blend = 1f;
         _offset = Vector3.zero;
-        _blendFrom = Vector3.zero;
         ClearHold();
         RestoreSkins();
         if (!_suppress)
