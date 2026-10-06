@@ -38,6 +38,7 @@ internal static class AimArms
     private const float ConeTipDistance = 100f;
     private const float MouseSpeedReference = 3f;
     private const float MouseSpeedSeconds = 0.1f;
+    private const float SwayTurnSpeed = 8f;
 
     internal static float ForwardDistance;
     internal static bool UseCone;
@@ -423,45 +424,35 @@ internal static class AimArms
             return liveCameraRotation;
         }
 
-        bool hasLook = TryGetMouseLook(player, out Quaternion look);
         if (!_hasAimHold)
         {
             _aimHold = liveCameraRotation;
-            _lastLook = look;
+            _lastLook = liveCameraRotation;
             _mouseSpeed = 0f;
             _hasAimHold = true;
             return liveCameraRotation;
         }
 
-        // The gun only ever points along the smoothed picture. The mouse never supplies a
-        // direction; its speed only decides how quickly that smoothing lets go while turning.
+        // The gun only ever points along the smoothed picture, and how quickly that smoothing lets
+        // go is judged from the picture's own turning speed. Mouse input arrives unevenly per frame;
+        // the head-driven picture turns smoothly, so the gun's lag behind it changes smoothly too.
         float dt = Mathf.Max(Time.deltaTime, 0.0001f);
-        float speed = hasLook ? Quaternion.Angle(_lastLook, look) / dt : 0f;
-        if (hasLook)
-            _lastLook = look;
+        float speed = AngleBetween(_lastLook, liveCameraRotation) / dt;
+        _lastLook = liveCameraRotation;
         _mouseSpeed = Mathf.Lerp(_mouseSpeed, speed, 1f - Mathf.Exp(-dt / MouseSpeedSeconds));
-        float ratio = _mouseSpeed / MouseSpeedReference;
+        float ratio = Mathf.Max(0f, _mouseSpeed - SwayTurnSpeed) / MouseSpeedReference;
         float smoothing = holdTime / (1f + ratio * ratio);
         _aimHold = Quaternion.Slerp(_aimHold, liveCameraRotation, 1f - Mathf.Exp(-dt / smoothing));
         return _aimHold;
     }
 
-    private static bool TryGetMouseLook(Player player, out Quaternion look)
+    // Quaternion.Angle reads anything under about 0.16 degrees as zero, which turns slow motion into
+    // on/off spikes at high frame rates.
+    private static float AngleBetween(Quaternion from, Quaternion to)
     {
-        look = Quaternion.identity;
-        try
-        {
-            MovementContext? movement = player.MovementContext;
-            if (movement == null)
-                return false;
-
-            look = Quaternion.Euler(movement.Pitch, movement.Yaw, 0f);
-            return true;
-        }
-        catch
-        {
-            return false;
-        }
+        Quaternion delta = Quaternion.Inverse(from) * to;
+        float sine = new Vector3(delta.x, delta.y, delta.z).magnitude;
+        return 2f * Mathf.Atan2(sine, Mathf.Abs(delta.w)) * Mathf.Rad2Deg;
     }
 
     internal static bool TryGetLook(Player player, out Quaternion look)
