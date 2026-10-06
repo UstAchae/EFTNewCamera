@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "新镜头";
-    public const string PluginVersion = "0.1.73";
+    public const string PluginVersion = "0.1.74";
 
     private void Awake()
     {
@@ -108,11 +108,6 @@ internal static class NewCameraSwitch
     private static int _poseFrame = -1;
     private static Vector3 _posePosition;
     private static Quaternion _poseRotation;
-    private const float HeadFollowSeconds = 0.05f;
-    private const float HeadSnapDegrees = 45f;
-    private static bool _hasHeadInLook;
-    private static Quaternion _headInLook = Quaternion.identity;
-
     internal static void LateUpdate()
     {
         Player? player = Singleton<GameWorld>.Instance?.MainPlayer;
@@ -166,9 +161,8 @@ internal static class NewCameraSwitch
             Transform? head = player.PlayerBones?.Head?.Original;
             if (head != null)
             {
-                Quaternion headRotation = CameraDirection.Resolve(head.rotation);
-                _posePosition = CameraPosition.Resolve(head.position, headRotation);
-                _poseRotation = SteadyAgainstLook(player, headRotation);
+                _poseRotation = CameraDirection.Resolve(head.rotation);
+                _posePosition = CameraPosition.Resolve(head.position, _poseRotation);
                 _poseFrame = Time.frameCount;
             }
         }
@@ -177,32 +171,6 @@ internal static class NewCameraSwitch
             camera.transform.SetPositionAndRotation(_posePosition, _poseRotation);
 
         AimArms.ReplayLasers(camera);
-    }
-
-    // While aiming the gun points along the mouse look, so the picture is built on that same look
-    // and only carries the head's smoothed motion relative to it. Uneven mouse input per frame then
-    // moves gun and picture together instead of shaking one against the other.
-    private static Quaternion SteadyAgainstLook(Player player, Quaternion headRotation)
-    {
-        if (!AimArms.TryGetLook(player, out Quaternion look))
-        {
-            _hasHeadInLook = false;
-            return headRotation;
-        }
-
-        Quaternion headInLook = Quaternion.Inverse(look) * headRotation;
-        if (!_hasHeadInLook || Quaternion.Angle(_headInLook, headInLook) > HeadSnapDegrees)
-        {
-            _headInLook = headInLook;
-            _hasHeadInLook = true;
-        }
-        else
-        {
-            _headInLook = Quaternion.Slerp(_headInLook, headInLook, 1f - Mathf.Exp(-Time.deltaTime / HeadFollowSeconds));
-        }
-
-        bool aiming = player.HandsController != null && player.HandsController.IsAiming;
-        return aiming ? look * _headInLook : headRotation;
     }
 
     internal static void OnCameraPreRender(Camera camera)

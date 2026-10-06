@@ -26,6 +26,13 @@ internal static class AimArms
     private const float BaseSeconds = 2f;
     private const float SwaySnapDegrees = 20f;
     private const float SwaySnapMeters = 0.15f;
+    private const float ActionBlendSeconds = 0.15f;
+    private const float HeadFollowSeconds = 0.05f;
+    private const float HeadSnapDegrees = 45f;
+
+    private static bool _hasHeadInLook;
+    private static Quaternion _headInLook = Quaternion.identity;
+    private static float _actionWeight;
 
     internal static float ForwardDistance;
 
@@ -79,6 +86,44 @@ internal static class AimArms
             return;
 
         harmony.Patch(shift, postfix: new HarmonyMethod(postfix) { priority = Priority.Last });
+
+        MethodInfo? rotateHead = AccessTools.Method(typeof(PlayerBones), nameof(PlayerBones.RotateHead));
+        MethodInfo? headPostfix = typeof(AimArms).GetMethod(nameof(RotateHeadPostfix), BindingFlags.NonPublic | BindingFlags.Static);
+        if (rotateHead != null && headPostfix != null)
+            harmony.Patch(rotateHead, postfix: new HarmonyMethod(headPostfix) { priority = Priority.Last });
+    }
+
+    // The gun points along the mouse look, so while aiming the head itself is turned onto that same
+    // look plus its own smoothed motion relative to it. The camera stays fixed to the head, and uneven
+    // mouse input per frame moves head, picture and gun together.
+    private static void RotateHeadPostfix(PlayerBones __instance)
+    {
+        if (!NewCameraSwitch.Enabled || __instance == null)
+            return;
+
+        Player? player = __instance.Player;
+        Transform? head = __instance.Head?.Original;
+        if (player == null || !player.IsYourPlayer || head == null || player.PointOfView != EPointOfView.ThirdPerson
+            || !TryGetLook(player, out Quaternion look))
+        {
+            _hasHeadInLook = false;
+            return;
+        }
+
+        Quaternion cameraRotation = CameraDirection.Resolve(head.rotation);
+        Quaternion headInLook = Quaternion.Inverse(look) * cameraRotation;
+        if (!_hasHeadInLook || Quaternion.Angle(_headInLook, headInLook) > HeadSnapDegrees)
+        {
+            _headInLook = headInLook;
+            _hasHeadInLook = true;
+        }
+        else
+        {
+            _headInLook = Quaternion.Slerp(_headInLook, headInLook, 1f - Mathf.Exp(-Time.deltaTime / HeadFollowSeconds));
+        }
+
+        if (player.HandsController != null && player.HandsController.IsAiming)
+            head.rotation = CameraDirection.Unresolve(look * _headInLook);
     }
 
     // Runs before RotateHead and hand IK, so the hands still grip the gun after it is placed.
@@ -165,6 +210,8 @@ internal static class AimArms
         Quaternion bodyInCamera = Quaternion.Inverse(liveRotation) * bodyRotation;
         Vector3 bodyInCameraPosition = Quaternion.Inverse(liveRotation) * (body.position - cameraPosition);
 
+        bool acting = player.HandsController != null && player.HandsController.IsInInteractionStrictCheck();
+        _actionWeight = Mathf.MoveTowards(_actionWeight, acting ? 1f : 0f, Time.deltaTime / ActionBlendSeconds);
         Quaternion sway = FilterBodySway(bone.GetInstanceID(), bodyInCamera, bodyInCameraPosition, gunRotation, gunPosition, out Vector3 swayShift);
 
         Quaternion steadyBody = look * _bodyBaseRotation;
@@ -191,9 +238,9 @@ internal static class AimArms
         shift = Vector3.zero;
         Quaternion turn = Quaternion.Inverse(_bodyBaseRotation) * bodyRotation;
         Vector3 offset = bodyPosition - _bodyBasePosition;
-        if (!_hasSway || sightId != _swaySightId
-            || Quaternion.Angle(Quaternion.identity, turn) > SwaySnapDegrees
-            || offset.sqrMagnitude > SwaySnapMeters * SwaySnapMeters)
+        bool jumped = _actionWeight <= 0f
+            && (Quaternion.Angle(Quaternion.identity, turn) > SwaySnapDegrees || offset.sqrMagnitude > SwaySnapMeters * SwaySnapMeters);
+        if (!_hasSway || sightId != _swaySightId || jumped)
         {
             _bodyBaseRotation = bodyRotation;
             _bodyBasePosition = bodyPosition;
@@ -222,8 +269,9 @@ internal static class AimArms
         _turnStage2 = Vector3.Lerp(_turnStage2, _turnStage1, pass);
         _shiftStage1 = Vector3.Lerp(_shiftStage1, offset, pass);
         _shiftStage2 = Vector3.Lerp(_shiftStage2, _shiftStage1, pass);
-        shift = _shiftStage2;
-        return FromRotationVector(_turnStage2);
+        // Weapon actions (fire mode, bolt, checks) play on the hands; they keep their full animated motion.
+        shift = Vector3.Lerp(_shiftStage2, offset, _actionWeight);
+        return Quaternion.Slerp(FromRotationVector(_turnStage2), turn, _actionWeight);
     }
 
     private static Vector3 ToRotationVector(Quaternion rotation)
