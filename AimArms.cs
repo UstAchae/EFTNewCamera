@@ -23,6 +23,7 @@ internal static class AimArms
     private const float BlendSeconds = 0.2f;
 
     internal static float ForwardDistance;
+    internal static float NeckBlend = 0.5f;
 
     private const float NeckSeconds = 0.45f;
     private const float NeckSnapDegrees = 20f;
@@ -48,6 +49,7 @@ internal static class AimArms
     private static bool _neckReady;
     private static Quaternion _neckOffset;
     private static Vector3 _neckLocal;
+    private static Quaternion _steadyRotation;
     private static bool _barrelReady;
     private static Quaternion _barrelHold;
     private static bool _opticReady;
@@ -128,6 +130,7 @@ internal static class AimArms
         {
             _neckOffset = offset;
             _neckLocal = local;
+            _steadyRotation = rotation;
             _neckReady = true;
             return;
         }
@@ -136,14 +139,17 @@ internal static class AimArms
         {
             _neckOffset = offset;
             _neckLocal = local;
+            _steadyRotation = rotation;
             return;
         }
 
         float follow = 1f - Mathf.Exp(-Time.deltaTime / NeckSeconds);
         _neckOffset = Quaternion.Slerp(_neckOffset, offset, follow);
         _neckLocal = Vector3.Lerp(_neckLocal, local, follow);
-        rotation = look * _neckOffset;
-        position = ((Component)player).transform.TransformPoint(_neckLocal);
+        _steadyRotation = look * _neckOffset;
+        float blend = Mathf.Clamp01(NeckBlend);
+        rotation = Quaternion.Slerp(rotation, _steadyRotation, blend);
+        position = Vector3.Lerp(position, ((Component)player).transform.TransformPoint(_neckLocal), blend);
     }
 
     internal static void AlignToCamera(Player player, Vector3 cameraPosition, Quaternion cameraRotation)
@@ -250,7 +256,7 @@ internal static class AimArms
         }
 
         if (aiming && sight != null && weapon != null && _blend >= 1f)
-            HoldBarrel(sight, weapon, weaponUnderArm, cameraRotation);
+            HoldBarrel(sight, weapon, weaponUnderArm);
         else
             _barrelReady = false;
     }
@@ -290,7 +296,7 @@ internal static class AimArms
             _opticDesired = look * _opticOffset;
         }
 
-        camera.transform.rotation = _opticDesired;
+        camera.transform.rotation = Quaternion.Slerp(_opticSaved, _opticDesired, Mathf.Clamp01(NeckBlend));
     }
 
     internal static void RestoreOptic()
@@ -303,16 +309,16 @@ internal static class AimArms
         _opticCamera = null;
     }
 
-    private static void HoldBarrel(Transform sight, Transform weapon, bool weaponUnderArm, Quaternion aimRotation)
+    private static void HoldBarrel(Transform sight, Transform weapon, bool weaponUnderArm)
     {
         if (!_barrelReady)
         {
-            _barrelHold = Quaternion.Inverse(aimRotation) * weapon.rotation;
+            _barrelHold = Quaternion.Inverse(_steadyRotation) * weapon.rotation;
             _barrelReady = true;
             return;
         }
 
-        Quaternion correction = aimRotation * _barrelHold * Quaternion.Inverse(weapon.rotation);
+        Quaternion correction = Quaternion.Slerp(Quaternion.identity, _steadyRotation * _barrelHold * Quaternion.Inverse(weapon.rotation), Mathf.Clamp01(NeckBlend));
         if (Quaternion.Angle(Quaternion.identity, correction) < 0.05f)
             return;
 

@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "新镜头";
-    public const string PluginVersion = "0.1.56";
+    public const string PluginVersion = "0.1.57";
 
     private void Awake()
     {
@@ -25,6 +25,15 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         BindDirection();
         BindPosition();
         BindAimDistance();
+        BindNeckBlend();
+    }
+
+    private void BindNeckBlend()
+    {
+        ConfigEntry<float> blend = Config.Bind("瞄准", "稳定", 0.5f,
+            new ConfigDescription("瞄准时枪的稳定程度。0 是做稳定之前的摆动，1 是完全稳住，中间的值在两者之间。", new AcceptableValueRange<float>(0f, 1f)));
+        blend.SettingChanged += (_, _) => AimArms.NeckBlend = blend.Value;
+        AimArms.NeckBlend = blend.Value;
     }
 
     private void BindDirection()
