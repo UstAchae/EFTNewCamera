@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "新镜头";
-    public const string PluginVersion = "0.1.74";
+    public const string PluginVersion = "0.1.75";
 
     private void Awake()
     {
@@ -25,6 +25,25 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         BindDirection();
         BindPosition();
         BindAimDistance();
+        BindCone();
+    }
+
+    private void BindCone()
+    {
+        ConfigEntry<bool> cone = Config.Bind("瞄准", "使用 0.1.70 方案", false,
+            "打开后瞄准用 0.1.70 的做法：枪尖停在目标上，尾端照游戏原来的幅度摆，枪的指向跟平滑后的画面，镜头直接跟头。关闭则用当前做法：枪对准鼠标方向，只留站着时的慢摆。");
+        ConfigEntry<float> hold = Config.Bind("瞄准", "静止时间", 0.6f,
+            new ConfigDescription("只在「使用 0.1.70 方案」打开时生效。不转视角时按这个时间平滑掉走路和呼吸的晃，转视角时几乎不平滑。0 表示关闭，枪完全跟着镜头。", new AcceptableValueRange<float>(0f, 2f)));
+        void Refresh()
+        {
+            AimArms.UseCone = cone.Value;
+            AimArms.HoldSeconds = hold.Value;
+            AimArms.ClearHold();
+        }
+
+        cone.SettingChanged += (_, _) => Refresh();
+        hold.SettingChanged += (_, _) => Refresh();
+        Refresh();
     }
 
     private void BindDirection()

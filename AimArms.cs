@@ -34,7 +34,20 @@ internal static class AimArms
     private static Quaternion _headInLook = Quaternion.identity;
     private static float _actionWeight;
 
+    private const float ConeTipDistance = 100f;
+    private const float MouseSpeedReference = 3f;
+    private const float MouseSpeedSeconds = 0.1f;
+
     internal static float ForwardDistance;
+    internal static bool UseCone;
+    internal static float HoldSeconds = 0.6f;
+
+    private static bool _hasSwayMean;
+    private static Vector3 _swayMean;
+    private static bool _hasAimHold;
+    private static Quaternion _aimHold = Quaternion.identity;
+    private static Quaternion _lastLook = Quaternion.identity;
+    private static float _mouseSpeed;
 
     private static bool _hasSway;
     private static int _swaySightId;
@@ -103,7 +116,7 @@ internal static class AimArms
 
         Player? player = __instance.Player;
         Transform? head = __instance.Head?.Original;
-        if (player == null || !player.IsYourPlayer || head == null || player.PointOfView != EPointOfView.ThirdPerson
+        if (UseCone || player == null || !player.IsYourPlayer || head == null || player.PointOfView != EPointOfView.ThirdPerson
             || !TryGetLook(player, out Quaternion look))
         {
             _hasHeadInLook = false;
@@ -143,6 +156,17 @@ internal static class AimArms
         Quaternion liveRotation = CameraDirection.Resolve(head.rotation);
         Vector3 cameraPosition = CameraPosition.Resolve(head.position, liveRotation);
         bool aiming = player.HandsController != null && player.HandsController.IsAiming;
+        if (UseCone)
+        {
+            Quaternion aimRotation = liveRotation;
+            if (aiming)
+                aimRotation = HoldAim(player, liveRotation);
+            else
+                ClearHold();
+            AlignToCamera(player, cameraPosition, aimRotation, liveRotation);
+            return;
+        }
+
         if (!aiming || !TryGetLook(player, out Quaternion look) || !AlignToLook(player, cameraPosition, liveRotation, look))
         {
             ClearHold();
@@ -315,6 +339,124 @@ internal static class AimArms
     internal static void ClearHold()
     {
         _hasSway = false;
+        _hasSwayMean = false;
+        _hasAimHold = false;
+    }
+
+    internal static void AlignToCamera(Player player, Vector3 cameraPosition, Quaternion cameraRotation, Quaternion liveRotation)
+    {
+        PlayerBones bones = player.PlayerBones;
+        bool aiming = player.HandsController != null && player.HandsController.IsAiming;
+        Vector3 target = Vector3.zero;
+        Transform? weapon = bones?.Weapon_Root_Anim;
+        bool placeWeapon = false;
+        Quaternion targetWeaponRotation = Quaternion.identity;
+        if (aiming && bones != null && weapon != null)
+        {
+            ProceduralWeaponAnimation? animation = player.ProceduralWeaponAnimation;
+            Transform? bone = animation != null && animation.ScopeAimTransforms != null && animation.ScopeAimTransforms.Count > 0
+                ? animation.CurrentScope?.Bone
+                : null;
+            if (bone != null && animation != null)
+            {
+                float relief = SightRelief(animation, bone);
+                Vector3 boneLocalPosition = Quaternion.Inverse(weapon.rotation) * (bone.position - weapon.position);
+                Quaternion boneLocalRotation = Quaternion.Inverse(weapon.rotation) * bone.rotation;
+                Vector3 sightPoint = cameraPosition + cameraRotation * new Vector3(0f, 0f, ForwardDistance + relief);
+                // The rear keeps the sway the game animated for the sight; the barrel is aimed
+                // from there at a far point on the held aim line, so the swing narrows toward the tip.
+                Vector3 animatedSight = Quaternion.Inverse(liveRotation) * (bone.position - cameraPosition);
+                Vector3 rear = sightPoint + liveRotation * TrackSway(animatedSight);
+                Vector3 tip = cameraPosition + cameraRotation * new Vector3(0f, 0f, ConeTipDistance);
+                Quaternion sightRotation = AlignSightTo(bone.rotation, (tip - rear).normalized);
+                targetWeaponRotation = sightRotation * Quaternion.Inverse(boneLocalRotation);
+                Vector3 targetWeaponPosition = rear - targetWeaponRotation * boneLocalPosition;
+                target = targetWeaponPosition - weapon.position;
+                placeWeapon = true;
+            }
+        }
+
+        if (!placeWeapon || bones == null || weapon == null)
+        {
+            _offset = Vector3.zero;
+            _hasLaserDisplacement = false;
+            return;
+        }
+
+        _offset = target;
+        _laserDisplacement = target;
+        _hasLaserDisplacement = target.sqrMagnitude >= 0.00000001f;
+        weapon.SetPositionAndRotation(weapon.position + target, targetWeaponRotation);
+    }
+
+    private static Vector3 TrackSway(Vector3 animatedSight)
+    {
+        float holdTime = HoldSeconds;
+        if (holdTime <= 0.0001f)
+        {
+            _hasSwayMean = false;
+            return Vector3.zero;
+        }
+
+        if (!_hasSwayMean || (animatedSight - _swayMean).sqrMagnitude > SwaySnapMeters * SwaySnapMeters)
+        {
+            _swayMean = animatedSight;
+            _hasSwayMean = true;
+            return Vector3.zero;
+        }
+
+        _swayMean = Vector3.Lerp(_swayMean, animatedSight, 1f - Mathf.Exp(-Time.deltaTime / holdTime));
+        return animatedSight - _swayMean;
+    }
+
+    internal static Quaternion HoldAim(Player player, Quaternion liveCameraRotation)
+    {
+        float holdTime = HoldSeconds;
+        if (holdTime <= 0.0001f)
+        {
+            _hasAimHold = false;
+            return liveCameraRotation;
+        }
+
+        bool hasLook = TryGetMouseLook(player, out Quaternion look);
+        if (!_hasAimHold)
+        {
+            _aimHold = liveCameraRotation;
+            _lastLook = look;
+            _mouseSpeed = 0f;
+            _hasAimHold = true;
+            return liveCameraRotation;
+        }
+
+        // The gun only ever points along the smoothed picture. The mouse never supplies a
+        // direction; its speed only decides how quickly that smoothing lets go while turning.
+        float dt = Mathf.Max(Time.deltaTime, 0.0001f);
+        float speed = hasLook ? Quaternion.Angle(_lastLook, look) / dt : 0f;
+        if (hasLook)
+            _lastLook = look;
+        _mouseSpeed = Mathf.Lerp(_mouseSpeed, speed, 1f - Mathf.Exp(-dt / MouseSpeedSeconds));
+        float ratio = _mouseSpeed / MouseSpeedReference;
+        float smoothing = holdTime / (1f + ratio * ratio);
+        _aimHold = Quaternion.Slerp(_aimHold, liveCameraRotation, 1f - Mathf.Exp(-dt / smoothing));
+        return _aimHold;
+    }
+
+    private static bool TryGetMouseLook(Player player, out Quaternion look)
+    {
+        look = Quaternion.identity;
+        try
+        {
+            MovementContext? movement = player.MovementContext;
+            if (movement == null)
+                return false;
+
+            look = Quaternion.Euler(movement.Pitch, movement.Yaw, 0f);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     internal static bool TryGetLook(Player player, out Quaternion look)
