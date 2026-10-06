@@ -105,7 +105,10 @@ internal static class AimArms
         bool aiming = player.HandsController != null && player.HandsController.IsAiming;
         int sightId = 0;
         Vector3 target = Vector3.zero;
-        if (aiming && bones != null)
+        Transform? weapon = bones?.Weapon_Root_Anim;
+        bool placeWeapon = false;
+        Quaternion targetWeaponRotation = Quaternion.identity;
+        if (aiming && bones != null && weapon != null)
         {
             ProceduralWeaponAnimation? animation = player.ProceduralWeaponAnimation;
             Transform? bone = animation != null && animation.ScopeAimTransforms != null && animation.ScopeAimTransforms.Count > 0
@@ -115,7 +118,14 @@ internal static class AimArms
             {
                 sightId = bone.GetInstanceID();
                 float relief = SightRelief(animation, bone);
-                target = cameraPosition - bone.position + cameraRotation * new Vector3(0f, 0f, ForwardDistance + relief);
+                Vector3 boneLocalPosition = Quaternion.Inverse(weapon.rotation) * (bone.position - weapon.position);
+                Quaternion boneLocalRotation = Quaternion.Inverse(weapon.rotation) * bone.rotation;
+                Quaternion sightRotation = AlignSightToCamera(bone.rotation, cameraRotation);
+                targetWeaponRotation = sightRotation * Quaternion.Inverse(boneLocalRotation);
+                Vector3 sightPoint = cameraPosition + cameraRotation * new Vector3(0f, 0f, ForwardDistance + relief);
+                Vector3 targetWeaponPosition = sightPoint - targetWeaponRotation * boneLocalPosition;
+                target = targetWeaponPosition - weapon.position;
+                placeWeapon = true;
             }
         }
 
@@ -150,6 +160,7 @@ internal static class AimArms
             _offset = target;
         }
 
+        float placed = _blend >= 1f ? 1f : _blend * _blend * (3f - 2f * _blend);
         Vector3 displacement = _offset;
         _laserDisplacement = displacement;
         _hasLaserDisplacement = displacement.sqrMagnitude >= 0.00000001f;
@@ -174,16 +185,19 @@ internal static class AimArms
             }
         }
 
+        Vector3 weaponOrigin = weapon != null ? weapon.position : Vector3.zero;
+        Quaternion weaponOriginRotation = weapon != null ? weapon.rotation : Quaternion.identity;
         foreach (Transform arm in Upperarms)
         {
             if (arm != null)
                 arm.position += displacement;
         }
 
-        Transform? weapon = bones.Weapon_Root_Anim;
-        bool weaponFollowsArm = false;
-        if (weapon != null)
+        if (weapon != null && placeWeapon)
+            weapon.SetPositionAndRotation(weaponOrigin + displacement, Quaternion.Slerp(weaponOriginRotation, targetWeaponRotation, placed));
+        else if (weapon != null)
         {
+            bool weaponFollowsArm = false;
             foreach (Transform arm in Upperarms)
             {
                 if (arm != null && weapon.IsChildOf(arm))
@@ -199,24 +213,47 @@ internal static class AimArms
 
     }
 
-    internal static Quaternion HoldHead(Player player, Quaternion liveHeadRotation)
+    private static Quaternion AlignSightToCamera(Quaternion sightRotation, Quaternion cameraRotation)
+    {
+        Vector3 cameraForward = cameraRotation * Vector3.forward;
+        Vector3 fromForward = sightRotation * Vector3.forward;
+        float bestDot = Vector3.Dot(fromForward, cameraForward);
+        Vector3[] locals =
+        {
+            Vector3.back, Vector3.up, Vector3.down, Vector3.right, Vector3.left
+        };
+        for (int i = 0; i < locals.Length; i++)
+        {
+            Vector3 axis = sightRotation * locals[i];
+            float dot = Vector3.Dot(axis, cameraForward);
+            if (dot <= bestDot)
+                continue;
+
+            bestDot = dot;
+            fromForward = axis;
+        }
+
+        return Quaternion.FromToRotation(fromForward, cameraForward) * sightRotation;
+    }
+
+    internal static Quaternion HoldAim(Player player, Quaternion liveCameraRotation)
     {
         float holdTime = HoldSeconds;
         if (holdTime <= 0.0001f)
         {
             _hasAimHold = false;
-            return liveHeadRotation;
+            return liveCameraRotation;
         }
 
-        if (!TryGetMouseLookRotation(player, liveHeadRotation, out Quaternion look))
+        if (!TryGetMouseLookRotation(player, liveCameraRotation, out Quaternion look))
         {
             _hasAimHold = false;
-            return liveHeadRotation;
+            return liveCameraRotation;
         }
 
         // Mouse motion lives entirely in look, so it still turns the gun one to one.
         // Walk and breath only show up in this residual, which is averaged away.
-        Quaternion residual = Quaternion.Inverse(look) * liveHeadRotation;
+        Quaternion residual = Quaternion.Inverse(look) * liveCameraRotation;
         if (!_hasAimHold)
         {
             _aimHoldResidual = residual;
@@ -239,7 +276,7 @@ internal static class AimArms
         _aimHoldResidual = Quaternion.identity;
     }
 
-    private static bool TryGetMouseLookRotation(Player player, Quaternion liveHeadRotation, out Quaternion look)
+    private static bool TryGetMouseLookRotation(Player player, Quaternion liveCameraRotation, out Quaternion look)
     {
         look = Quaternion.identity;
         float pitch;
@@ -258,16 +295,17 @@ internal static class AimArms
             return false;
         }
 
+        Quaternion alignment = CameraDirection.Resolve(Quaternion.identity);
         if (Mathf.Abs(pitch) > 5f)
         {
-            Quaternion positive = Quaternion.Euler(pitch, yaw, 0f);
-            Quaternion negative = Quaternion.Euler(-pitch, yaw, 0f);
-            _aimHoldPitchSign = Quaternion.Angle(positive, liveHeadRotation) <= Quaternion.Angle(negative, liveHeadRotation)
+            Quaternion positive = Quaternion.Euler(pitch, yaw, 0f) * alignment;
+            Quaternion negative = Quaternion.Euler(-pitch, yaw, 0f) * alignment;
+            _aimHoldPitchSign = Quaternion.Angle(positive, liveCameraRotation) <= Quaternion.Angle(negative, liveCameraRotation)
                 ? 1f
                 : -1f;
         }
 
-        look = Quaternion.Euler(pitch * _aimHoldPitchSign, yaw, 0f);
+        look = Quaternion.Euler(pitch * _aimHoldPitchSign, yaw, 0f) * alignment;
         return true;
     }
 
