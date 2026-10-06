@@ -269,7 +269,7 @@ internal static class AimArms
         _hasSway = false;
     }
 
-    private static bool TryGetLook(Player player, out Quaternion look)
+    internal static bool TryGetLook(Player player, out Quaternion look)
     {
         look = Quaternion.identity;
         try
