@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "新镜头";
-    public const string PluginVersion = "0.1.68";
+    public const string PluginVersion = "0.1.69";
 
     private void Awake()
     {
@@ -25,15 +25,6 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         BindDirection();
         BindPosition();
         BindAimDistance();
-        BindAimHold();
-    }
-
-    private void BindAimHold()
-    {
-        ConfigEntry<float> hold = Config.Bind("瞄准", "静止时间", 0.6f,
-            new ConfigDescription("瞄准时枪尖停在鼠标指向的目标上，尾端照游戏原来的幅度摆，越往前摆得越小。走路和呼吸的差按这个时间均掉。0 表示关闭，枪完全跟着镜头。", new AcceptableValueRange<float>(0f, 2f)));
-        hold.SettingChanged += (_, _) => AimArms.HoldSeconds = hold.Value;
-        AimArms.HoldSeconds = hold.Value;
     }
 
     private void BindDirection()
@@ -173,6 +164,7 @@ internal static class NewCameraSwitch
             {
                 _poseRotation = CameraDirection.Resolve(head.rotation);
                 _posePosition = CameraPosition.Resolve(head.position, _poseRotation);
+                AimArms.AlignToCamera(player, _posePosition, _poseRotation);
                 _poseFrame = Time.frameCount;
             }
         }
