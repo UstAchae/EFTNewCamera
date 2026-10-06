@@ -211,9 +211,9 @@ internal static class AimArms
         return false;
     }
 
-    // The aim shift moves the whole gun by one vector, so the muzzle and the stock
-    // trace the same contour. Scale only the muzzle's sway around the stock.
-    // 1 keeps that contour. 0 leaves the muzzle on one point. Hands rotate with the gun.
+    // The muzzle's sway includes the arms. Scale that contour by turning the holding
+    // arm around the shoulder, so the shoulder stays and the muzzle draws a smaller copy.
+    // 1 keeps the contour. 0 leaves the muzzle on one point. The gun turns with that arm.
     private static void ConvergeTip(ProceduralWeaponAnimation animation, Transform sight, Transform weapon, Quaternion cameraRotation, bool weaponUnderArm)
     {
         Transform? muzzle = animation.HandsContainer != null ? animation.HandsContainer.Fireport : null;
@@ -251,24 +251,55 @@ internal static class AimArms
         if (correction.sqrMagnitude < 0.00000004f)
             return;
 
-        Vector3 tail = weapon.position;
-        Vector3 fromTail = muzzle.position - tail;
-        Vector3 toTail = fromTail + correction;
-        if (fromTail.sqrMagnitude < 0.0001f || toTail.sqrMagnitude < 0.0001f)
+        Transform? shoulder = HoldingShoulder(weapon, muzzle);
+        Vector3 pivot = shoulder != null ? shoulder.position : weapon.position;
+        Vector3 fromPivot = muzzle.position - pivot;
+        Vector3 toPivot = fromPivot + correction;
+        if (fromPivot.sqrMagnitude < 0.0001f || toPivot.sqrMagnitude < 0.0001f)
             return;
 
-        Quaternion turn = Quaternion.FromToRotation(fromTail, toTail);
+        Quaternion turn = Quaternion.FromToRotation(fromPivot, toPivot);
         if (Quaternion.Angle(Quaternion.identity, turn) > 8f)
             return;
 
         foreach (Transform arm in Upperarms)
         {
             if (arm != null)
-                TurnAround(arm, tail, turn);
+                TurnAround(arm, arm.position, turn);
         }
 
-        if (!weaponUnderArm)
-            TurnAround(weapon, tail, turn);
+        if (shoulder == null || !weaponUnderArm)
+            TurnAround(weapon, pivot, turn);
+    }
+
+    private static Transform? HoldingShoulder(Transform weapon, Transform muzzle)
+    {
+        Transform? found = null;
+        foreach (Transform arm in Upperarms)
+        {
+            if (arm == null)
+                continue;
+            if (weapon.IsChildOf(arm) || muzzle.IsChildOf(arm))
+                found = found == null || arm.IsChildOf(found) ? arm : found;
+        }
+
+        if (found != null)
+            return found;
+
+        float best = float.MaxValue;
+        foreach (Transform arm in Upperarms)
+        {
+            if (arm == null)
+                continue;
+            float distance = (arm.position - weapon.position).sqrMagnitude;
+            if (distance < best)
+            {
+                best = distance;
+                found = arm;
+            }
+        }
+
+        return found;
     }
 
     private static void TurnAround(Transform target, Vector3 pivot, Quaternion turn)
