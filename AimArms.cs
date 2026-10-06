@@ -23,6 +23,11 @@ internal static class AimArms
     private const float BlendSeconds = 0.2f;
 
     internal static float ForwardDistance;
+    internal static float WalkScale = 1f;
+
+    private const float WalkRestSeconds = 0.7f;
+    private const float WalkSnapMeters = 0.02f;
+    private const float WalkMoveSpeed = 0.15f;
 
     private static bool _suppress;
     private static bool _blendAiming;
@@ -41,6 +46,9 @@ internal static class AimArms
     private static int _skinOwnerId;
     private static readonly List<Transform> Upperarms = new();
     private static readonly List<SkinState> Skins = new();
+    private static bool _walkRestReady;
+    private static Vector3 _walkRest;
+    private static Vector3 _walkLast;
 
     internal static void Install()
     {
@@ -101,12 +109,14 @@ internal static class AimArms
         bool aiming = player.HandsController != null && player.HandsController.IsAiming;
         int sightId = 0;
         Vector3 target = Vector3.zero;
+        Transform? sight = null;
         if (aiming && bones != null)
         {
             ProceduralWeaponAnimation? animation = player.ProceduralWeaponAnimation;
             Transform? bone = animation != null && animation.ScopeAimTransforms != null && animation.ScopeAimTransforms.Count > 0
                 ? animation.CurrentScope?.Bone
                 : null;
+            sight = bone;
             if (bone != null && animation != null)
             {
                 sightId = bone.GetInstanceID();
@@ -118,12 +128,14 @@ internal static class AimArms
         if (!aiming && !_blendAiming && _offset.sqrMagnitude < 0.00000001f && _blend >= 1f)
         {
             _hasLaserDisplacement = false;
+            _walkRestReady = false;
             return;
         }
 
         if (bones == null)
         {
             _hasLaserDisplacement = false;
+            _walkRestReady = false;
             return;
         }
 
@@ -177,15 +189,87 @@ internal static class AimArms
         }
 
         Transform? weapon = bones.Weapon_Root_Anim;
-        if (weapon == null)
-            return;
-        foreach (Transform arm in Upperarms)
+        bool weaponUnderArm = false;
+        if (weapon != null)
         {
-            if (arm != null && weapon.IsChildOf(arm))
-                return;
+            foreach (Transform arm in Upperarms)
+            {
+                if (arm != null && weapon.IsChildOf(arm))
+                {
+                    weaponUnderArm = true;
+                    break;
+                }
+            }
+
+            if (!weaponUnderArm)
+                weapon.position += displacement;
         }
 
-        weapon.position += displacement;
+        if (aiming && sight != null && weapon != null && _blend >= 1f)
+            ReduceWalkAroundAim(sight, weapon, weaponUnderArm, cameraRotation);
+        else
+            _walkRestReady = false;
+    }
+
+    private static void ReduceWalkAroundAim(Transform sight, Transform weapon, bool weaponUnderArm, Quaternion cameraRotation)
+    {
+        Player? player = Singleton<GameWorld>.Instance?.MainPlayer;
+        float speed = player?.MovementContext != null ? player.MovementContext.SmoothedCharacterMovementSpeed : 0f;
+        float scale = Mathf.Clamp01(WalkScale);
+        if (speed < WalkMoveSpeed || scale >= 0.999f)
+        {
+            _walkRestReady = false;
+            return;
+        }
+
+        Vector3 pivot = sight.position;
+        Vector3 fromPivot = weapon.position - pivot;
+        if (fromPivot.sqrMagnitude < 0.0004f)
+            return;
+
+        Vector3 local = Quaternion.Inverse(cameraRotation) * fromPivot;
+        if (!_walkRestReady)
+        {
+            _walkRest = local;
+            _walkLast = local;
+            _walkRestReady = true;
+            return;
+        }
+
+        if (Vector3.Distance(local, _walkLast) > WalkSnapMeters)
+        {
+            _walkRest = local;
+            _walkLast = local;
+            return;
+        }
+
+        _walkLast = local;
+        float follow = 1f - Mathf.Exp(-Time.deltaTime / WalkRestSeconds);
+        _walkRest = Vector3.Lerp(_walkRest, local, follow);
+        Vector3 restWorld = cameraRotation * _walkRest;
+        if (restWorld.sqrMagnitude < 0.0004f)
+            return;
+
+        Quaternion correction = Quaternion.Slerp(Quaternion.identity, Quaternion.FromToRotation(fromPivot, restWorld), 1f - scale);
+        if (Quaternion.Angle(Quaternion.identity, correction) < 0.02f)
+            return;
+
+        Vector3 before = weapon.position;
+        if (!weaponUnderArm)
+            RotateAround(weapon, pivot, correction);
+        foreach (Transform arm in Upperarms)
+        {
+            if (arm != null)
+                RotateAround(arm, pivot, correction);
+        }
+
+        _laserDisplacement += weapon.position - before;
+    }
+
+    private static void RotateAround(Transform target, Vector3 pivot, Quaternion correction)
+    {
+        target.position = pivot + correction * (target.position - pivot);
+        target.rotation = correction * target.rotation;
     }
 
     private static float SightRelief(ProceduralWeaponAnimation animation, Transform bone)
@@ -374,6 +458,7 @@ internal static class AimArms
         _blend = 1f;
         _offset = Vector3.zero;
         _blendFrom = Vector3.zero;
+        _walkRestReady = false;
         RestoreSkins();
         if (!_suppress)
             return;
