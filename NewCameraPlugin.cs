@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "新镜头";
-    public const string PluginVersion = "0.1.66";
+    public const string PluginVersion = "0.1.67";
 
     private void Awake()
     {
@@ -173,13 +173,6 @@ internal static class NewCameraSwitch
             {
                 _poseRotation = CameraDirection.Resolve(head.rotation);
                 _posePosition = CameraPosition.Resolve(head.position, _poseRotation);
-                bool aiming = player.HandsController != null && player.HandsController.IsAiming;
-                Quaternion aimRotation = _poseRotation;
-                if (aiming)
-                    aimRotation = AimArms.HoldAim(player, _poseRotation);
-                else
-                    AimArms.ClearHold();
-                AimArms.AlignToCamera(player, _posePosition, aimRotation);
                 _poseFrame = Time.frameCount;
             }
         }

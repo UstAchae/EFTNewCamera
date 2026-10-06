@@ -52,9 +52,44 @@ internal static class AimArms
 
         Harmony harmony = new Harmony(NewCameraPlugin.PluginGuid + ".aimarms");
         harmony.Patch(target, prefix: new HarmonyMethod(prefix));
+        PatchShiftWeaponRoot(harmony);
         PatchLaser(harmony);
         PatchFieldOfView(harmony);
         _patched = true;
+    }
+
+    private static void PatchShiftWeaponRoot(Harmony harmony)
+    {
+        MethodInfo? shift = AccessTools.Method(typeof(PlayerBones), nameof(PlayerBones.ShiftWeaponRoot));
+        MethodInfo? postfix = typeof(AimArms).GetMethod(nameof(ShiftWeaponRootPostfix), BindingFlags.NonPublic | BindingFlags.Static);
+        if (shift == null || postfix == null)
+            return;
+
+        harmony.Patch(shift, postfix: new HarmonyMethod(postfix) { priority = Priority.Last });
+    }
+
+    // Runs before RotateHead and hand IK, so the hands still grip the gun after it is placed.
+    private static void ShiftWeaponRootPostfix(PlayerBones __instance, EPointOfView pv)
+    {
+        if (!NewCameraSwitch.Enabled || pv != EPointOfView.ThirdPerson || __instance == null)
+            return;
+
+        Player? player = __instance.Player;
+        if (player == null || !player.IsYourPlayer)
+            return;
+
+        Transform? head = __instance.Head?.Original;
+        if (head == null)
+            return;
+
+        Quaternion cameraRotation = CameraDirection.Resolve(head.rotation);
+        Vector3 cameraPosition = CameraPosition.Resolve(head.position, cameraRotation);
+        bool aiming = player.HandsController != null && player.HandsController.IsAiming;
+        if (aiming)
+            cameraRotation = HoldAim(player, cameraRotation);
+        else
+            ClearHold();
+        AlignToCamera(player, cameraPosition, cameraRotation);
     }
 
     private static void PatchFieldOfView(Harmony harmony)
