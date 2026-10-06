@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "新镜头";
-    public const string PluginVersion = "0.1.55";
+    public const string PluginVersion = "0.1.56";
 
     private void Awake()
     {
@@ -86,12 +86,14 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
     {
         Camera.onPreCull += NewCameraSwitch.OnCameraPreCull;
         Camera.onPreRender += NewCameraSwitch.OnCameraPreRender;
+        Camera.onPostRender += NewCameraSwitch.OnCameraPostRender;
     }
 
     private void OnDisable()
     {
         Camera.onPreCull -= NewCameraSwitch.OnCameraPreCull;
         Camera.onPreRender -= NewCameraSwitch.OnCameraPreRender;
+        Camera.onPostRender -= NewCameraSwitch.OnCameraPostRender;
     }
 
     private void LateUpdate()
@@ -165,23 +167,45 @@ internal static class NewCameraSwitch
             {
                 _poseRotation = CameraDirection.Resolve(head.rotation);
                 _posePosition = CameraPosition.Resolve(head.position, _poseRotation);
-                AimArms.AlignToCamera(player, _posePosition, _poseRotation);
+                Vector3 gunPosition = _posePosition;
+                Quaternion gunRotation = _poseRotation;
+                AimArms.SteadyAim(player, ref gunPosition, ref gunRotation);
+                AimArms.AlignToCamera(player, gunPosition, gunRotation);
                 _poseFrame = Time.frameCount;
             }
         }
 
         if (main && _poseFrame == Time.frameCount)
             camera.transform.SetPositionAndRotation(_posePosition, _poseRotation);
+        if (optic)
+            AimArms.HoldOptic(camera, player);
 
         AimArms.ReplayLasers(camera);
     }
 
     internal static void OnCameraPreRender(Camera camera)
     {
-        if (!Enabled || camera == null || !camera.CompareTag("MainCamera"))
+        if (!Enabled || camera == null)
             return;
 
-        HoldFieldOfView(camera);
+        if (camera.CompareTag("MainCamera"))
+        {
+            HoldFieldOfView(camera);
+            return;
+        }
+
+        if (!OpticPicture.IsCamera(camera))
+            return;
+
+        Player? player = Singleton<GameWorld>.Instance?.MainPlayer;
+        if (player != null && player.IsYourPlayer)
+            AimArms.HoldOptic(camera, player);
+    }
+
+    internal static void OnCameraPostRender(Camera camera)
+    {
+        if (camera != null && OpticPicture.IsCamera(camera))
+            AimArms.RestoreOptic();
     }
 
     private static void HoldFieldOfView(Camera camera)

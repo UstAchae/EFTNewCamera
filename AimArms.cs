@@ -24,6 +24,10 @@ internal static class AimArms
 
     internal static float ForwardDistance;
 
+    private const float NeckSeconds = 0.45f;
+    private const float NeckSnapDegrees = 20f;
+    private const float NeckSnapMeters = 0.1f;
+
     private static bool _suppress;
     private static bool _blendAiming;
     private static int _blendSightId;
@@ -41,6 +45,18 @@ internal static class AimArms
     private static int _skinOwnerId;
     private static readonly List<Transform> Upperarms = new();
     private static readonly List<SkinState> Skins = new();
+    private static bool _neckReady;
+    private static Quaternion _neckOffset;
+    private static Vector3 _neckLocal;
+    private static bool _barrelReady;
+    private static Quaternion _barrelHold;
+    private static bool _opticReady;
+    private static Quaternion _opticOffset;
+    private static Quaternion _opticDesired;
+    private static bool _opticHeld;
+    private static Quaternion _opticSaved;
+    private static Camera? _opticCamera;
+    private static int _opticFrame = -1;
 
     internal static void Install()
     {
@@ -95,18 +111,55 @@ internal static class AimArms
         player.MovementContext?.PlayerAnimator?.SetAiming(false);
     }
 
+    internal static void SteadyAim(Player player, ref Vector3 position, ref Quaternion rotation)
+    {
+        bool aiming = player.HandsController != null && player.HandsController.IsAiming;
+        if (!aiming || player.MovementContext == null)
+        {
+            _neckReady = false;
+            _opticReady = false;
+            return;
+        }
+
+        Quaternion look = Quaternion.Euler(player.MovementContext.Pitch, player.MovementContext.Yaw, 0f);
+        Quaternion offset = Quaternion.Inverse(look) * rotation;
+        Vector3 local = ((Component)player).transform.InverseTransformPoint(position);
+        if (!_neckReady)
+        {
+            _neckOffset = offset;
+            _neckLocal = local;
+            _neckReady = true;
+            return;
+        }
+
+        if (Quaternion.Angle(offset, _neckOffset) > NeckSnapDegrees || Vector3.Distance(local, _neckLocal) > NeckSnapMeters)
+        {
+            _neckOffset = offset;
+            _neckLocal = local;
+            return;
+        }
+
+        float follow = 1f - Mathf.Exp(-Time.deltaTime / NeckSeconds);
+        _neckOffset = Quaternion.Slerp(_neckOffset, offset, follow);
+        _neckLocal = Vector3.Lerp(_neckLocal, local, follow);
+        rotation = look * _neckOffset;
+        position = ((Component)player).transform.TransformPoint(_neckLocal);
+    }
+
     internal static void AlignToCamera(Player player, Vector3 cameraPosition, Quaternion cameraRotation)
     {
         PlayerBones bones = player.PlayerBones;
         bool aiming = player.HandsController != null && player.HandsController.IsAiming;
         int sightId = 0;
         Vector3 target = Vector3.zero;
+        Transform? sight = null;
         if (aiming && bones != null)
         {
             ProceduralWeaponAnimation? animation = player.ProceduralWeaponAnimation;
             Transform? bone = animation != null && animation.ScopeAimTransforms != null && animation.ScopeAimTransforms.Count > 0
                 ? animation.CurrentScope?.Bone
                 : null;
+            sight = bone;
             if (bone != null && animation != null)
             {
                 sightId = bone.GetInstanceID();
@@ -118,12 +171,14 @@ internal static class AimArms
         if (!aiming && !_blendAiming && _offset.sqrMagnitude < 0.00000001f && _blend >= 1f)
         {
             _hasLaserDisplacement = false;
+            _barrelReady = false;
             return;
         }
 
         if (bones == null)
         {
             _hasLaserDisplacement = false;
+            _barrelReady = false;
             return;
         }
 
@@ -133,6 +188,7 @@ internal static class AimArms
             _blend = 0f;
             _blendAiming = aiming;
             _blendSightId = sightId;
+            _barrelReady = false;
         }
 
         if (_blend < 1f)
@@ -177,15 +233,106 @@ internal static class AimArms
         }
 
         Transform? weapon = bones.Weapon_Root_Anim;
-        if (weapon == null)
-            return;
-        foreach (Transform arm in Upperarms)
+        bool weaponUnderArm = false;
+        if (weapon != null)
         {
-            if (arm != null && weapon.IsChildOf(arm))
-                return;
+            foreach (Transform arm in Upperarms)
+            {
+                if (arm != null && weapon.IsChildOf(arm))
+                {
+                    weaponUnderArm = true;
+                    break;
+                }
+            }
+
+            if (!weaponUnderArm)
+                weapon.position += displacement;
         }
 
-        weapon.position += displacement;
+        if (aiming && sight != null && weapon != null && _blend >= 1f)
+            HoldBarrel(sight, weapon, weaponUnderArm, cameraRotation);
+        else
+            _barrelReady = false;
+    }
+
+    internal static void HoldOptic(Camera camera, Player player)
+    {
+        bool aiming = player.HandsController != null && player.HandsController.IsAiming;
+        if (!aiming || player.MovementContext == null)
+        {
+            _opticReady = false;
+            return;
+        }
+
+        if (_opticFrame != Time.frameCount)
+        {
+            _opticFrame = Time.frameCount;
+            _opticSaved = camera.transform.rotation;
+            _opticCamera = camera;
+            _opticHeld = true;
+            Quaternion look = Quaternion.Euler(player.MovementContext.Pitch, player.MovementContext.Yaw, 0f);
+            Quaternion offset = Quaternion.Inverse(look) * _opticSaved;
+            if (!_opticReady)
+            {
+                _opticOffset = offset;
+                _opticReady = true;
+            }
+            else if (Quaternion.Angle(offset, _opticOffset) <= NeckSnapDegrees)
+            {
+                float follow = 1f - Mathf.Exp(-Time.deltaTime / NeckSeconds);
+                _opticOffset = Quaternion.Slerp(_opticOffset, offset, follow);
+            }
+            else
+            {
+                _opticOffset = offset;
+            }
+
+            _opticDesired = look * _opticOffset;
+        }
+
+        camera.transform.rotation = _opticDesired;
+    }
+
+    internal static void RestoreOptic()
+    {
+        if (!_opticHeld || _opticCamera == null)
+            return;
+
+        _opticCamera.transform.rotation = _opticSaved;
+        _opticHeld = false;
+        _opticCamera = null;
+    }
+
+    private static void HoldBarrel(Transform sight, Transform weapon, bool weaponUnderArm, Quaternion aimRotation)
+    {
+        if (!_barrelReady)
+        {
+            _barrelHold = Quaternion.Inverse(aimRotation) * weapon.rotation;
+            _barrelReady = true;
+            return;
+        }
+
+        Quaternion correction = aimRotation * _barrelHold * Quaternion.Inverse(weapon.rotation);
+        if (Quaternion.Angle(Quaternion.identity, correction) < 0.05f)
+            return;
+
+        Vector3 pivot = sight.position;
+        Vector3 before = weapon.position;
+        if (!weaponUnderArm)
+            TurnAround(weapon, pivot, correction);
+        foreach (Transform arm in Upperarms)
+        {
+            if (arm != null)
+                TurnAround(arm, pivot, correction);
+        }
+
+        _laserDisplacement += weapon.position - before;
+    }
+
+    private static void TurnAround(Transform target, Vector3 pivot, Quaternion correction)
+    {
+        target.position = pivot + correction * (target.position - pivot);
+        target.rotation = correction * target.rotation;
     }
 
     private static float SightRelief(ProceduralWeaponAnimation animation, Transform bone)
@@ -374,6 +521,9 @@ internal static class AimArms
         _blend = 1f;
         _offset = Vector3.zero;
         _blendFrom = Vector3.zero;
+        _neckReady = false;
+        _barrelReady = false;
+        _opticReady = false;
         RestoreSkins();
         if (!_suppress)
             return;
