@@ -23,6 +23,7 @@ internal static class AimArms
     private const float BlendSeconds = 0.2f;
 
     internal static float ForwardDistance;
+    internal static float Trajectory = 0.35f;
 
     private static bool _suppress;
     private static bool _blendAiming;
@@ -177,15 +178,87 @@ internal static class AimArms
         }
 
         Transform? weapon = bones.Weapon_Root_Anim;
-        if (weapon == null)
-            return;
-        foreach (Transform arm in Upperarms)
+        bool weaponFollowsArm = false;
+        if (weapon != null)
         {
-            if (arm != null && weapon.IsChildOf(arm))
-                return;
+            foreach (Transform arm in Upperarms)
+            {
+                if (arm != null && weapon.IsChildOf(arm))
+                {
+                    weaponFollowsArm = true;
+                    break;
+                }
+            }
+
+            if (!weaponFollowsArm)
+                weapon.position += displacement;
         }
 
-        weapon.position += displacement;
+        if (aiming)
+            ApplyTrajectory(player, weapon, !weaponFollowsArm);
+    }
+
+    private static void ApplyTrajectory(Player player, Transform? weapon, bool moveWeapon)
+    {
+        float scale = Mathf.Clamp01(Trajectory);
+        if (scale <= 0f)
+            return;
+
+        PlayerSpring? hands = player.ProceduralWeaponAnimation?.HandsContainer;
+        if (hands?.HandsPosition == null || hands.HandsRotation == null)
+            return;
+
+        Vector3 shift = hands.HandsPosition.GetRelative() * scale;
+        Vector3 euler = hands.HandsRotation.GetRelative();
+        if (hands.SwaySpring != null)
+            euler += hands.SwaySpring.Value;
+        euler *= scale;
+        bool shiftArms = shift.sqrMagnitude > 0.0000000001f;
+        bool spin = euler.sqrMagnitude > 0.0000001f;
+        if (!shiftArms && !spin)
+            return;
+
+        Quaternion turn = Quaternion.Euler(euler.x, 0f, euler.z) * Quaternion.Euler(0f, euler.y, 0f);
+        Vector3 pivot = weapon != null ? weapon.TransformPoint(TrajectoryPivot(player, hands)) : Vector3.zero;
+        foreach (Transform arm in Upperarms)
+        {
+            if (arm == null)
+                continue;
+
+            if (shiftArms)
+                arm.position += arm.TransformDirection(shift);
+            if (!spin || weapon == null)
+                continue;
+
+            Vector3 offset = arm.position - pivot;
+            arm.position = pivot + turn * offset;
+            arm.rotation = turn * arm.rotation;
+        }
+
+        if (weapon == null || !moveWeapon)
+            return;
+
+        if (shiftArms)
+            weapon.position += weapon.TransformDirection(shift);
+        if (!spin)
+            return;
+
+        Vector3 weaponOffset = weapon.position - pivot;
+        weapon.position = pivot + turn * weaponOffset;
+        weapon.rotation = turn * weapon.rotation;
+    }
+
+    private static Vector3 TrajectoryPivot(Player player, PlayerSpring hands)
+    {
+        ProceduralWeaponAnimation? animation = player.ProceduralWeaponAnimation;
+        if (animation != null && animation.IsMountedState)
+        {
+            return !animation.IsBipodUsed || animation.IsVerticalMounting
+                ? hands.MountingRotationCenter
+                : hands.MountingRotationCenterBipods;
+        }
+
+        return hands.RecoilPivot;
     }
 
     private static float SightRelief(ProceduralWeaponAnimation animation, Transform bone)
