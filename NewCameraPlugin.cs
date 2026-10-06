@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "新镜头";
-    public const string PluginVersion = "0.1.45";
+    public const string PluginVersion = "0.1.46";
 
     private void Awake()
     {
@@ -26,6 +26,15 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         BindDirection();
         BindPosition();
         BindAimDistance();
+        BindWalkScale();
+    }
+
+    private void BindWalkScale()
+    {
+        ConfigEntry<float> scale = Config.Bind("瞄准", "走路摆动", 1f,
+            new ConfigDescription("瞄准走路时，手臂和枪的走路摆动。1 是原来的幅度，0 是去掉这份摆动。", new AcceptableValueRange<float>(0f, 1f)));
+        scale.SettingChanged += (_, _) => AimArms.WalkScale = scale.Value;
+        AimArms.WalkScale = scale.Value;
     }
 
     private void BindDirection()

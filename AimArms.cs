@@ -23,6 +23,12 @@ internal static class AimArms
     private const float BlendSeconds = 0.2f;
 
     internal static float ForwardDistance;
+    internal static float WalkScale = 1f;
+
+    private const float WalkRestSeconds = 0.7f;
+    private const float WalkSnapMeters = 0.08f;
+    private const float WalkSnapDegrees = 25f;
+    private const float WalkMoveSpeed = 0.15f;
 
     private static bool _suppress;
     private static bool _blendAiming;
@@ -41,6 +47,15 @@ internal static class AimArms
     private static int _skinOwnerId;
     private static readonly List<Transform> Upperarms = new();
     private static readonly List<SkinState> Skins = new();
+    private static readonly Dictionary<int, ArmRest> ArmRests = new();
+    private static bool _walkScaled;
+    private static float _savedWalkIntensity;
+
+    private struct ArmRest
+    {
+        public Vector3 Position;
+        public Quaternion Rotation;
+    }
 
     internal static void Install()
     {
@@ -56,7 +71,53 @@ internal static class AimArms
         harmony.Patch(target, prefix: new HarmonyMethod(prefix));
         PatchLaser(harmony);
         PatchFieldOfView(harmony);
+        PatchWalk(harmony);
         _patched = true;
+    }
+
+    private static void PatchWalk(Harmony harmony)
+    {
+        MethodInfo? process = AccessTools.Method(typeof(WalkEffector), "Process", new[] { typeof(float) });
+        MethodInfo? prefix = typeof(AimArms).GetMethod(nameof(WalkPrefix), BindingFlags.NonPublic | BindingFlags.Static);
+        MethodInfo? postfix = typeof(AimArms).GetMethod(nameof(WalkPostfix), BindingFlags.NonPublic | BindingFlags.Static);
+        if (process == null || prefix == null || postfix == null)
+            return;
+
+        harmony.Patch(process, prefix: new HarmonyMethod(prefix), postfix: new HarmonyMethod(postfix));
+    }
+
+    private static void WalkPrefix(WalkEffector __instance)
+    {
+        _walkScaled = false;
+        if (!ScaleThisWalk(__instance))
+            return;
+
+        _savedWalkIntensity = __instance.Intensity;
+        __instance.Intensity = _savedWalkIntensity * Mathf.Clamp01(WalkScale);
+        _walkScaled = true;
+    }
+
+    private static void WalkPostfix(WalkEffector __instance)
+    {
+        if (!_walkScaled)
+            return;
+
+        __instance.Intensity = _savedWalkIntensity;
+        _walkScaled = false;
+    }
+
+    private static bool ScaleThisWalk(WalkEffector effector)
+    {
+        if (!NewCameraSwitch.Enabled || WalkScale >= 0.999f)
+            return false;
+
+        Player? player = Singleton<GameWorld>.Instance?.MainPlayer;
+        if (player == null || !player.IsYourPlayer || player.HandsController == null || !player.HandsController.IsAiming)
+            return false;
+        if (player.MovementContext == null || player.MovementContext.SmoothedCharacterMovementSpeed < WalkMoveSpeed)
+            return false;
+
+        return player.ProceduralWeaponAnimation != null && ReferenceEquals(player.ProceduralWeaponAnimation.Walk, effector);
     }
 
     private static void PatchFieldOfView(Harmony harmony)
@@ -97,6 +158,7 @@ internal static class AimArms
 
     internal static void AlignToCamera(Player player, Vector3 cameraPosition, Quaternion cameraRotation)
     {
+        ScaleArmWalk(player);
         PlayerBones bones = player.PlayerBones;
         bool aiming = player.HandsController != null && player.HandsController.IsAiming;
         int sightId = 0;
@@ -308,6 +370,47 @@ internal static class AimArms
         return false;
     }
 
+    private static void ScaleArmWalk(Player player)
+    {
+        bool aiming = player.HandsController != null && player.HandsController.IsAiming;
+        float speed = player.MovementContext != null ? player.MovementContext.SmoothedCharacterMovementSpeed : 0f;
+        float scale = Mathf.Clamp01(WalkScale);
+        if (!NewCameraSwitch.Enabled || !aiming || speed < WalkMoveSpeed || scale >= 0.999f)
+        {
+            ArmRests.Clear();
+            return;
+        }
+
+        EnsureUpperarms(player);
+        float follow = 1f - Mathf.Exp(-Time.deltaTime / WalkRestSeconds);
+        foreach (Transform arm in Upperarms)
+        {
+            if (arm == null)
+                continue;
+
+            int id = arm.GetInstanceID();
+            if (!ArmRests.TryGetValue(id, out ArmRest rest))
+            {
+                ArmRests[id] = new ArmRest { Position = arm.localPosition, Rotation = arm.localRotation };
+                continue;
+            }
+
+            float positionGap = Vector3.Distance(arm.localPosition, rest.Position);
+            float angleGap = Quaternion.Angle(arm.localRotation, rest.Rotation);
+            if (positionGap > WalkSnapMeters || angleGap > WalkSnapDegrees)
+            {
+                ArmRests[id] = new ArmRest { Position = arm.localPosition, Rotation = arm.localRotation };
+                continue;
+            }
+
+            rest.Position = Vector3.Lerp(rest.Position, arm.localPosition, follow);
+            rest.Rotation = Quaternion.Slerp(rest.Rotation, arm.localRotation, follow);
+            arm.localPosition = Vector3.Lerp(rest.Position, arm.localPosition, scale);
+            arm.localRotation = Quaternion.Slerp(rest.Rotation, arm.localRotation, scale);
+            ArmRests[id] = rest;
+        }
+    }
+
     private static void EnsureUpperarms(Player player)
     {
         int ownerId = player.GetInstanceID();
@@ -374,6 +477,7 @@ internal static class AimArms
         _blend = 1f;
         _offset = Vector3.zero;
         _blendFrom = Vector3.zero;
+        ArmRests.Clear();
         RestoreSkins();
         if (!_suppress)
             return;
