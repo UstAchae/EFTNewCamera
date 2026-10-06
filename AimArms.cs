@@ -38,8 +38,6 @@ internal static class AimArms
     private const float ConeTipDistance = 100f;
     private const float MouseSpeedReference = 3f;
     private const float MouseSpeedSeconds = 0.1f;
-    private const float SwayTurnSpeed = 8f;
-
     internal static float ForwardDistance;
     internal static bool UseCone;
     internal static float HoldSeconds = 0.6f;
@@ -440,7 +438,7 @@ internal static class AimArms
         float speed = AngleBetween(_lastLook, liveCameraRotation) / dt;
         _lastLook = liveCameraRotation;
         _mouseSpeed = Mathf.Lerp(_mouseSpeed, speed, 1f - Mathf.Exp(-dt / MouseSpeedSeconds));
-        float ratio = Mathf.Max(0f, _mouseSpeed - SwayTurnSpeed) / MouseSpeedReference;
+        float ratio = _mouseSpeed / MouseSpeedReference;
         float smoothing = holdTime / (1f + ratio * ratio);
         _aimHold = Quaternion.Slerp(_aimHold, liveCameraRotation, 1f - Mathf.Exp(-dt / smoothing));
         return _aimHold;
