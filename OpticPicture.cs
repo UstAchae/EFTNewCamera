@@ -8,10 +8,6 @@ namespace EFTNewCamera;
 internal static class OpticPicture
 {
     private static int _frame = -1;
-    private static bool _placed;
-    private static Camera? _savedCamera;
-    private static Vector3 _savedPosition;
-    private static Quaternion _savedRotation;
     private static OpticSight? _held;
 
     internal static bool IsCamera(Camera camera)
@@ -75,32 +71,6 @@ internal static class OpticPicture
         }
     }
 
-    internal static void PlaceOnDrawnScope(Camera camera, Player player)
-    {
-        if (!TryGetDrawnScopePose(player, out Vector3 position, out Quaternion rotation))
-            return;
-
-        if (!_placed)
-        {
-            _savedCamera = camera;
-            _savedPosition = camera.transform.position;
-            _savedRotation = camera.transform.rotation;
-            _placed = true;
-        }
-
-        camera.transform.SetPositionAndRotation(position, rotation);
-    }
-
-    internal static void RestorePose()
-    {
-        if (!_placed || _savedCamera == null)
-            return;
-
-        _savedCamera.transform.SetPositionAndRotation(_savedPosition, _savedRotation);
-        _placed = false;
-        _savedCamera = null;
-    }
-
     internal static void Release()
     {
         try
@@ -120,62 +90,6 @@ internal static class OpticPicture
 
         _held = null;
         _frame = -1;
-        RestorePose();
-    }
-
-    private static bool TryGetDrawnScopePose(Player player, out Vector3 position, out Quaternion rotation)
-    {
-        position = default;
-        rotation = Quaternion.identity;
-        OpticSight? sight = CameraManager.Instance?.OpticCameraManager?.CurrentOpticSight;
-        Transform? scopeData = sight?.ScopeData != null ? sight.ScopeData.transform : null;
-        if (scopeData == null)
-            return false;
-
-        Transform? weapon = player.PlayerBones?.Weapon_Root_Anim;
-        Transform pivot = scopeData;
-        if (weapon != null && !scopeData.IsChildOf(weapon))
-        {
-            Transform? drawn = FindSameScope(weapon, scopeData);
-            if (drawn != null)
-                pivot = drawn;
-        }
-
-        position = pivot.position;
-        rotation = pivot.rotation;
-        return true;
-    }
-
-    private static Transform? FindSameScope(Transform weapon, Transform scopeData)
-    {
-        Transform? best = null;
-        int bestScore = 0;
-        foreach (Transform candidate in weapon.GetComponentsInChildren<Transform>(true))
-        {
-            if (!string.Equals(candidate.name, scopeData.name, System.StringComparison.Ordinal))
-                continue;
-
-            int score = 0;
-            Transform? candidateWalk = candidate;
-            Transform? scopeWalk = scopeData;
-            while (candidateWalk != null && scopeWalk != null)
-            {
-                if (!string.Equals(candidateWalk.name, scopeWalk.name, System.StringComparison.Ordinal))
-                    break;
-
-                score++;
-                candidateWalk = candidateWalk.parent;
-                scopeWalk = scopeWalk.parent;
-            }
-
-            if (score > bestScore)
-            {
-                bestScore = score;
-                best = candidate;
-            }
-        }
-
-        return best;
     }
 
     private static void ReleaseHeld()
