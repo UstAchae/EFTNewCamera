@@ -23,6 +23,10 @@ internal static class AimArms
     private const float BlendSeconds = 0.2f;
 
     internal static float ForwardDistance;
+    internal static float TipScale = 0.5f;
+
+    private const float TipRestSeconds = 1.2f;
+    private const float TipSnapMeters = 0.08f;
 
     private static bool _suppress;
     private static bool _blendAiming;
@@ -39,6 +43,10 @@ internal static class AimArms
     private static int _laserFrame = -1;
     private static readonly List<MonoBehaviour> DeferredLasers = new();
     private static int _skinOwnerId;
+    private static bool _tipReady;
+    private static int _tipSightId;
+    private static float _tipRestRight;
+    private static float _tipRestUp;
     private static readonly List<Transform> Upperarms = new();
     private static readonly List<SkinState> Skins = new();
 
@@ -101,14 +109,17 @@ internal static class AimArms
         bool aiming = player.HandsController != null && player.HandsController.IsAiming;
         int sightId = 0;
         Vector3 target = Vector3.zero;
+        ProceduralWeaponAnimation? animation = null;
+        Transform? sight = null;
         if (aiming && bones != null)
         {
-            ProceduralWeaponAnimation? animation = player.ProceduralWeaponAnimation;
+            animation = player.ProceduralWeaponAnimation;
             Transform? bone = animation != null && animation.ScopeAimTransforms != null && animation.ScopeAimTransforms.Count > 0
                 ? animation.CurrentScope?.Bone
                 : null;
             if (bone != null && animation != null)
             {
+                sight = bone;
                 sightId = bone.GetInstanceID();
                 float relief = SightRelief(animation, bone);
                 target = cameraPosition - bone.position + cameraRotation * new Vector3(0f, 0f, ForwardDistance + relief);
@@ -118,12 +129,14 @@ internal static class AimArms
         if (!aiming && !_blendAiming && _offset.sqrMagnitude < 0.00000001f && _blend >= 1f)
         {
             _hasLaserDisplacement = false;
+            _tipReady = false;
             return;
         }
 
         if (bones == null)
         {
             _hasLaserDisplacement = false;
+            _tipReady = false;
             return;
         }
 
@@ -177,15 +190,91 @@ internal static class AimArms
         }
 
         Transform? weapon = bones.Weapon_Root_Anim;
-        if (weapon == null)
-            return;
+        bool weaponUnderArm = weapon != null && UnderUpperarm(weapon);
+        if (weapon != null && !weaponUnderArm)
+            weapon.position += displacement;
+
+        if (aiming && sight != null && animation != null && weapon != null && _blend >= 1f)
+            ConvergeTip(animation, sight, weapon, cameraRotation, weaponUnderArm);
+        else
+            _tipReady = false;
+    }
+
+    private static bool UnderUpperarm(Transform transform)
+    {
         foreach (Transform arm in Upperarms)
         {
-            if (arm != null && weapon.IsChildOf(arm))
-                return;
+            if (arm != null && transform.IsChildOf(arm))
+                return true;
         }
 
-        weapon.position += displacement;
+        return false;
+    }
+
+    // The aim shift moves the whole gun by one vector, so the muzzle and the stock
+    // trace the same contour. Scale only the muzzle's sway around the stock.
+    // 1 keeps that contour. 0 leaves the muzzle on one point. Hands rotate with the gun.
+    private static void ConvergeTip(ProceduralWeaponAnimation animation, Transform sight, Transform weapon, Quaternion cameraRotation, bool weaponUnderArm)
+    {
+        Transform? muzzle = animation.HandsContainer != null ? animation.HandsContainer.Fireport : null;
+        if (muzzle == null)
+            return;
+
+        Vector3 forward = cameraRotation * Vector3.forward;
+        Vector3 right = cameraRotation * Vector3.right;
+        Vector3 up = cameraRotation * Vector3.up;
+        Vector3 fromSight = muzzle.position - sight.position;
+        float depth = Vector3.Dot(fromSight, forward);
+        Vector3 lateral = fromSight - forward * depth;
+        float alongRight = Vector3.Dot(lateral, right);
+        float alongUp = Vector3.Dot(lateral, up);
+        int sightId = sight.GetInstanceID();
+        if (!_tipReady || _tipSightId != sightId)
+        {
+            _tipRestRight = alongRight;
+            _tipRestUp = alongUp;
+            _tipSightId = sightId;
+            _tipReady = true;
+            return;
+        }
+
+        float gapRight = alongRight - _tipRestRight;
+        float gapUp = alongUp - _tipRestUp;
+        float gap = Mathf.Sqrt(gapRight * gapRight + gapUp * gapUp);
+        float follow = gap > TipSnapMeters ? 1f : 1f - Mathf.Exp(-Time.deltaTime / TipRestSeconds);
+        _tipRestRight = Mathf.Lerp(_tipRestRight, alongRight, follow);
+        _tipRestUp = Mathf.Lerp(_tipRestUp, alongUp, follow);
+        float swayRight = alongRight - _tipRestRight;
+        float swayUp = alongUp - _tipRestUp;
+        float scale = Mathf.Clamp01(TipScale);
+        Vector3 correction = (right * swayRight + up * swayUp) * (scale - 1f);
+        if (correction.sqrMagnitude < 0.00000004f)
+            return;
+
+        Vector3 tail = weapon.position;
+        Vector3 fromTail = muzzle.position - tail;
+        Vector3 toTail = fromTail + correction;
+        if (fromTail.sqrMagnitude < 0.0001f || toTail.sqrMagnitude < 0.0001f)
+            return;
+
+        Quaternion turn = Quaternion.FromToRotation(fromTail, toTail);
+        if (Quaternion.Angle(Quaternion.identity, turn) > 8f)
+            return;
+
+        foreach (Transform arm in Upperarms)
+        {
+            if (arm != null)
+                TurnAround(arm, tail, turn);
+        }
+
+        if (!weaponUnderArm)
+            TurnAround(weapon, tail, turn);
+    }
+
+    private static void TurnAround(Transform target, Vector3 pivot, Quaternion turn)
+    {
+        target.position = pivot + turn * (target.position - pivot);
+        target.rotation = turn * target.rotation;
     }
 
     private static float SightRelief(ProceduralWeaponAnimation animation, Transform bone)
@@ -371,6 +460,7 @@ internal static class AimArms
     {
         _blendAiming = false;
         _blendSightId = 0;
+        _tipReady = false;
         _blend = 1f;
         _offset = Vector3.zero;
         _blendFrom = Vector3.zero;
