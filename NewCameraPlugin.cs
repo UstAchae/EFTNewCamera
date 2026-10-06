@@ -12,28 +12,20 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "新镜头";
-    public const string PluginVersion = "0.1.44";
+    public const string PluginVersion = "0.1.45";
 
     private void Awake()
     {
         ConfigEntry<bool> enabled = Config.Bind("新镜头", "总开关", false,
             "打开后使用第三人称骨架，并把游戏镜头挂在人物头部。");
         AimArms.Install();
+        AimQuiet.Install();
         FirstPersonAudio.Install();
         NewCameraSwitch.Enabled = enabled.Value;
         enabled.SettingChanged += (_, _) => NewCameraSwitch.Enabled = enabled.Value;
         BindDirection();
         BindPosition();
         BindAimDistance();
-        BindTipScale();
-    }
-
-    private void BindTipScale()
-    {
-        ConfigEntry<float> scale = Config.Bind("瞄准", "尖端收束", 0.5f,
-            new ConfigDescription("瞄准时枪口摆动轮廓的大小。形状和原来相似。1 是原来的轮廓，0 收到一个点。", new AcceptableValueRange<float>(0f, 1f)));
-        scale.SettingChanged += (_, _) => AimArms.TipScale = scale.Value;
-        AimArms.TipScale = scale.Value;
     }
 
     private void BindDirection()
@@ -157,6 +149,7 @@ internal static class NewCameraSwitch
             {
                 OpticPicture.RestorePose();
                 OpticPicture.Release();
+                AimQuiet.Restore();
                 AimArms.Release(player);
                 if (player.PointOfView != EPointOfView.FirstPerson)
                     player.PointOfView = EPointOfView.FirstPerson;
@@ -172,6 +165,7 @@ internal static class NewCameraSwitch
             player.PointOfView = EPointOfView.ThirdPerson;
         HeadMotion.Apply(player);
         AimArms.Apply(player);
+        AimQuiet.Apply(player);
         _applied = true;
     }
 
