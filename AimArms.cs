@@ -24,10 +24,14 @@ internal static class AimArms
 
     internal static float ForwardDistance;
     internal static float WalkScale = 1f;
+    internal static float WalkLift;
 
     private const float WalkRestSeconds = 0.7f;
     private const float WalkSnapMeters = 0.02f;
     private const float WalkMoveSpeed = 0.15f;
+    private const float WalkHeightSeconds = 0.45f;
+    private const float WalkHeightFrameSnap = 0.04f;
+    private const float WalkHeightBand = 0.08f;
 
     private static bool _suppress;
     private static bool _blendAiming;
@@ -49,6 +53,9 @@ internal static class AimArms
     private static bool _walkRestReady;
     private static Vector3 _walkRest;
     private static Vector3 _walkLast;
+    private static bool _heightReady;
+    private static float _heightRest;
+    private static float _heightLast;
 
     internal static void Install()
     {
@@ -128,14 +135,14 @@ internal static class AimArms
         if (!aiming && !_blendAiming && _offset.sqrMagnitude < 0.00000001f && _blend >= 1f)
         {
             _hasLaserDisplacement = false;
-            _walkRestReady = false;
+            ClearWalkFilter();
             return;
         }
 
         if (bones == null)
         {
             _hasLaserDisplacement = false;
-            _walkRestReady = false;
+            ClearWalkFilter();
             return;
         }
 
@@ -206,9 +213,66 @@ internal static class AimArms
         }
 
         if (aiming && sight != null && weapon != null && _blend >= 1f)
+        {
             ReduceWalkAroundAim(sight, weapon, weaponUnderArm, cameraRotation);
+            ReduceWalkHeight(player, sight, weapon, weaponUnderArm);
+        }
         else
-            _walkRestReady = false;
+            ClearWalkFilter();
+    }
+
+    private static void ClearWalkFilter()
+    {
+        _walkRestReady = false;
+        _heightReady = false;
+        WalkLift = 0f;
+    }
+
+    private static void ReduceWalkHeight(Player player, Transform sight, Transform weapon, bool weaponUnderArm)
+    {
+        WalkLift = 0f;
+        float speed = player.MovementContext != null ? player.MovementContext.SmoothedCharacterMovementSpeed : 0f;
+        float scale = Mathf.Clamp01(WalkScale);
+        if (speed < WalkMoveSpeed || scale >= 0.999f)
+        {
+            _heightReady = false;
+            return;
+        }
+
+        float offset = sight.position.y - ((Component)player).transform.position.y;
+        if (!_heightReady)
+        {
+            _heightRest = offset;
+            _heightLast = offset;
+            _heightReady = true;
+            return;
+        }
+
+        if (Mathf.Abs(offset - _heightLast) > WalkHeightFrameSnap || Mathf.Abs(offset - _heightRest) > WalkHeightBand)
+        {
+            _heightRest = offset;
+            _heightLast = offset;
+            return;
+        }
+
+        _heightLast = offset;
+        float follow = 1f - Mathf.Exp(-Time.deltaTime / WalkHeightSeconds);
+        _heightRest = Mathf.Lerp(_heightRest, offset, follow);
+        float shift = (_heightRest - offset) * (1f - scale);
+        if (Mathf.Abs(shift) < 0.0001f)
+            return;
+
+        Vector3 lift = Vector3.up * shift;
+        foreach (Transform arm in Upperarms)
+        {
+            if (arm != null)
+                arm.position += lift;
+        }
+
+        if (!weaponUnderArm)
+            weapon.position += lift;
+        _laserDisplacement += lift;
+        WalkLift = shift;
     }
 
     private static void ReduceWalkAroundAim(Transform sight, Transform weapon, bool weaponUnderArm, Quaternion cameraRotation)
@@ -458,7 +522,7 @@ internal static class AimArms
         _blend = 1f;
         _offset = Vector3.zero;
         _blendFrom = Vector3.zero;
-        _walkRestReady = false;
+        ClearWalkFilter();
         RestoreSkins();
         if (!_suppress)
             return;

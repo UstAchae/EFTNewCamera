@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "新镜头";
-    public const string PluginVersion = "0.1.49";
+    public const string PluginVersion = "0.1.50";
 
     private void Awake()
     {
@@ -32,7 +32,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
     private void BindWalkScale()
     {
         ConfigEntry<float> scale = Config.Bind("瞄准", "走路摆动", 1f,
-            new ConfigDescription("瞄准走路时，枪绕瞄准点在世界里的摆动。1 是原来的幅度，0 是去掉这份摆动。瞄具仍留在瞄准点上。", new AcceptableValueRange<float>(0f, 1f)));
+            new ConfigDescription("瞄准走路时，枪相对世界的摆动，包括上下起伏。1 是原来的幅度，0 是去掉这份摆动。", new AcceptableValueRange<float>(0f, 1f)));
         scale.SettingChanged += (_, _) => AimArms.WalkScale = scale.Value;
         AimArms.WalkScale = scale.Value;
     }
@@ -212,7 +212,9 @@ internal static class NewCameraSwitch
                 HeadAnchor.Resolve(head, aiming, out Vector3 gunHeadPosition, out Quaternion gunHeadRotation);
                 Quaternion gunRotation = CameraDirection.Resolve(gunHeadRotation);
                 Vector3 gunPosition = CameraPosition.Resolve(gunHeadPosition, gunRotation);
+                AimArms.WalkLift = 0f;
                 AimArms.AlignToCamera(player, gunPosition, gunRotation);
+                _posePosition += Vector3.up * AimArms.WalkLift;
                 _poseFrame = Time.frameCount;
             }
         }
