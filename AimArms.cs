@@ -23,7 +23,6 @@ internal static class AimArms
     private const float BlendSeconds = 0.2f;
 
     internal static float ForwardDistance;
-    internal static float WalkScale = 1f;
 
     private static bool _suppress;
     private static bool _blendAiming;
@@ -42,8 +41,6 @@ internal static class AimArms
     private static int _skinOwnerId;
     private static readonly List<Transform> Upperarms = new();
     private static readonly List<SkinState> Skins = new();
-    private static bool _lockReady;
-    private static Quaternion _lockOffset;
 
     internal static void Install()
     {
@@ -104,14 +101,12 @@ internal static class AimArms
         bool aiming = player.HandsController != null && player.HandsController.IsAiming;
         int sightId = 0;
         Vector3 target = Vector3.zero;
-        Transform? sight = null;
         if (aiming && bones != null)
         {
             ProceduralWeaponAnimation? animation = player.ProceduralWeaponAnimation;
             Transform? bone = animation != null && animation.ScopeAimTransforms != null && animation.ScopeAimTransforms.Count > 0
                 ? animation.CurrentScope?.Bone
                 : null;
-            sight = bone;
             if (bone != null && animation != null)
             {
                 sightId = bone.GetInstanceID();
@@ -123,14 +118,12 @@ internal static class AimArms
         if (!aiming && !_blendAiming && _offset.sqrMagnitude < 0.00000001f && _blend >= 1f)
         {
             _hasLaserDisplacement = false;
-            _lockReady = false;
             return;
         }
 
         if (bones == null)
         {
             _hasLaserDisplacement = false;
-            _lockReady = false;
             return;
         }
 
@@ -140,7 +133,6 @@ internal static class AimArms
             _blend = 0f;
             _blendAiming = aiming;
             _blendSightId = sightId;
-            _lockReady = false;
         }
 
         if (_blend < 1f)
@@ -185,66 +177,15 @@ internal static class AimArms
         }
 
         Transform? weapon = bones.Weapon_Root_Anim;
-        bool weaponUnderArm = false;
-        if (weapon != null)
-        {
-            foreach (Transform arm in Upperarms)
-            {
-                if (arm != null && weapon.IsChildOf(arm))
-                {
-                    weaponUnderArm = true;
-                    break;
-                }
-            }
-
-            if (!weaponUnderArm)
-                weapon.position += displacement;
-        }
-
-        if (aiming && sight != null && weapon != null && _blend >= 1f)
-            LockSightToCamera(sight, weapon, weaponUnderArm, cameraRotation);
-        else
-            _lockReady = false;
-    }
-
-    private static void LockSightToCamera(Transform sight, Transform weapon, bool weaponUnderArm, Quaternion cameraRotation)
-    {
-        float scale = Mathf.Clamp01(WalkScale);
-        if (scale >= 0.999f)
-        {
-            _lockReady = false;
+        if (weapon == null)
             return;
-        }
-
-        if (!_lockReady)
-        {
-            _lockOffset = Quaternion.Inverse(cameraRotation) * weapon.rotation;
-            _lockReady = true;
-            return;
-        }
-
-        Quaternion correction = cameraRotation * _lockOffset * Quaternion.Inverse(weapon.rotation);
-        correction = Quaternion.Slerp(Quaternion.identity, correction, 1f - scale);
-        if (Quaternion.Angle(Quaternion.identity, correction) < 0.02f)
-            return;
-
-        Vector3 pivot = sight.position;
-        Vector3 before = weapon.position;
-        if (!weaponUnderArm)
-            RotateAround(weapon, pivot, correction);
         foreach (Transform arm in Upperarms)
         {
-            if (arm != null)
-                RotateAround(arm, pivot, correction);
+            if (arm != null && weapon.IsChildOf(arm))
+                return;
         }
 
-        _laserDisplacement += weapon.position - before;
-    }
-
-    private static void RotateAround(Transform target, Vector3 pivot, Quaternion correction)
-    {
-        target.position = pivot + correction * (target.position - pivot);
-        target.rotation = correction * target.rotation;
+        weapon.position += displacement;
     }
 
     private static float SightRelief(ProceduralWeaponAnimation animation, Transform bone)
@@ -433,7 +374,6 @@ internal static class AimArms
         _blend = 1f;
         _offset = Vector3.zero;
         _blendFrom = Vector3.zero;
-        _lockReady = false;
         RestoreSkins();
         if (!_suppress)
             return;
