@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "新镜头";
-    public const string PluginVersion = "0.1.61";
+    public const string PluginVersion = "0.1.62";
 
     private void Awake()
     {
@@ -25,24 +25,6 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         BindDirection();
         BindPosition();
         BindAimDistance();
-        BindCone();
-    }
-
-    private void BindCone()
-    {
-        ConfigEntry<bool> cone = Config.Bind("瞄准", "锥体静止", true,
-            "瞄准时枪停在鼠标指的方向。头和走路的晃留在镜头上。关掉则枪跟着镜头。");
-        ConfigEntry<float> trajectory = Config.Bind("瞄准", "锥体轨迹", 0.35f,
-            new ConfigDescription("枪相对鼠标方向的晃动，只用游戏已经算出的双手位置、双手旋转和摇摆弹簧。0 是一个点，1 是这三根弹簧的原样。", new AcceptableValueRange<float>(0f, 1f)));
-        void Refresh()
-        {
-            AimArms.Cone = cone.Value;
-            AimArms.Trajectory = trajectory.Value;
-        }
-
-        cone.SettingChanged += (_, _) => Refresh();
-        trajectory.SettingChanged += (_, _) => Refresh();
-        Refresh();
     }
 
     private void BindDirection()
