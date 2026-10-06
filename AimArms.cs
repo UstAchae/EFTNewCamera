@@ -23,6 +23,8 @@ internal static class AimArms
     private const float BlendSeconds = 0.2f;
 
     internal static float ForwardDistance;
+    internal static bool Cone = true;
+    internal static float Trajectory = 0.35f;
 
     private static bool _suppress;
     private static bool _blendAiming;
@@ -41,6 +43,14 @@ internal static class AimArms
     private static int _skinOwnerId;
     private static readonly List<Transform> Upperarms = new();
     private static readonly List<SkinState> Skins = new();
+    private static bool _axisHeld;
+    private static Quaternion _axis = Quaternion.identity;
+    private static float _axisYaw;
+    private static float _axisPitch;
+    private static Vector3 _axisLocal;
+    private static float _axisPose;
+    private static bool _axisProne;
+    private static int _axisSight;
 
     internal static void Install()
     {
@@ -110,10 +120,19 @@ internal static class AimArms
             if (bone != null && animation != null)
             {
                 sightId = bone.GetInstanceID();
+                if (Cone && HoldMouse(player, cameraPosition, cameraRotation, sightId, out Vector3 heldPosition, out Quaternion heldRotation))
+                {
+                    cameraPosition = heldPosition;
+                    cameraRotation = heldRotation;
+                }
+
                 float relief = SightRelief(animation, bone);
                 target = cameraPosition - bone.position + cameraRotation * new Vector3(0f, 0f, ForwardDistance + relief);
             }
         }
+
+        if (!aiming || !Cone)
+            _axisHeld = false;
 
         if (!aiming && !_blendAiming && _offset.sqrMagnitude < 0.00000001f && _blend >= 1f)
         {
@@ -177,15 +196,126 @@ internal static class AimArms
         }
 
         Transform? weapon = bones.Weapon_Root_Anim;
-        if (weapon == null)
-            return;
-        foreach (Transform arm in Upperarms)
+        bool weaponFollowsArm = false;
+        if (weapon != null)
         {
-            if (arm != null && weapon.IsChildOf(arm))
-                return;
+            foreach (Transform arm in Upperarms)
+            {
+                if (arm != null && weapon.IsChildOf(arm))
+                {
+                    weaponFollowsArm = true;
+                    break;
+                }
+            }
+
+            if (!weaponFollowsArm)
+                weapon.position += displacement;
         }
 
-        weapon.position += displacement;
+        if (aiming && Cone)
+            ApplySprings(player, weapon, cameraRotation, !weaponFollowsArm);
+    }
+
+    private static bool HoldMouse(Player player, Vector3 cameraPosition, Quaternion cameraRotation, int sightId, out Vector3 position, out Quaternion rotation)
+    {
+        position = cameraPosition;
+        rotation = cameraRotation;
+        MovementContext? context = player.MovementContext;
+        if (context == null)
+            return false;
+
+        Transform body = ((Component)player).transform;
+        float yaw = context.Yaw;
+        float pitch = context.Pitch;
+        float pose = context.PoseLevel;
+        bool prone = context.IsInPronePose;
+        if (!_axisHeld || sightId != _axisSight)
+        {
+            _axisHeld = true;
+            _axis = cameraRotation;
+            _axisYaw = yaw;
+            _axisPitch = pitch;
+            _axisLocal = body.InverseTransformPoint(cameraPosition);
+            _axisPose = pose;
+            _axisProne = prone;
+            _axisSight = sightId;
+        }
+        else
+        {
+            float deltaYaw = Mathf.DeltaAngle(_axisYaw, yaw);
+            float deltaPitch = Mathf.DeltaAngle(_axisPitch, pitch);
+            _axisYaw = yaw;
+            _axisPitch = pitch;
+            Quaternion yawed = Quaternion.AngleAxis(deltaYaw, Vector3.up) * _axis;
+            _axis = Quaternion.AngleAxis(deltaPitch, yawed * Vector3.right) * yawed;
+            if (_axisProne != prone || Mathf.Abs(pose - _axisPose) > 0.02f)
+            {
+                _axisLocal = body.InverseTransformPoint(cameraPosition);
+                _axisPose = pose;
+                _axisProne = prone;
+            }
+        }
+
+        position = body.TransformPoint(_axisLocal);
+        rotation = _axis;
+        return true;
+    }
+
+    private static void ApplySprings(Player player, Transform? weapon, Quaternion space, bool moveWeapon)
+    {
+        float scale = Mathf.Clamp01(Trajectory);
+        if (scale <= 0f)
+            return;
+
+        PlayerSpring? hands = player.ProceduralWeaponAnimation?.HandsContainer;
+        if (hands == null || hands.HandsPosition == null || hands.HandsRotation == null)
+            return;
+
+        Vector3 shift = space * (hands.HandsPosition.GetRelative() * scale);
+        Vector3 euler = hands.HandsRotation.GetRelative();
+        if (hands.SwaySpring != null)
+            euler += hands.SwaySpring.Value;
+        euler *= scale;
+        Quaternion turn = Quaternion.Euler(euler.x, 0f, euler.z) * Quaternion.Euler(0f, euler.y, 0f);
+        bool spin = Quaternion.Angle(turn, Quaternion.identity) > 0.01f;
+        Vector3 pivot = weapon != null ? weapon.TransformPoint(SpringPivot(player, hands)) : Vector3.zero;
+        foreach (Transform arm in Upperarms)
+        {
+            if (arm == null)
+                continue;
+
+            arm.position += shift;
+            if (!spin || weapon == null)
+                continue;
+
+            Vector3 offset = arm.position - pivot;
+            arm.position = pivot + turn * offset;
+            arm.rotation = turn * arm.rotation;
+        }
+
+        if (weapon == null || !moveWeapon)
+            return;
+
+        weapon.position += shift;
+        if (!spin)
+            return;
+
+        Vector3 weaponOffset = weapon.position - pivot;
+        weapon.position = pivot + turn * weaponOffset;
+        weapon.rotation = turn * weapon.rotation;
+    }
+
+    private static Vector3 SpringPivot(Player player, PlayerSpring hands)
+    {
+        ProceduralWeaponAnimation? animation = player.ProceduralWeaponAnimation;
+        if (animation != null && animation.IsMountedState)
+        {
+            return !animation.IsBipodUsed || animation.IsVerticalMounting
+                ? hands.MountingRotationCenter
+                : hands.MountingRotationCenterBipods;
+        }
+
+        return hands.RecoilPivot;
     }
 
     private static float SightRelief(ProceduralWeaponAnimation animation, Transform bone)
@@ -374,6 +504,7 @@ internal static class AimArms
         _blend = 1f;
         _offset = Vector3.zero;
         _blendFrom = Vector3.zero;
+        _axisHeld = false;
         RestoreSkins();
         if (!_suppress)
             return;
