@@ -23,8 +23,11 @@ internal static class AimArms
     private const float BlendSeconds = 0.2f;
 
     internal static float ForwardDistance;
-    internal static float Trajectory = 0.35f;
+    internal static float HoldSeconds = 0.6f;
 
+    private static bool _hasAimHold;
+    private static Quaternion _aimHoldResidual = Quaternion.identity;
+    private static float _aimHoldPitchSign = 1f;
     private static bool _suppress;
     private static bool _blendAiming;
     private static int _blendSightId;
@@ -194,71 +197,78 @@ internal static class AimArms
                 weapon.position += displacement;
         }
 
-        if (aiming)
-            ApplyTrajectory(player, weapon, !weaponFollowsArm);
     }
 
-    private static void ApplyTrajectory(Player player, Transform? weapon, bool moveWeapon)
+    internal static Quaternion HoldHead(Player player, Quaternion liveHeadRotation)
     {
-        float scale = Mathf.Clamp01(Trajectory);
-        if (scale <= 0f)
-            return;
-
-        PlayerSpring? hands = player.ProceduralWeaponAnimation?.HandsContainer;
-        if (hands?.HandsPosition == null || hands.HandsRotation == null)
-            return;
-
-        Vector3 shift = hands.HandsPosition.GetRelative() * scale;
-        Vector3 euler = hands.HandsRotation.GetRelative();
-        if (hands.SwaySpring != null)
-            euler += hands.SwaySpring.Value;
-        euler *= scale;
-        bool shiftArms = shift.sqrMagnitude > 0.0000000001f;
-        bool spin = euler.sqrMagnitude > 0.0000001f;
-        if (!shiftArms && !spin)
-            return;
-
-        Quaternion turn = Quaternion.Euler(euler.x, 0f, euler.z) * Quaternion.Euler(0f, euler.y, 0f);
-        Vector3 pivot = weapon != null ? weapon.TransformPoint(TrajectoryPivot(player, hands)) : Vector3.zero;
-        foreach (Transform arm in Upperarms)
+        float holdTime = HoldSeconds;
+        if (holdTime <= 0.0001f)
         {
-            if (arm == null)
-                continue;
-
-            if (shiftArms)
-                arm.position += arm.TransformDirection(shift);
-            if (!spin || weapon == null)
-                continue;
-
-            Vector3 offset = arm.position - pivot;
-            arm.position = pivot + turn * offset;
-            arm.rotation = turn * arm.rotation;
+            _hasAimHold = false;
+            return liveHeadRotation;
         }
 
-        if (weapon == null || !moveWeapon)
-            return;
+        if (!TryGetMouseLookRotation(player, liveHeadRotation, out Quaternion look))
+        {
+            _hasAimHold = false;
+            return liveHeadRotation;
+        }
 
-        if (shiftArms)
-            weapon.position += weapon.TransformDirection(shift);
-        if (!spin)
-            return;
+        // Mouse motion lives entirely in look, so it still turns the gun one to one.
+        // Walk and breath only show up in this residual, which is averaged away.
+        Quaternion residual = Quaternion.Inverse(look) * liveHeadRotation;
+        if (!_hasAimHold)
+        {
+            _aimHoldResidual = residual;
+            _hasAimHold = true;
+        }
+        else
+        {
+            float follow = 1f - Mathf.Exp(-Time.deltaTime / holdTime);
+            if (Quaternion.Angle(_aimHoldResidual, residual) > 12f)
+                follow = 1f;
+            _aimHoldResidual = Quaternion.Slerp(_aimHoldResidual, residual, follow);
+        }
 
-        Vector3 weaponOffset = weapon.position - pivot;
-        weapon.position = pivot + turn * weaponOffset;
-        weapon.rotation = turn * weapon.rotation;
+        return look * _aimHoldResidual;
     }
 
-    private static Vector3 TrajectoryPivot(Player player, PlayerSpring hands)
+    internal static void ClearHold()
     {
-        ProceduralWeaponAnimation? animation = player.ProceduralWeaponAnimation;
-        if (animation != null && animation.IsMountedState)
+        _hasAimHold = false;
+        _aimHoldResidual = Quaternion.identity;
+    }
+
+    private static bool TryGetMouseLookRotation(Player player, Quaternion liveHeadRotation, out Quaternion look)
+    {
+        look = Quaternion.identity;
+        float pitch;
+        float yaw;
+        try
         {
-            return !animation.IsBipodUsed || animation.IsVerticalMounting
-                ? hands.MountingRotationCenter
-                : hands.MountingRotationCenterBipods;
+            MovementContext? movement = player.MovementContext;
+            if (movement == null)
+                return false;
+
+            pitch = movement.Pitch;
+            yaw = movement.Yaw;
+        }
+        catch
+        {
+            return false;
         }
 
-        return hands.RecoilPivot;
+        if (Mathf.Abs(pitch) > 5f)
+        {
+            Quaternion positive = Quaternion.Euler(pitch, yaw, 0f);
+            Quaternion negative = Quaternion.Euler(-pitch, yaw, 0f);
+            _aimHoldPitchSign = Quaternion.Angle(positive, liveHeadRotation) <= Quaternion.Angle(negative, liveHeadRotation)
+                ? 1f
+                : -1f;
+        }
+
+        look = Quaternion.Euler(pitch * _aimHoldPitchSign, yaw, 0f);
+        return true;
     }
 
     private static float SightRelief(ProceduralWeaponAnimation animation, Transform bone)
@@ -447,6 +457,7 @@ internal static class AimArms
         _blend = 1f;
         _offset = Vector3.zero;
         _blendFrom = Vector3.zero;
+        ClearHold();
         RestoreSkins();
         if (!_suppress)
             return;

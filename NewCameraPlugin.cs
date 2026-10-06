@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "新镜头";
-    public const string PluginVersion = "0.1.63";
+    public const string PluginVersion = "0.1.64";
 
     private void Awake()
     {
@@ -25,15 +25,15 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         BindDirection();
         BindPosition();
         BindAimDistance();
-        BindTrajectory();
+        BindAimHold();
     }
 
-    private void BindTrajectory()
+    private void BindAimHold()
     {
-        ConfigEntry<float> trajectory = Config.Bind("瞄准", "锥体轨迹", 0.35f,
-            new ConfigDescription("瞄准点不动。枪的晃动只缩放游戏已经算出的双手位置、双手旋转和摇摆弹簧。0 是一个点，1 是这三根弹簧的原样。", new AcceptableValueRange<float>(0f, 1f)));
-        trajectory.SettingChanged += (_, _) => AimArms.Trajectory = trajectory.Value;
-        AimArms.Trajectory = trajectory.Value;
+        ConfigEntry<float> hold = Config.Bind("瞄准", "静止时间", 0.6f,
+            new ConfigDescription("瞄准时枪的位置跟着头部镜头走，前端和尾端一起摆。指向只跟鼠标走，走路和呼吸的差按这个时间均掉，尖端收在目标上。0 表示关闭，指向完全跟着镜头。", new AcceptableValueRange<float>(0f, 2f)));
+        hold.SettingChanged += (_, _) => AimArms.HoldSeconds = hold.Value;
+        AimArms.HoldSeconds = hold.Value;
     }
 
     private void BindDirection()
@@ -171,9 +171,16 @@ internal static class NewCameraSwitch
             Transform? head = player.PlayerBones?.Head?.Original;
             if (head != null)
             {
-                _poseRotation = CameraDirection.Resolve(head.rotation);
+                Quaternion liveHead = head.rotation;
+                _poseRotation = CameraDirection.Resolve(liveHead);
                 _posePosition = CameraPosition.Resolve(head.position, _poseRotation);
-                AimArms.AlignToCamera(player, _posePosition, _poseRotation);
+                bool aiming = player.HandsController != null && player.HandsController.IsAiming;
+                Quaternion aimRotation = _poseRotation;
+                if (aiming)
+                    aimRotation = CameraDirection.Resolve(AimArms.HoldHead(player, liveHead));
+                else
+                    AimArms.ClearHold();
+                AimArms.AlignToCamera(player, _posePosition, aimRotation);
                 _poseFrame = Time.frameCount;
             }
         }
