@@ -24,14 +24,6 @@ internal static class AimArms
 
     internal static float ForwardDistance;
     internal static float WalkScale = 1f;
-    internal static float WalkLift;
-
-    private const float WalkRestSeconds = 0.7f;
-    private const float WalkSnapMeters = 0.02f;
-    private const float WalkMoveSpeed = 0.15f;
-    private const float WalkHeightSeconds = 0.45f;
-    private const float WalkHeightFrameSnap = 0.04f;
-    private const float WalkHeightBand = 0.08f;
 
     private static bool _suppress;
     private static bool _blendAiming;
@@ -50,12 +42,8 @@ internal static class AimArms
     private static int _skinOwnerId;
     private static readonly List<Transform> Upperarms = new();
     private static readonly List<SkinState> Skins = new();
-    private static bool _walkRestReady;
-    private static Vector3 _walkRest;
-    private static Vector3 _walkLast;
-    private static bool _heightReady;
-    private static float _heightRest;
-    private static float _heightLast;
+    private static bool _lockReady;
+    private static Quaternion _lockOffset;
 
     internal static void Install()
     {
@@ -135,14 +123,14 @@ internal static class AimArms
         if (!aiming && !_blendAiming && _offset.sqrMagnitude < 0.00000001f && _blend >= 1f)
         {
             _hasLaserDisplacement = false;
-            ClearWalkFilter();
+            _lockReady = false;
             return;
         }
 
         if (bones == null)
         {
             _hasLaserDisplacement = false;
-            ClearWalkFilter();
+            _lockReady = false;
             return;
         }
 
@@ -152,6 +140,7 @@ internal static class AimArms
             _blend = 0f;
             _blendAiming = aiming;
             _blendSightId = sightId;
+            _lockReady = false;
         }
 
         if (_blend < 1f)
@@ -213,111 +202,33 @@ internal static class AimArms
         }
 
         if (aiming && sight != null && weapon != null && _blend >= 1f)
-        {
-            ReduceWalkAroundAim(sight, weapon, weaponUnderArm, cameraRotation);
-            ReduceWalkHeight(player, sight, weapon, weaponUnderArm);
-        }
+            LockSightToCamera(sight, weapon, weaponUnderArm, cameraRotation);
         else
-            ClearWalkFilter();
+            _lockReady = false;
     }
 
-    private static void ClearWalkFilter()
+    private static void LockSightToCamera(Transform sight, Transform weapon, bool weaponUnderArm, Quaternion cameraRotation)
     {
-        _walkRestReady = false;
-        _heightReady = false;
-        WalkLift = 0f;
-    }
-
-    private static void ReduceWalkHeight(Player player, Transform sight, Transform weapon, bool weaponUnderArm)
-    {
-        WalkLift = 0f;
-        float speed = player.MovementContext != null ? player.MovementContext.SmoothedCharacterMovementSpeed : 0f;
         float scale = Mathf.Clamp01(WalkScale);
-        if (speed < WalkMoveSpeed || scale >= 0.999f)
+        if (scale >= 0.999f)
         {
-            _heightReady = false;
+            _lockReady = false;
             return;
         }
 
-        float offset = sight.position.y - ((Component)player).transform.position.y;
-        if (!_heightReady)
+        if (!_lockReady)
         {
-            _heightRest = offset;
-            _heightLast = offset;
-            _heightReady = true;
+            _lockOffset = Quaternion.Inverse(cameraRotation) * weapon.rotation;
+            _lockReady = true;
             return;
         }
 
-        if (Mathf.Abs(offset - _heightLast) > WalkHeightFrameSnap || Mathf.Abs(offset - _heightRest) > WalkHeightBand)
-        {
-            _heightRest = offset;
-            _heightLast = offset;
-            return;
-        }
-
-        _heightLast = offset;
-        float follow = 1f - Mathf.Exp(-Time.deltaTime / WalkHeightSeconds);
-        _heightRest = Mathf.Lerp(_heightRest, offset, follow);
-        float shift = (_heightRest - offset) * (1f - scale);
-        if (Mathf.Abs(shift) < 0.0001f)
-            return;
-
-        Vector3 lift = Vector3.up * shift;
-        foreach (Transform arm in Upperarms)
-        {
-            if (arm != null)
-                arm.position += lift;
-        }
-
-        if (!weaponUnderArm)
-            weapon.position += lift;
-        _laserDisplacement += lift;
-        WalkLift = shift;
-    }
-
-    private static void ReduceWalkAroundAim(Transform sight, Transform weapon, bool weaponUnderArm, Quaternion cameraRotation)
-    {
-        Player? player = Singleton<GameWorld>.Instance?.MainPlayer;
-        float speed = player?.MovementContext != null ? player.MovementContext.SmoothedCharacterMovementSpeed : 0f;
-        float scale = Mathf.Clamp01(WalkScale);
-        if (speed < WalkMoveSpeed || scale >= 0.999f)
-        {
-            _walkRestReady = false;
-            return;
-        }
-
-        Vector3 pivot = sight.position;
-        Vector3 fromPivot = weapon.position - pivot;
-        if (fromPivot.sqrMagnitude < 0.0004f)
-            return;
-
-        Vector3 local = Quaternion.Inverse(cameraRotation) * fromPivot;
-        if (!_walkRestReady)
-        {
-            _walkRest = local;
-            _walkLast = local;
-            _walkRestReady = true;
-            return;
-        }
-
-        if (Vector3.Distance(local, _walkLast) > WalkSnapMeters)
-        {
-            _walkRest = local;
-            _walkLast = local;
-            return;
-        }
-
-        _walkLast = local;
-        float follow = 1f - Mathf.Exp(-Time.deltaTime / WalkRestSeconds);
-        _walkRest = Vector3.Lerp(_walkRest, local, follow);
-        Vector3 restWorld = cameraRotation * _walkRest;
-        if (restWorld.sqrMagnitude < 0.0004f)
-            return;
-
-        Quaternion correction = Quaternion.Slerp(Quaternion.identity, Quaternion.FromToRotation(fromPivot, restWorld), 1f - scale);
+        Quaternion correction = cameraRotation * _lockOffset * Quaternion.Inverse(weapon.rotation);
+        correction = Quaternion.Slerp(Quaternion.identity, correction, 1f - scale);
         if (Quaternion.Angle(Quaternion.identity, correction) < 0.02f)
             return;
 
+        Vector3 pivot = sight.position;
         Vector3 before = weapon.position;
         if (!weaponUnderArm)
             RotateAround(weapon, pivot, correction);
@@ -522,7 +433,7 @@ internal static class AimArms
         _blend = 1f;
         _offset = Vector3.zero;
         _blendFrom = Vector3.zero;
-        ClearWalkFilter();
+        _lockReady = false;
         RestoreSkins();
         if (!_suppress)
             return;
