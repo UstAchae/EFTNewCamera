@@ -26,8 +26,7 @@ internal static class AimArms
     internal static float NeckBlend = 0.5f;
 
     private const float NeckSeconds = 0.45f;
-    private const float NeckSnapDegrees = 20f;
-    private const float NeckSnapMeters = 0.1f;
+    private const float NeckTurnDegrees = 1.5f;
 
     private static bool _suppress;
     private static bool _blendAiming;
@@ -47,13 +46,15 @@ internal static class AimArms
     private static readonly List<Transform> Upperarms = new();
     private static readonly List<SkinState> Skins = new();
     private static bool _neckReady;
-    private static Quaternion _neckOffset;
-    private static Vector3 _neckLocal;
+    private static Quaternion _smoothRotation;
+    private static Vector3 _smoothLocal;
+    private static Quaternion _lastRotation;
     private static Quaternion _steadyRotation;
     private static bool _barrelReady;
     private static Quaternion _barrelHold;
     private static bool _opticReady;
-    private static Quaternion _opticOffset;
+    private static Quaternion _opticSmooth;
+    private static Quaternion _lastOpticRotation;
     private static Quaternion _opticDesired;
     private static bool _opticHeld;
     private static Quaternion _opticSaved;
@@ -116,40 +117,37 @@ internal static class AimArms
     internal static void SteadyAim(Player player, ref Vector3 position, ref Quaternion rotation)
     {
         bool aiming = player.HandsController != null && player.HandsController.IsAiming;
-        if (!aiming || player.MovementContext == null)
+        if (!aiming)
         {
             _neckReady = false;
             _opticReady = false;
             return;
         }
 
-        Quaternion look = Quaternion.Euler(player.MovementContext.Pitch, player.MovementContext.Yaw, 0f);
-        Quaternion offset = Quaternion.Inverse(look) * rotation;
         Vector3 local = ((Component)player).transform.InverseTransformPoint(position);
         if (!_neckReady)
         {
-            _neckOffset = offset;
-            _neckLocal = local;
+            _smoothRotation = rotation;
+            _smoothLocal = local;
+            _lastRotation = rotation;
             _steadyRotation = rotation;
             _neckReady = true;
             return;
         }
 
-        if (Quaternion.Angle(offset, _neckOffset) > NeckSnapDegrees || Vector3.Distance(local, _neckLocal) > NeckSnapMeters)
-        {
-            _neckOffset = offset;
-            _neckLocal = local;
-            _steadyRotation = rotation;
-            return;
-        }
-
+        Quaternion turn = rotation * Quaternion.Inverse(_lastRotation);
+        _lastRotation = rotation;
         float follow = 1f - Mathf.Exp(-Time.deltaTime / NeckSeconds);
-        _neckOffset = Quaternion.Slerp(_neckOffset, offset, follow);
-        _neckLocal = Vector3.Lerp(_neckLocal, local, follow);
-        _steadyRotation = look * _neckOffset;
+        if (Quaternion.Angle(Quaternion.identity, turn) > NeckTurnDegrees)
+            _smoothRotation = turn * _smoothRotation;
+        else
+            _smoothRotation = Quaternion.Slerp(_smoothRotation, rotation, follow);
+
+        _smoothLocal = Vector3.Lerp(_smoothLocal, local, follow);
+        _steadyRotation = _smoothRotation;
         float blend = Mathf.Clamp01(NeckBlend);
-        rotation = Quaternion.Slerp(rotation, _steadyRotation, blend);
-        position = Vector3.Lerp(position, ((Component)player).transform.TransformPoint(_neckLocal), blend);
+        rotation = Quaternion.Slerp(rotation, _smoothRotation, blend);
+        position = Vector3.Lerp(position, ((Component)player).transform.TransformPoint(_smoothLocal), blend);
     }
 
     internal static void AlignToCamera(Player player, Vector3 cameraPosition, Quaternion cameraRotation)
@@ -264,7 +262,7 @@ internal static class AimArms
     internal static void HoldOptic(Camera camera, Player player)
     {
         bool aiming = player.HandsController != null && player.HandsController.IsAiming;
-        if (!aiming || player.MovementContext == null)
+        if (!aiming)
         {
             _opticReady = false;
             return;
@@ -276,24 +274,24 @@ internal static class AimArms
             _opticSaved = camera.transform.rotation;
             _opticCamera = camera;
             _opticHeld = true;
-            Quaternion look = Quaternion.Euler(player.MovementContext.Pitch, player.MovementContext.Yaw, 0f);
-            Quaternion offset = Quaternion.Inverse(look) * _opticSaved;
             if (!_opticReady)
             {
-                _opticOffset = offset;
+                _opticSmooth = _opticSaved;
+                _lastOpticRotation = _opticSaved;
                 _opticReady = true;
-            }
-            else if (Quaternion.Angle(offset, _opticOffset) <= NeckSnapDegrees)
-            {
-                float follow = 1f - Mathf.Exp(-Time.deltaTime / NeckSeconds);
-                _opticOffset = Quaternion.Slerp(_opticOffset, offset, follow);
             }
             else
             {
-                _opticOffset = offset;
+                Quaternion turn = _opticSaved * Quaternion.Inverse(_lastOpticRotation);
+                _lastOpticRotation = _opticSaved;
+                float follow = 1f - Mathf.Exp(-Time.deltaTime / NeckSeconds);
+                if (Quaternion.Angle(Quaternion.identity, turn) > NeckTurnDegrees)
+                    _opticSmooth = turn * _opticSmooth;
+                else
+                    _opticSmooth = Quaternion.Slerp(_opticSmooth, _opticSaved, follow);
             }
 
-            _opticDesired = look * _opticOffset;
+            _opticDesired = _opticSmooth;
         }
 
         camera.transform.rotation = Quaternion.Slerp(_opticSaved, _opticDesired, Mathf.Clamp01(NeckBlend));
