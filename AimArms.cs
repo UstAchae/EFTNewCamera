@@ -20,9 +20,14 @@ internal static class AimArms
         public bool UpdateWhenOffscreen;
     }
 
+    private const float ConeTipDistance = 100f;
+    private const float SwaySnapMeters = 0.15f;
+
     internal static float ForwardDistance;
     internal static float HoldSeconds = 0.6f;
 
+    private static bool _hasSwayMean;
+    private static Vector3 _swayMean;
     private static bool _hasAimHold;
     private static Quaternion _aimHoldResidual = Quaternion.identity;
     private static float _aimHoldPitchSign = 1f;
@@ -82,14 +87,15 @@ internal static class AimArms
         if (head == null)
             return;
 
-        Quaternion cameraRotation = CameraDirection.Resolve(head.rotation);
-        Vector3 cameraPosition = CameraPosition.Resolve(head.position, cameraRotation);
+        Quaternion liveRotation = CameraDirection.Resolve(head.rotation);
+        Vector3 cameraPosition = CameraPosition.Resolve(head.position, liveRotation);
         bool aiming = player.HandsController != null && player.HandsController.IsAiming;
+        Quaternion aimRotation = liveRotation;
         if (aiming)
-            cameraRotation = HoldAim(player, cameraRotation);
+            aimRotation = HoldAim(player, liveRotation);
         else
             ClearHold();
-        AlignToCamera(player, cameraPosition, cameraRotation);
+        AlignToCamera(player, cameraPosition, aimRotation, liveRotation);
     }
 
     private static void PatchFieldOfView(Harmony harmony)
@@ -128,7 +134,7 @@ internal static class AimArms
         player.MovementContext?.PlayerAnimator?.SetAiming(false);
     }
 
-    internal static void AlignToCamera(Player player, Vector3 cameraPosition, Quaternion cameraRotation)
+    internal static void AlignToCamera(Player player, Vector3 cameraPosition, Quaternion cameraRotation, Quaternion liveRotation)
     {
         PlayerBones bones = player.PlayerBones;
         bool aiming = player.HandsController != null && player.HandsController.IsAiming;
@@ -147,10 +153,15 @@ internal static class AimArms
                 float relief = SightRelief(animation, bone);
                 Vector3 boneLocalPosition = Quaternion.Inverse(weapon.rotation) * (bone.position - weapon.position);
                 Quaternion boneLocalRotation = Quaternion.Inverse(weapon.rotation) * bone.rotation;
-                Quaternion sightRotation = AlignSightToCamera(bone.rotation, cameraRotation);
-                targetWeaponRotation = sightRotation * Quaternion.Inverse(boneLocalRotation);
                 Vector3 sightPoint = cameraPosition + cameraRotation * new Vector3(0f, 0f, ForwardDistance + relief);
-                Vector3 targetWeaponPosition = sightPoint - targetWeaponRotation * boneLocalPosition;
+                // The rear keeps the sway the game animated for the sight; the barrel is aimed
+                // from there at a far point on the held aim line, so the swing narrows toward the tip.
+                Vector3 animatedSight = Quaternion.Inverse(liveRotation) * (bone.position - cameraPosition);
+                Vector3 rear = sightPoint + liveRotation * TrackSway(animatedSight);
+                Vector3 tip = cameraPosition + cameraRotation * new Vector3(0f, 0f, ConeTipDistance);
+                Quaternion sightRotation = AlignSightTo(bone.rotation, (tip - rear).normalized);
+                targetWeaponRotation = sightRotation * Quaternion.Inverse(boneLocalRotation);
+                Vector3 targetWeaponPosition = rear - targetWeaponRotation * boneLocalPosition;
                 target = targetWeaponPosition - weapon.position;
                 placeWeapon = true;
             }
@@ -170,9 +181,28 @@ internal static class AimArms
 
     }
 
-    private static Quaternion AlignSightToCamera(Quaternion sightRotation, Quaternion cameraRotation)
+    private static Vector3 TrackSway(Vector3 animatedSight)
     {
-        Vector3 cameraForward = cameraRotation * Vector3.forward;
+        float holdTime = HoldSeconds;
+        if (holdTime <= 0.0001f)
+        {
+            _hasSwayMean = false;
+            return Vector3.zero;
+        }
+
+        if (!_hasSwayMean || (animatedSight - _swayMean).sqrMagnitude > SwaySnapMeters * SwaySnapMeters)
+        {
+            _swayMean = animatedSight;
+            _hasSwayMean = true;
+            return Vector3.zero;
+        }
+
+        _swayMean = Vector3.Lerp(_swayMean, animatedSight, 1f - Mathf.Exp(-Time.deltaTime / holdTime));
+        return animatedSight - _swayMean;
+    }
+
+    private static Quaternion AlignSightTo(Quaternion sightRotation, Vector3 cameraForward)
+    {
         Vector3 fromForward = sightRotation * Vector3.forward;
         float bestDot = Vector3.Dot(fromForward, cameraForward);
         Vector3[] locals =
@@ -229,6 +259,7 @@ internal static class AimArms
 
     internal static void ClearHold()
     {
+        _hasSwayMean = false;
         _hasAimHold = false;
         _aimHoldResidual = Quaternion.identity;
     }

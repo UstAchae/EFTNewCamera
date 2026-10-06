@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "新镜头";
-    public const string PluginVersion = "0.1.67";
+    public const string PluginVersion = "0.1.68";
 
     private void Awake()
     {
@@ -31,7 +31,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
     private void BindAimHold()
     {
         ConfigEntry<float> hold = Config.Bind("瞄准", "静止时间", 0.6f,
-            new ConfigDescription("瞄准时枪的位置跟着头部镜头走，前端和尾端一起摆。指向只跟鼠标走，走路和呼吸的差按这个时间均掉，尖端收在目标上。0 表示关闭，指向完全跟着镜头。", new AcceptableValueRange<float>(0f, 2f)));
+            new ConfigDescription("瞄准时枪尖停在鼠标指向的目标上，尾端照游戏原来的幅度摆，越往前摆得越小。走路和呼吸的差按这个时间均掉。0 表示关闭，枪完全跟着镜头。", new AcceptableValueRange<float>(0f, 2f)));
         hold.SettingChanged += (_, _) => AimArms.HoldSeconds = hold.Value;
         AimArms.HoldSeconds = hold.Value;
     }
