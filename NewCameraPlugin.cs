@@ -12,14 +12,13 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "新镜头";
-    public const string PluginVersion = "0.1.53";
+    public const string PluginVersion = "0.1.41";
 
     private void Awake()
     {
         ConfigEntry<bool> enabled = Config.Bind("新镜头", "总开关", false,
             "打开后使用第三人称骨架，并把游戏镜头挂在人物头部。");
         AimArms.Install();
-        AimQuiet.Install();
         FirstPersonAudio.Install();
         NewCameraSwitch.Enabled = enabled.Value;
         enabled.SettingChanged += (_, _) => NewCameraSwitch.Enabled = enabled.Value;
@@ -103,34 +102,6 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
     }
 }
 
-internal static class HeadAnchor
-{
-    private const float SnapMeters = 0.05f;
-
-    private static bool _ready;
-    private static Vector3 _localPosition;
-
-    internal static void Resolve(Transform head, bool aiming, out Vector3 position, out Quaternion rotation)
-    {
-        Transform parent = head.parent;
-        rotation = head.rotation;
-        if (!aiming || parent == null)
-        {
-            _ready = false;
-            position = head.position;
-            return;
-        }
-
-        if (!_ready || Vector3.Distance(head.localPosition, _localPosition) > SnapMeters)
-        {
-            _localPosition = head.localPosition;
-            _ready = true;
-        }
-
-        position = parent.TransformPoint(_localPosition);
-    }
-}
-
 internal static class NewCameraSwitch
 {
     internal static bool Enabled;
@@ -197,11 +168,7 @@ internal static class NewCameraSwitch
             {
                 _poseRotation = CameraDirection.Resolve(head.rotation);
                 _posePosition = CameraPosition.Resolve(head.position, _poseRotation);
-                bool aiming = player.HandsController != null && player.HandsController.IsAiming;
-                HeadAnchor.Resolve(head, aiming, out Vector3 gunHeadPosition, out Quaternion gunHeadRotation);
-                Quaternion gunRotation = CameraDirection.Resolve(gunHeadRotation);
-                Vector3 gunPosition = CameraPosition.Resolve(gunHeadPosition, gunRotation);
-                AimArms.AlignToCamera(player, gunPosition, gunRotation);
+                AimArms.AlignToCamera(player, _posePosition, _poseRotation);
                 _poseFrame = Time.frameCount;
             }
         }
