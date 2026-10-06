@@ -27,6 +27,7 @@ internal static class AimArms
     private const float SwaySnapDegrees = 20f;
     private const float SwaySnapMeters = 0.15f;
     private const float ActionBlendSeconds = 0.15f;
+    private const float WalkingSpeed = 0.5f;
     private const float HeadFollowSeconds = 0.05f;
     private const float HeadSnapDegrees = 45f;
 
@@ -235,7 +236,10 @@ internal static class AimArms
         Vector3 bodyInCameraPosition = Quaternion.Inverse(liveRotation) * (body.position - cameraPosition);
 
         bool acting = player.HandsController != null && player.HandsController.IsInInteractionStrictCheck();
-        _actionWeight = Mathf.MoveTowards(_actionWeight, acting ? 1f : 0f, Time.deltaTime / ActionBlendSeconds);
+        Vector3 velocity = player.Velocity;
+        float walking = Mathf.Clamp01(new Vector2(velocity.x, velocity.z).magnitude / WalkingSpeed);
+        float raw = acting ? 1f : 1f - walking;
+        _actionWeight = Mathf.MoveTowards(_actionWeight, raw, Time.deltaTime / ActionBlendSeconds);
         Quaternion sway = FilterBodySway(bone.GetInstanceID(), bodyInCamera, bodyInCameraPosition, gunRotation, gunPosition, out Vector3 swayShift);
 
         Quaternion steadyBody = look * _bodyBaseRotation;
@@ -293,7 +297,8 @@ internal static class AimArms
         _turnStage2 = Vector3.Lerp(_turnStage2, _turnStage1, pass);
         _shiftStage1 = Vector3.Lerp(_shiftStage1, offset, pass);
         _shiftStage2 = Vector3.Lerp(_shiftStage2, _shiftStage1, pass);
-        // Weapon actions (fire mode, bolt, checks) play on the hands; they keep their full animated motion.
+        // Standing still, or during a recognised hands action, the body's motion on the gun is kept
+        // whole (bolt cycling, fire mode, breathing); only walking gets the step-paced sway removed.
         shift = Vector3.Lerp(_shiftStage2, offset, _actionWeight);
         return Quaternion.Slerp(FromRotationVector(_turnStage2), turn, _actionWeight);
     }
