@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "新镜头";
-    public const string PluginVersion = "0.1.42";
+    public const string PluginVersion = "0.1.43";
 
     private void Awake()
     {
@@ -30,8 +30,8 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 
     private void BindTipScale()
     {
-        ConfigEntry<float> scale = Config.Bind("瞄准", "尖端收束", 0.5f,
-            new ConfigDescription("瞄准时枪口摆动轮廓的大小。形状和原来相似。1 是现在的轮廓，0 收到一个点。", new AcceptableValueRange<float>(0f, 1f)));
+        ConfigEntry<float> scale = Config.Bind("瞄准", "尖端收束", 1f,
+            new ConfigDescription("瞄准时枪口摆动轮廓的大小。形状和原来相似。1 是原来的轮廓，0 收到一个点。", new AcceptableValueRange<float>(0f, 1f)));
         scale.SettingChanged += (_, _) => AimArms.TipScale = scale.Value;
         AimArms.TipScale = scale.Value;
     }
@@ -111,6 +111,34 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
     }
 }
 
+internal static class HeadAnchor
+{
+    private const float SnapMeters = 0.05f;
+
+    private static bool _ready;
+    private static Vector3 _localPosition;
+
+    internal static void Resolve(Transform head, bool aiming, out Vector3 position, out Quaternion rotation)
+    {
+        Transform parent = head.parent;
+        rotation = head.rotation;
+        if (!aiming || parent == null)
+        {
+            _ready = false;
+            position = head.position;
+            return;
+        }
+
+        if (!_ready || Vector3.Distance(head.localPosition, _localPosition) > SnapMeters)
+        {
+            _localPosition = head.localPosition;
+            _ready = true;
+        }
+
+        position = parent.TransformPoint(_localPosition);
+    }
+}
+
 internal static class NewCameraSwitch
 {
     internal static bool Enabled;
@@ -177,7 +205,11 @@ internal static class NewCameraSwitch
             {
                 _poseRotation = CameraDirection.Resolve(head.rotation);
                 _posePosition = CameraPosition.Resolve(head.position, _poseRotation);
-                AimArms.AlignToCamera(player, _posePosition, _poseRotation);
+                bool aiming = player.HandsController != null && player.HandsController.IsAiming;
+                HeadAnchor.Resolve(head, aiming, out Vector3 gunHeadPosition, out Quaternion gunHeadRotation);
+                Quaternion gunRotation = CameraDirection.Resolve(gunHeadRotation);
+                Vector3 gunPosition = CameraPosition.Resolve(gunHeadPosition, gunRotation);
+                AimArms.AlignToCamera(player, gunPosition, gunRotation);
                 _poseFrame = Time.frameCount;
             }
         }
