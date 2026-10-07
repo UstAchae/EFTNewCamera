@@ -21,8 +21,6 @@ internal static class AimArms
     }
 
     private const float BaseSeconds = 2f;
-    private const float SwaySnapDegrees = 20f;
-    private const float SwaySnapMeters = 0.15f;
     private const float ActionBlendSeconds = 0.15f;
     private const float WalkingSpeed = 0.5f;
     private const float HeadFollowSeconds = 0.05f;
@@ -41,20 +39,17 @@ internal static class AimArms
     private static Quaternion _headInLook = Quaternion.identity;
     private static float _actionWeight;
 
-    private const float ConeTipDistance = 100f;
-    private const float MouseSpeedReference = 3f;
-    private const float MouseSpeedSeconds = 0.1f;
     internal static float ForwardDistance;
-    internal static bool UseCone;
-    internal static float SwayAmount = 0.5f;
-    internal static float HoldSeconds = 0.6f;
-
-    private static bool _hasSwayMean;
-    private static Vector3 _swayMean;
-    private static bool _hasAimHold;
-    private static Quaternion _aimHold = Quaternion.identity;
-    private static Quaternion _lastLook = Quaternion.identity;
-    private static float _mouseSpeed;
+    internal static float BodyAmount = 1f;
+    internal static float GunAmount = 1f;
+    internal static float RecoilAmount = 1f;
+    internal static float ActionAmount = 1f;
+    internal static float ViewAmount = 1f;
+    private static float _aimWeight;
+    private const float HandsActionInSeconds = 0.1f;
+    private const float HandsActionOutSeconds = 0.3f;
+    private static float _handsAction;
+    private static Quaternion _viewMean = Quaternion.identity;
 
     private static bool _hasSway;
     private static int _swaySightId;
@@ -134,7 +129,7 @@ internal static class AimArms
 
         Player? player = __instance.Player;
         Transform? head = __instance.Head?.Original;
-        if (UseCone || player == null || !player.IsYourPlayer || head == null || player.PointOfView != EPointOfView.ThirdPerson
+        if (player == null || !player.IsYourPlayer || head == null || player.PointOfView != EPointOfView.ThirdPerson
             || !TryGetLook(player, out Quaternion look))
         {
             _hasHeadInLook = false;
@@ -146,6 +141,7 @@ internal static class AimArms
         if (!_hasHeadInLook || Quaternion.Angle(_headInLook, headInLook) > HeadSnapDegrees)
         {
             _headInLook = headInLook;
+            _viewMean = headInLook;
             _hasHeadInLook = true;
         }
         else
@@ -153,18 +149,32 @@ internal static class AimArms
             _headInLook = Quaternion.Slerp(_headInLook, headInLook, 1f - Mathf.Exp(-Time.deltaTime / HeadFollowSeconds));
         }
 
+        _viewMean = Quaternion.Slerp(_viewMean, _headInLook, 1f - Mathf.Exp(-Time.deltaTime / HeadMeanSeconds));
         bool aiming = player.HandsController != null && player.HandsController.IsAiming;
+        // At full view sway the picture is the head, the same as before these sliders. Only a lower
+        // setting eases the picture toward the head's average, and aiming in or out eases that change.
+        if (ViewAmount >= 0.999f)
+            _aimWeight = aiming ? 1f : 0f;
+        else
+            _aimWeight = Mathf.MoveTowards(_aimWeight, aiming ? 1f : 0f, Time.deltaTime / PlacementBlendSeconds);
         if (!aiming)
         {
             _aimSince = 0f;
             _headMean = _headInLook;
-            return;
+            if (_aimWeight <= 0f)
+                return;
+        }
+        else
+        {
+            _aimSince += Time.deltaTime;
+            float seconds = SettlingSeconds(_aimSince, HeadMeanSeconds);
+            _headMean = Quaternion.Slerp(_headMean, _headInLook, 1f - Mathf.Exp(-Time.deltaTime / seconds));
         }
 
-        _aimSince += Time.deltaTime;
-        float seconds = SettlingSeconds(_aimSince, HeadMeanSeconds);
-        _headMean = Quaternion.Slerp(_headMean, _headInLook, 1f - Mathf.Exp(-Time.deltaTime / seconds));
-        head.rotation = CameraDirection.Unresolve(look * _headInLook);
+        float aimBlend = _aimWeight * _aimWeight * (3f - 2f * _aimWeight);
+        Quaternion calmed = Quaternion.Slerp(_viewMean, _headInLook, ViewAmount);
+        Quaternion shownHead = Quaternion.Slerp(_headInLook, calmed, aimBlend);
+        head.rotation = CameraDirection.Unresolve(look * shownHead);
     }
 
     // The picture hangs on the head, which sits at an angle to the mouse look that the game eases
@@ -192,17 +202,6 @@ internal static class AimArms
         Quaternion liveRotation = CameraDirection.Resolve(head.rotation);
         Vector3 cameraPosition = CameraPosition.Resolve(head.position, liveRotation);
         bool aiming = player.HandsController != null && player.HandsController.IsAiming;
-        if (UseCone)
-        {
-            Quaternion aimRotation = liveRotation;
-            if (aiming)
-                aimRotation = HoldAim(player, liveRotation);
-            else
-                ClearHold();
-            AlignToCamera(player, cameraPosition, aimRotation, liveRotation);
-            return;
-        }
-
         Transform? weapon = __instance.Weapon_Root_Anim;
         if (weapon == null)
             return;
@@ -331,10 +330,9 @@ internal static class AimArms
         player.MovementContext?.PlayerAnimator?.SetAiming(false);
     }
 
-    // The chain from the ribcage out to the gun (the arms' and weapon's own animation, recoil) is
-    // kept whole. The ribcage's motion against the camera is the rest of the body; standing it is
-    // kept, walking only its breathing-paced part. The result is laid onto the mouse look and the
-    // sight keeps the displacement that chain gives it, so swings pivot where the game pivots them.
+    // The chest's motion against the camera, and the gun's own motion on the chest, are each a
+    // departure from their average. Each departure is scaled on its own; at full scale the pose is
+    // the one the game animated. Recoil is the game's push and is added back on its own scale.
     private static bool AlignToLook(Player player, Vector3 cameraPosition, Quaternion liveRotation, Quaternion look)
     {
         PlayerBones? bones = player.PlayerBones;
@@ -350,7 +348,8 @@ internal static class AimArms
         Transform frame = ArmFrame(bones, body);
         Quaternion frameRotation = frame.rotation;
         Quaternion armRotation = Quaternion.Inverse(frameRotation) * weapon.rotation;
-        Vector3 armPosition = Quaternion.Inverse(frameRotation) * (weapon.position - frame.position);
+        Vector3 recoil = RecoilShift(animation, body);
+        Vector3 armPosition = Quaternion.Inverse(frameRotation) * (weapon.position - recoil - frame.position);
         Quaternion boneLocalRotation = Quaternion.Inverse(weapon.rotation) * bone.rotation;
         Vector3 boneLocalPosition = Quaternion.Inverse(weapon.rotation) * (bone.position - weapon.position);
         Quaternion frameInCamera = Quaternion.Inverse(liveRotation) * frameRotation;
@@ -361,41 +360,39 @@ internal static class AimArms
         float walking = Mathf.Clamp01(new Vector2(velocity.x, velocity.z).magnitude / WalkingSpeed);
         float raw = acting ? 1f : 1f - walking;
         _actionWeight = Mathf.MoveTowards(_actionWeight, raw, Time.deltaTime / ActionBlendSeconds);
-        Quaternion sway = FilterBodySway(bone.GetInstanceID(), frameInCamera, frameInCameraPosition, out Vector3 swayShift, out bool reset);
-
-        Quaternion filteredFrame = _bodyBaseRotation * sway;
-        Vector3 filteredFramePosition = _bodyBasePosition + swayShift;
+        Quaternion bodyTurn = FilterBodySway(bone.GetInstanceID(), frameInCamera, frameInCameraPosition, out Vector3 bodyShift, out bool reset);
+        bool handsActing = HandsActing(player);
+        _handsAction = Mathf.MoveTowards(_handsAction, handsActing ? 1f : 0f,
+            Time.deltaTime / (handsActing ? HandsActionInSeconds : HandsActionOutSeconds));
         TrackArmMean(reset, armRotation, armPosition);
-        Quaternion sightInCamera = filteredFrame * armRotation * boneLocalRotation;
-        Vector3 sightInCameraPosition = filteredFramePosition + filteredFrame * (armPosition + armRotation * boneLocalPosition);
-        if (reset)
-        {
-            _sightMeanRotation = sightInCamera;
-            _sightMeanPosition = sightInCameraPosition;
-        }
-        else
-        {
-            float follow = MeanFollow();
-            _sightMeanRotation = Quaternion.Slerp(_sightMeanRotation, sightInCamera, follow);
-            _sightMeanPosition = Vector3.Lerp(_sightMeanPosition, sightInCameraPosition, follow);
-        }
 
-        _logSightTurn = Quaternion.Angle(_sightMeanRotation, sightInCamera);
-        _logSightShift = (sightInCameraPosition - _sightMeanPosition).magnitude * 100f;
+        float actionBlend = _handsAction * _handsAction * (3f - 2f * _handsAction);
+        float gunScale = Mathf.Lerp(GunAmount, ActionAmount, actionBlend);
+        Quaternion shownFrame = _bodyBaseRotation * Quaternion.SlerpUnclamped(Quaternion.identity, bodyTurn, BodyAmount);
+        Vector3 shownFramePosition = _bodyBasePosition + bodyShift * BodyAmount;
+        Quaternion shownArm = Quaternion.SlerpUnclamped(_armMeanRotation, armRotation, gunScale);
+        Vector3 shownArmPosition = Vector3.LerpUnclamped(_armMeanPosition, armPosition, gunScale);
+        Quaternion shownSight = shownFrame * shownArm * boneLocalRotation;
+        Vector3 shownSightPosition = shownFramePosition + shownFrame * (shownArmPosition + shownArm * boneLocalPosition);
+        Quaternion meanSightRotation = _bodyBaseRotation * _armMeanRotation * boneLocalRotation;
+        Vector3 meanSightPosition = _bodyBasePosition + _bodyBaseRotation * (_armMeanPosition + _armMeanRotation * boneLocalPosition);
+        _sightMeanRotation = meanSightRotation;
+        _sightMeanPosition = meanSightPosition;
+        _logSightTurn = Quaternion.Angle(meanSightRotation, frameInCamera * armRotation * boneLocalRotation);
+        _logSightShift = (frameInCameraPosition + frameInCamera * (armPosition + armRotation * boneLocalPosition) - meanSightPosition).magnitude * 100f;
         _logGunOnBody = Quaternion.Angle(Quaternion.identity, Quaternion.Inverse(body.rotation) * weapon.rotation);
         _logArmTurn = Quaternion.Angle(_armMeanRotation, armRotation);
-        // Every swing (body, arms, actions, recoil) is the sight's departure from its average, so one
-        // scale turns them all down together.
-        Quaternion shownSight = Quaternion.SlerpUnclamped(_sightMeanRotation, sightInCamera, SwayAmount);
-        Vector3 shownShift = (sightInCameraPosition - _sightMeanPosition) * SwayAmount;
-        Quaternion meanSight = look * _sightMeanRotation;
+        Quaternion meanSight = look * meanSightRotation;
         Quaternion correction = AlignSightTo(meanSight, look * Vector3.forward) * Quaternion.Inverse(meanSight);
         Quaternion sightRotation = correction * look * shownSight;
         float relief = SightRelief(animation, bone);
+        Vector3 shownShift = shownSightPosition - meanSightPosition;
         Vector3 sightPoint = cameraPosition + look * new Vector3(0f, 0f, ForwardDistance + relief)
             + correction * (look * shownShift);
         Quaternion targetWeaponRotation = sightRotation * Quaternion.Inverse(boneLocalRotation);
-        Vector3 targetWeaponPosition = sightPoint - targetWeaponRotation * boneLocalPosition;
+        Vector3 recoilInWeapon = Quaternion.Inverse(weapon.rotation) * recoil;
+        Vector3 targetWeaponPosition = sightPoint - targetWeaponRotation * boneLocalPosition
+            + targetWeaponRotation * (recoilInWeapon * RecoilAmount);
         Vector3 target = targetWeaponPosition - weapon.position;
 
         _offset = target;
@@ -414,7 +411,8 @@ internal static class AimArms
         }
         else
         {
-            float follow = MeanFollow();
+            // Held through a hand action, so the whole action stays a departure on its own scale.
+            float follow = MeanFollow() * (1f - _handsAction);
             _armMeanRotation = Quaternion.Slerp(_armMeanRotation, armRotation, follow);
             _armMeanPosition = Vector3.Lerp(_armMeanPosition, armPosition, follow);
         }
@@ -492,114 +490,34 @@ internal static class AimArms
     internal static void ClearHold()
     {
         _hasSway = false;
-        _hasSwayMean = false;
-        _hasAimHold = false;
+        _handsAction = 0f;
     }
 
-    internal static void AlignToCamera(Player player, Vector3 cameraPosition, Quaternion cameraRotation, Quaternion liveRotation)
+    // The hands animator leaves its idle state for bolt cycling, fire mode switches, reloads, checks.
+    private static bool HandsActing(Player player)
     {
-        PlayerBones bones = player.PlayerBones;
-        bool aiming = player.HandsController != null && player.HandsController.IsAiming;
-        Vector3 target = Vector3.zero;
-        Transform? weapon = bones?.Weapon_Root_Anim;
-        bool placeWeapon = false;
-        Quaternion targetWeaponRotation = Quaternion.identity;
-        if (aiming && bones != null && weapon != null)
-        {
-            ProceduralWeaponAnimation? animation = player.ProceduralWeaponAnimation;
-            Transform? bone = animation != null && animation.ScopeAimTransforms != null && animation.ScopeAimTransforms.Count > 0
-                ? animation.CurrentScope?.Bone
-                : null;
-            if (bone != null && animation != null)
-            {
-                float relief = SightRelief(animation, bone);
-                Vector3 boneLocalPosition = Quaternion.Inverse(weapon.rotation) * (bone.position - weapon.position);
-                Quaternion boneLocalRotation = Quaternion.Inverse(weapon.rotation) * bone.rotation;
-                Vector3 sightPoint = cameraPosition + cameraRotation * new Vector3(0f, 0f, ForwardDistance + relief);
-                // The rear keeps the sway the game animated for the sight; the barrel is aimed
-                // from there at a far point on the held aim line, so the swing narrows toward the tip.
-                Vector3 animatedSight = Quaternion.Inverse(liveRotation) * (bone.position - cameraPosition);
-                Vector3 rear = sightPoint + liveRotation * TrackSway(animatedSight);
-                Vector3 tip = cameraPosition + cameraRotation * new Vector3(0f, 0f, ConeTipDistance);
-                Quaternion sightRotation = AlignSightTo(bone.rotation, (tip - rear).normalized);
-                targetWeaponRotation = sightRotation * Quaternion.Inverse(boneLocalRotation);
-                Vector3 targetWeaponPosition = rear - targetWeaponRotation * boneLocalPosition;
-                target = targetWeaponPosition - weapon.position;
-                placeWeapon = true;
-            }
-        }
+        var hands = player.HandsController;
+        if (hands == null)
+            return false;
 
-        if (!placeWeapon || bones == null || weapon == null)
-        {
-            _offset = Vector3.zero;
-            _hasLaserDisplacement = false;
-            return;
-        }
+        if (hands.IsInInteractionStrictCheck())
+            return true;
 
-        _offset = target;
-        _laserDisplacement = target;
-        _hasLaserDisplacement = target.sqrMagnitude >= 0.00000001f;
-        weapon.SetPositionAndRotation(weapon.position + target, targetWeaponRotation);
+        FirearmsAnimator? animator = hands.FirearmsAnimator;
+        return animator != null && !animator.IsIdling();
     }
 
-    private static Vector3 TrackSway(Vector3 animatedSight)
+    // In third person the game's recoil only pushes the gun, in the frame of Weapon_root_3rd_anim.
+    private static Vector3 RecoilShift(ProceduralWeaponAnimation animation, Transform body)
     {
-        float holdTime = HoldSeconds;
-        if (holdTime <= 0.0001f)
-        {
-            _hasSwayMean = false;
+        var effect = animation.Shootingg?.CurrentRecoilEffect;
+        if (effect == null)
             return Vector3.zero;
-        }
 
-        if (!_hasSwayMean || (animatedSight - _swayMean).sqrMagnitude > SwaySnapMeters * SwaySnapMeters)
-        {
-            _swayMean = animatedSight;
-            _hasSwayMean = true;
-            return Vector3.zero;
-        }
-
-        _swayMean = Vector3.Lerp(_swayMean, animatedSight, 1f - Mathf.Exp(-Time.deltaTime / holdTime));
-        return animatedSight - _swayMean;
-    }
-
-    internal static Quaternion HoldAim(Player player, Quaternion liveCameraRotation)
-    {
-        float holdTime = HoldSeconds;
-        if (holdTime <= 0.0001f)
-        {
-            _hasAimHold = false;
-            return liveCameraRotation;
-        }
-
-        if (!_hasAimHold)
-        {
-            _aimHold = liveCameraRotation;
-            _lastLook = liveCameraRotation;
-            _mouseSpeed = 0f;
-            _hasAimHold = true;
-            return liveCameraRotation;
-        }
-
-        // The gun only ever points along the smoothed picture, and how quickly that smoothing lets
-        // go is judged from the picture's own turning speed. Mouse input arrives unevenly per frame;
-        // the head-driven picture turns smoothly, so the gun's lag behind it changes smoothly too.
-        float dt = Mathf.Max(Time.deltaTime, 0.0001f);
-        float speed = AngleBetween(_lastLook, liveCameraRotation) / dt;
-        _lastLook = liveCameraRotation;
-        _mouseSpeed = Mathf.Lerp(_mouseSpeed, speed, 1f - Mathf.Exp(-dt / MouseSpeedSeconds));
-        float ratio = _mouseSpeed / MouseSpeedReference;
-        float smoothing = holdTime / (1f + ratio * ratio);
-        _aimHold = Quaternion.Slerp(_aimHold, liveCameraRotation, 1f - Mathf.Exp(-dt / smoothing));
-        return _aimHold;
-    }
-
-    // Quaternion.Angle reads anything under about 0.16 degrees as zero, which turns slow motion into
-    // on/off spikes at high frame rates.
-    private static float AngleBetween(Quaternion from, Quaternion to)
-    {
-        Quaternion delta = Quaternion.Inverse(from) * to;
-        float sine = new Vector3(delta.x, delta.y, delta.z).magnitude;
-        return 2f * Mathf.Atan2(sine, Mathf.Abs(delta.w)) * Mathf.Rad2Deg;
+        Vector3 local = effect.GetHandPositionRecoil();
+        if (effect.WeaponRecoilEffect != null)
+            local += effect.WeaponRecoilEffect.GetPositionRecoil();
+        return body.rotation * local;
     }
 
     internal static bool TryGetLook(Player player, out Quaternion look)

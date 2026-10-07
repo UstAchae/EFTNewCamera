@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "新镜头";
-    public const string PluginVersion = "0.1.94";
+    public const string PluginVersion = "0.1.95";
 
     private void Awake()
     {
@@ -26,34 +26,29 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         BindDirection();
         BindPosition();
         BindAimDistance();
-        BindCone();
-        BindSwayAmount();
+        BindSways();
     }
 
-    private void BindSwayAmount()
+    private void BindSways()
     {
-        ConfigEntry<float> sway = Config.Bind("瞄准", "摆动幅度", 0.5f,
-            new ConfigDescription("瞄准时枪的所有摆动一起按这个比例缩放：站着、走路、手臂、身体，拉栓等动作和后坐力也在内。1 表示照游戏原样摆，0 表示完全不摆。", new AcceptableValueRange<float>(0f, 1f)));
-        sway.SettingChanged += (_, _) => AimArms.SwayAmount = sway.Value;
-        AimArms.SwayAmount = sway.Value;
+        BindPortion("身体摆动", v => AimArms.BodyAmount = v,
+            "瞄准时胸口带着枪晃的幅度，站着的起伏和走路的颠都在里面。1 是游戏原来的，0 是胸口这块不带动枪。");
+        BindPortion("枪自身摆动", v => AimArms.GunAmount = v,
+            "瞄准时枪在胸口上自己晃的幅度，不含开枪后坐，也不含拉栓、换弹这些手上动作。1 是游戏原来的，0 是枪自身不晃。");
+        BindPortion("后坐力", v => AimArms.RecoilAmount = v,
+            "瞄准时开枪，枪被往后顶的幅度。1 是游戏原来的，0 是不顶。");
+        BindPortion("手上动作", v => AimArms.ActionAmount = v,
+            "瞄准时拉栓、切开火模式、换弹、检查这些动作带动枪的幅度。1 是游戏原来的，0 是做这些动作时枪不动。");
+        BindPortion("画面晃动", v => AimArms.ViewAmount = v,
+            "瞄准时头带着画面晃的幅度，走路的颠簸也在里面。1 是和不瞄准时一样，0 是画面只跟鼠标。开镜和退镜会慢慢过渡。");
     }
 
-    private void BindCone()
+    private void BindPortion(string key, System.Action<float> apply, string description)
     {
-        ConfigEntry<bool> cone = Config.Bind("瞄准", "使用 0.1.70 方案", false,
-            "打开后瞄准用 0.1.70 的做法：枪尖停在目标上，尾端照游戏原来的幅度摆，枪的指向跟平滑后的画面，镜头直接跟头。关闭则用当前做法：枪对准鼠标方向，只留站着时的慢摆。");
-        ConfigEntry<float> hold = Config.Bind("瞄准", "静止时间", 0.6f,
-            new ConfigDescription("只在「使用 0.1.70 方案」打开时生效。不转视角时按这个时间平滑掉走路和呼吸的晃，转视角时几乎不平滑。0 表示关闭，枪完全跟着镜头。", new AcceptableValueRange<float>(0f, 2f)));
-        void Refresh()
-        {
-            AimArms.UseCone = cone.Value;
-            AimArms.HoldSeconds = hold.Value;
-            AimArms.ClearHold();
-        }
-
-        cone.SettingChanged += (_, _) => Refresh();
-        hold.SettingChanged += (_, _) => Refresh();
-        Refresh();
+        ConfigEntry<float> entry = Config.Bind("瞄准", key, 1f,
+            new ConfigDescription(description, new AcceptableValueRange<float>(0f, 1f)));
+        entry.SettingChanged += (_, _) => apply(entry.Value);
+        apply(entry.Value);
     }
 
     private void BindDirection()
