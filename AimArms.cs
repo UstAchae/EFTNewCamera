@@ -20,7 +20,9 @@ internal static class AimArms
         public bool UpdateWhenOffscreen;
     }
 
-    private const float BaseSeconds = 2f;
+    internal static float ReturnSeconds = 0.7f;
+    internal static float WalkHeadAmount = 1f;
+    private static float _standWeight = 1f;
     private const float SwaySnapDegrees = 20f;
     private const float SwaySnapMeters = 0.15f;
     private const float ActionBlendSeconds = 0.15f;
@@ -28,7 +30,6 @@ internal static class AimArms
     private const float HeadFollowSeconds = 0.05f;
     private const float HeadSnapDegrees = 45f;
 
-    private const float HeadMeanSeconds = 1f;
     internal static BepInEx.Logging.ManualLogSource? Log;
     private static float _aimSince;
     private static float _nextAimLog;
@@ -162,6 +163,9 @@ internal static class AimArms
 
         bool aiming = player.HandsController != null && player.HandsController.IsAiming;
         _aimWeight = Mathf.MoveTowards(_aimWeight, aiming ? 1f : 0f, Time.deltaTime / PlacementBlendSeconds);
+        Vector3 velocity = player.Velocity;
+        float standing = 1f - Mathf.Clamp01(new Vector2(velocity.x, velocity.z).magnitude / WalkingSpeed);
+        _standWeight = Mathf.MoveTowards(_standWeight, standing, Time.deltaTime / ActionBlendSeconds);
         if (!aiming)
         {
             _aimSince = 0f;
@@ -170,7 +174,7 @@ internal static class AimArms
         else
         {
             _aimSince += Time.deltaTime;
-            float seconds = SettlingSeconds(_aimSince, HeadMeanSeconds);
+            float seconds = SettlingSeconds(_aimSince, ReturnSeconds);
             _headMean = Quaternion.Slerp(_headMean, _headInLook, 1f - Mathf.Exp(-Time.deltaTime / seconds));
         }
 
@@ -178,20 +182,25 @@ internal static class AimArms
             head.rotation = CameraDirection.Unresolve(look * HeadShown(_headInLook));
     }
 
-    // The head's angle to the mouse look, scaled by the sway amount once aimed in: at zero the
-    // picture is the mouse look itself. Aiming in and out eases between that and the game's head.
+    // The head's angle to the mouse look, scaled once aimed in (standing by the sway amount, walking
+    // by its own amount): at zero the picture is the mouse look itself. Aiming in and out eases
+    // between that and the game's head.
     private static Quaternion HeadShown(Quaternion headInLook)
     {
         float t = _aimWeight * _aimWeight * (3f - 2f * _aimWeight);
-        return Quaternion.Slerp(headInLook, Quaternion.Slerp(Quaternion.identity, headInLook, SwayAmount), t);
+        float amount = Mathf.Lerp(WalkHeadAmount, SwayAmount, _standWeight);
+        return Quaternion.Slerp(headInLook, Quaternion.Slerp(Quaternion.identity, headInLook, amount), t);
     }
 
     // The picture hangs on the head, which sits at an angle to the mouse look that the game eases
-    // while aiming in. The gun aims along the look turned by the head's averaged angle, so it lands
-    // in the middle of the picture while still sharing the mouse signal frame by frame.
+    // while aiming in. Standing, the gun aims along the look turned by the head's averaged angle, so
+    // it lands in the middle of the picture while still sharing the mouse signal frame by frame.
+    // Walking, it rides the head's bob with the picture, the way a cheek on the stock carries it.
     private static Quaternion AimLook(Quaternion look)
     {
-        return _hasHeadInLook ? look * HeadShown(_headMean) : look;
+        if (!_hasHeadInLook)
+            return look;
+        return look * Quaternion.Slerp(HeadShown(_headInLook), HeadShown(_headMean), _standWeight);
     }
 
     private static Quaternion AimCamera(Quaternion look)
@@ -305,7 +314,7 @@ internal static class AimArms
 
     private static float MeanFollow()
     {
-        return 1f - Mathf.Exp(-Time.deltaTime / SettlingSeconds(_sinceReset, BaseSeconds));
+        return 1f - Mathf.Exp(-Time.deltaTime / SettlingSeconds(_sinceReset, ReturnSeconds));
     }
 
     // After aiming in, the body keeps settling into its aiming pose for about one and a half
