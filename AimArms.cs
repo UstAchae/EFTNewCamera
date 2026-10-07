@@ -53,8 +53,9 @@ internal static class AimArms
     private static int _swaySightId;
     private static Quaternion _bodyBaseRotation = Quaternion.identity;
     private static Vector3 _bodyBasePosition;
-    private static Quaternion _gunBaseRotation = Quaternion.identity;
-    private static Vector3 _gunBasePosition;
+    private static Quaternion _sightMeanRotation = Quaternion.identity;
+    private static Vector3 _sightMeanPosition;
+    private static bool _loggedArmFrame;
     private static Vector3 _turnStage1;
     private static Vector3 _turnStage2;
     private static Vector3 _shiftStage1;
@@ -211,9 +212,10 @@ internal static class AimArms
         player.MovementContext?.PlayerAnimator?.SetAiming(false);
     }
 
-    // The body bone that carries the gun is measured against the camera; only the breathing-paced
-    // part of its sway is kept and laid onto the mouse look. The gun's own offset on that bone
-    // (recoil) is left as the game computed it.
+    // The chain from the ribcage out to the gun (the arms' and weapon's own animation, recoil) is
+    // kept whole. The ribcage's motion against the camera is the rest of the body; standing it is
+    // kept, walking only its breathing-paced part. The result is laid onto the mouse look and the
+    // sight keeps the displacement that chain gives it, so swings pivot where the game pivots them.
     private static bool AlignToLook(Player player, Vector3 cameraPosition, Quaternion liveRotation, Quaternion look)
     {
         PlayerBones? bones = player.PlayerBones;
@@ -223,33 +225,48 @@ internal static class AimArms
         Transform? bone = animation != null && animation.ScopeAimTransforms != null && animation.ScopeAimTransforms.Count > 0
             ? animation.CurrentScope?.Bone
             : null;
-        if (weapon == null || body == null || bone == null || animation == null)
+        if (bones == null || weapon == null || body == null || bone == null || animation == null)
             return false;
 
-        Quaternion bodyRotation = body.rotation;
-        Quaternion gunRotation = Quaternion.Inverse(bodyRotation) * weapon.rotation;
-        Vector3 gunPosition = Quaternion.Inverse(bodyRotation) * (weapon.position - body.position);
+        Transform frame = ArmFrame(bones, body);
+        Quaternion frameRotation = frame.rotation;
+        Quaternion armRotation = Quaternion.Inverse(frameRotation) * weapon.rotation;
+        Vector3 armPosition = Quaternion.Inverse(frameRotation) * (weapon.position - frame.position);
         Quaternion boneLocalRotation = Quaternion.Inverse(weapon.rotation) * bone.rotation;
         Vector3 boneLocalPosition = Quaternion.Inverse(weapon.rotation) * (bone.position - weapon.position);
-        Quaternion bodyInCamera = Quaternion.Inverse(liveRotation) * bodyRotation;
-        Vector3 bodyInCameraPosition = Quaternion.Inverse(liveRotation) * (body.position - cameraPosition);
+        Quaternion frameInCamera = Quaternion.Inverse(liveRotation) * frameRotation;
+        Vector3 frameInCameraPosition = Quaternion.Inverse(liveRotation) * (frame.position - cameraPosition);
 
         bool acting = player.HandsController != null && player.HandsController.IsInInteractionStrictCheck();
         Vector3 velocity = player.Velocity;
         float walking = Mathf.Clamp01(new Vector2(velocity.x, velocity.z).magnitude / WalkingSpeed);
         float raw = acting ? 1f : 1f - walking;
         _actionWeight = Mathf.MoveTowards(_actionWeight, raw, Time.deltaTime / ActionBlendSeconds);
-        Quaternion sway = FilterBodySway(bone.GetInstanceID(), bodyInCamera, bodyInCameraPosition, gunRotation, gunPosition, out Vector3 swayShift);
+        Quaternion sway = FilterBodySway(bone.GetInstanceID(), frameInCamera, frameInCameraPosition, out Vector3 swayShift, out bool reset);
 
-        Quaternion steadyBody = look * _bodyBaseRotation;
-        Quaternion steadySight = steadyBody * _gunBaseRotation * boneLocalRotation;
-        Quaternion correction = AlignSightTo(steadySight, look * Vector3.forward) * Quaternion.Inverse(steadySight);
-        Quaternion placedBody = correction * steadyBody * sway;
-        Quaternion targetWeaponRotation = placedBody * gunRotation;
+        Quaternion filteredFrame = _bodyBaseRotation * sway;
+        Vector3 filteredFramePosition = _bodyBasePosition + swayShift;
+        Quaternion sightInCamera = filteredFrame * armRotation * boneLocalRotation;
+        Vector3 sightInCameraPosition = filteredFramePosition + filteredFrame * (armPosition + armRotation * boneLocalPosition);
+        if (reset)
+        {
+            _sightMeanRotation = sightInCamera;
+            _sightMeanPosition = sightInCameraPosition;
+        }
+        else
+        {
+            float follow = 1f - Mathf.Exp(-Time.deltaTime / BaseSeconds);
+            _sightMeanRotation = Quaternion.Slerp(_sightMeanRotation, sightInCamera, follow);
+            _sightMeanPosition = Vector3.Lerp(_sightMeanPosition, sightInCameraPosition, follow);
+        }
+
+        Quaternion meanSight = look * _sightMeanRotation;
+        Quaternion correction = AlignSightTo(meanSight, look * Vector3.forward) * Quaternion.Inverse(meanSight);
+        Quaternion sightRotation = correction * look * sightInCamera;
         float relief = SightRelief(animation, bone);
         Vector3 sightPoint = cameraPosition + look * new Vector3(0f, 0f, ForwardDistance + relief)
-            + correction * (look * swayShift)
-            + placedBody * (gunPosition - _gunBasePosition);
+            + correction * (look * (sightInCameraPosition - _sightMeanPosition));
+        Quaternion targetWeaponRotation = sightRotation * Quaternion.Inverse(boneLocalRotation);
         Vector3 targetWeaponPosition = sightPoint - targetWeaponRotation * boneLocalPosition;
         Vector3 target = targetWeaponPosition - weapon.position;
 
@@ -260,19 +277,37 @@ internal static class AimArms
         return true;
     }
 
-    private static Quaternion FilterBodySway(int sightId, Quaternion bodyRotation, Vector3 bodyPosition, Quaternion gunRotation, Vector3 gunPosition, out Vector3 shift)
+    private static Transform ArmFrame(PlayerBones bones, Transform body)
+    {
+        Transform? ribcage = bones.Ribcage?.Original;
+        Transform frame = ribcage != null && body.IsChildOf(ribcage) && body != ribcage
+            ? ribcage
+            : body.parent != null ? body.parent : body;
+        if (!_loggedArmFrame)
+        {
+            _loggedArmFrame = true;
+            string chain = body.name;
+            for (Transform? t = body.parent; t != null && chain.Length < 400; t = t.parent)
+                chain += " <- " + t.name;
+            Debug.Log("[新镜头] 手臂层起点: " + frame.name + "；枪骨链: " + chain);
+        }
+
+        return frame;
+    }
+
+    private static Quaternion FilterBodySway(int sightId, Quaternion bodyRotation, Vector3 bodyPosition, out Vector3 shift, out bool reset)
     {
         shift = Vector3.zero;
+        reset = false;
         Quaternion turn = Quaternion.Inverse(_bodyBaseRotation) * bodyRotation;
         Vector3 offset = bodyPosition - _bodyBasePosition;
         bool jumped = _actionWeight <= 0f
             && (Quaternion.Angle(Quaternion.identity, turn) > SwaySnapDegrees || offset.sqrMagnitude > SwaySnapMeters * SwaySnapMeters);
         if (!_hasSway || sightId != _swaySightId || jumped)
         {
+            reset = true;
             _bodyBaseRotation = bodyRotation;
             _bodyBasePosition = bodyPosition;
-            _gunBaseRotation = gunRotation;
-            _gunBasePosition = gunPosition;
             _turnStage1 = Vector3.zero;
             _turnStage2 = Vector3.zero;
             _shiftStage1 = Vector3.zero;
@@ -286,8 +321,6 @@ internal static class AimArms
         float follow = 1f - Mathf.Exp(-dt / BaseSeconds);
         _bodyBaseRotation = Quaternion.Slerp(_bodyBaseRotation, bodyRotation, follow);
         _bodyBasePosition = Vector3.Lerp(_bodyBasePosition, bodyPosition, follow);
-        _gunBaseRotation = Quaternion.Slerp(_gunBaseRotation, gunRotation, follow);
-        _gunBasePosition = Vector3.Lerp(_gunBasePosition, gunPosition, follow);
         turn = Quaternion.Inverse(_bodyBaseRotation) * bodyRotation;
         offset = bodyPosition - _bodyBasePosition;
 
