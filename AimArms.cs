@@ -48,7 +48,12 @@ internal static class AimArms
     internal static bool UseCone;
     internal static float SwayAmount = 0.5f;
     internal static float RecoilAmount = 1f;
+    internal static float ActionAmount = 1f;
     private static float _aimWeight;
+    private const float HandsActionInSeconds = 0.1f;
+    private const float HandsActionOutSeconds = 0.3f;
+    private static float _handsAction;
+    private static bool _loggedHandsActing;
     internal static float HoldSeconds = 0.6f;
 
     private static bool _hasSwayMean;
@@ -378,7 +383,10 @@ internal static class AimArms
         Quaternion frameInCamera = Quaternion.Inverse(liveRotation) * frameRotation;
         Vector3 frameInCameraPosition = Quaternion.Inverse(liveRotation) * (frame.position - cameraPosition);
 
-        bool acting = player.HandsController != null && player.HandsController.IsInInteractionStrictCheck();
+        bool handsActing = HandsActing(player);
+        _handsAction = Mathf.MoveTowards(_handsAction, handsActing ? 1f : 0f,
+            Time.deltaTime / (handsActing ? HandsActionInSeconds : HandsActionOutSeconds));
+        bool acting = handsActing;
         Vector3 velocity = player.Velocity;
         float walking = Mathf.Clamp01(new Vector2(velocity.x, velocity.z).magnitude / WalkingSpeed);
         float raw = acting ? 1f : 1f - walking;
@@ -397,7 +405,8 @@ internal static class AimArms
         }
         else
         {
-            float follow = MeanFollow();
+            // Held during a hand action, so the whole action is a departure on its own scale.
+            float follow = MeanFollow() * (1f - _handsAction);
             _sightMeanRotation = Quaternion.Slerp(_sightMeanRotation, sightInCamera, follow);
             _sightMeanPosition = Vector3.Lerp(_sightMeanPosition, sightInCameraPosition, follow);
         }
@@ -406,10 +415,13 @@ internal static class AimArms
         _logSightShift = (sightInCameraPosition - _sightMeanPosition).magnitude * 100f;
         _logGunOnBody = Quaternion.Angle(Quaternion.identity, Quaternion.Inverse(body.rotation) * weapon.rotation);
         _logArmTurn = Quaternion.Angle(_armMeanRotation, armRotation);
-        // Every swing (body, arms, actions) is the sight's departure from its average, so one scale
-        // turns them all down together. Recoil was taken out above and is put back on its own scale.
-        Quaternion shownSight = Quaternion.SlerpUnclamped(_sightMeanRotation, sightInCamera, SwayAmount);
-        Vector3 shownShift = (sightInCameraPosition - _sightMeanPosition) * SwayAmount;
+        // Every swing is the sight's departure from its average: hand actions (bolt, fire mode,
+        // reloads) on their own scale, everything else (body, arms) on the sway scale. Recoil was
+        // taken out above and is put back on its own scale.
+        float action = _handsAction * _handsAction * (3f - 2f * _handsAction);
+        float amount = Mathf.Lerp(SwayAmount, ActionAmount, action);
+        Quaternion shownSight = Quaternion.SlerpUnclamped(_sightMeanRotation, sightInCamera, amount);
+        Vector3 shownShift = (sightInCameraPosition - _sightMeanPosition) * amount;
         Quaternion meanSight = look * _sightMeanRotation;
         Quaternion correction = AlignSightTo(meanSight, look * Vector3.forward) * Quaternion.Inverse(meanSight);
         Quaternion sightRotation = correction * look * shownSight;
@@ -426,6 +438,27 @@ internal static class AimArms
         _hasLaserDisplacement = target.sqrMagnitude >= 0.00000001f;
         weapon.SetPositionAndRotation(targetWeaponPosition, targetWeaponRotation);
         return true;
+    }
+
+    // The hands animator leaves its idle state for every hand action: bolt cycling after a shot,
+    // fire mode switches, reloads, checks.
+    private static bool HandsActing(Player player)
+    {
+        var hands = player.HandsController;
+        if (hands == null)
+            return false;
+
+        bool acting = hands.IsInInteractionStrictCheck();
+        FirearmsAnimator? animator = hands.FirearmsAnimator;
+        if (!acting && animator != null)
+            acting = !animator.IsIdling();
+        if (acting != _loggedHandsActing)
+        {
+            _loggedHandsActing = acting;
+            Log?.LogInfo(acting ? "手上动作开始" : "手上动作结束");
+        }
+
+        return acting;
     }
 
     // In third person the game's recoil only pushes the gun, in the frame of Weapon_root_3rd_anim
