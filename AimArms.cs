@@ -121,6 +121,9 @@ internal static class AimArms
     private static Camera? _drawCamera;
     private static int _laserFrame = -1;
     private static int _opticFrame = -1;
+    private static readonly AccessTools.FieldRef<ProceduralWeaponAnimation, float> LineOfSightAngle =
+        AccessTools.FieldRefAccess<ProceduralWeaponAnimation, float>("_currentLineOfSightDeltaAngle");
+    internal static float RecoilKick = 1f;
     private static int _shotFrame = -1;
     private static Vector3? _shotFireport;
     private const float SteadyLogFrom = 1.5f;
@@ -276,7 +279,7 @@ internal static class AimArms
                 Vector3 aimPoint = new Vector3(0f, 0f, ForwardDistance + relief);
                 SteadyHead(player, cameraPosition, cameraRotation, out Vector3 steadyPosition, out Quaternion steadyRotation);
                 if (bones.Weapon_Root_Third != null && bones.Weapon_Root_Anim != null)
-                    Sway(animation, bones.Weapon_Root_Third, bones.Weapon_Root_Anim, bone.position, sightId, steadyPosition, steadyRotation, aimPoint, out target, out turn);
+                    Sway(animation, bones.Weapon_Root_Third, bones.Weapon_Root_Anim, bone, sightId, steadyPosition, steadyRotation, aimPoint, out target, out turn);
                 else
                     target = steadyPosition - bone.position + steadyRotation * aimPoint;
 
@@ -328,11 +331,13 @@ internal static class AimArms
         }
 
         Vector3 displacement = _offset;
+        Quaternion carryTurn = _turn;
         Vector3 pivot = sightPoint ?? (bones.Weapon_Root_Anim != null ? bones.Weapon_Root_Anim.position : Vector3.zero);
+        Recoil(player.ProceduralWeaponAnimation, bones.Weapon_Root_Anim, pivot, ref displacement, ref carryTurn);
         _laserDisplacement = displacement;
         _laserPivot = pivot;
-        _laserTurn = _turn;
-        _hasLaserDisplacement = displacement.sqrMagnitude >= 0.00000001f || _turn != Quaternion.identity;
+        _laserTurn = carryTurn;
+        _hasLaserDisplacement = displacement.sqrMagnitude >= 0.00000001f || carryTurn != Quaternion.identity;
         EnsureUpperarms(player);
         for (int i = Upperarms.Count - 1; i >= 0; i--)
         {
@@ -357,7 +362,7 @@ internal static class AimArms
         foreach (Transform arm in Upperarms)
         {
             if (arm != null)
-                Carry(arm, pivot, displacement, _turn);
+                Carry(arm, pivot, displacement, carryTurn);
         }
 
         Transform? weapon = bones.Weapon_Root_Anim;
@@ -371,7 +376,7 @@ internal static class AimArms
         }
 
         if (!carried)
-            Carry(weapon, pivot, displacement, _turn);
+            Carry(weapon, pivot, displacement, carryTurn);
         _shotFrame = Time.frameCount;
         _shotFireport = player.HandsController is Player.FirearmController firearm && firearm.CurrentFireport?.Original != null
             ? firearm.CurrentFireport.Original.position
@@ -438,9 +443,29 @@ internal static class AimArms
         transform.SetPositionAndRotation(pivot + displacement + turn * (transform.position - pivot), turn * transform.rotation);
     }
 
-    private static void Sway(ProceduralWeaponAnimation animation, Transform third, Transform anim, Vector3 sight, int sightId, Vector3 cameraPosition, Quaternion cameraRotation, Vector3 aimPoint, out Vector3 displacement, out Quaternion turn)
+    private static void Recoil(ProceduralWeaponAnimation? animation, Transform? weapon, Vector3 pivot, ref Vector3 displacement, ref Quaternion turn)
+    {
+        if (animation == null || weapon == null || animation.Shootingg?.CurrentRecoilEffect == null || animation.HandsContainer == null || RecoilKick <= 0f)
+            return;
+
+        Vector3 recoil = animation.Shootingg.CurrentRecoilEffect.GetHandRotationRecoil();
+        if (animation.Shootingg.CurrentRecoilEffect.WeaponRecoilEffect != null)
+            recoil += animation.Shootingg.CurrentRecoilEffect.WeaponRecoilEffect.GetRotationRecoil();
+        if (recoil.sqrMagnitude < 0.00000001f)
+            return;
+
+        Quaternion weaponRotation = turn * weapon.rotation;
+        Vector3 weaponPosition = pivot + displacement + turn * (weapon.position - pivot);
+        Vector3 recoilPivot = weaponPosition + weaponRotation * animation.HandsContainer.RecoilPivot;
+        Quaternion kick = Quaternion.Euler(weaponRotation * (recoil * RecoilKick));
+        displacement = recoilPivot + kick * (pivot + displacement - recoilPivot) - pivot;
+        turn = kick * turn;
+    }
+
+    private static void Sway(ProceduralWeaponAnimation animation, Transform third, Transform anim, Transform sightBone, int sightId, Vector3 cameraPosition, Quaternion cameraRotation, Vector3 aimPoint, out Vector3 displacement, out Quaternion turn)
     {
         Quaternion toCamera = Quaternion.Inverse(cameraRotation);
+        Vector3 sight = sightBone.position;
         Vector3 sightOnThird = third.position + third.rotation * (Quaternion.Inverse(anim.rotation) * (sight - anim.position));
         Vector3 armMove = toCamera * (sightOnThird - cameraPosition);
         Vector3 rawGunMove = toCamera * (sight - sightOnThird);
@@ -531,7 +556,24 @@ internal static class AimArms
         Quaternion gunBase = _gunTurnCenter * Scale(Quaternion.Inverse(_gunTurnCenter) * _gunTurnMean, Now.Breath);
         Quaternion keptArm = armBase * Scale(Quaternion.Inverse(_armTurnMean) * armTurn, Now.ArmTurn);
         Quaternion keptGun = gunBase * Scale(Quaternion.Inverse(_gunTurnMean) * gunTurn, Now.GunTurn);
-        turn = cameraRotation * keptArm * keptGun * Quaternion.Inverse(armTurn * rawGunTurn) * toCamera;
+        turn = cameraRotation * LineOfSight(animation, sightBone, anim, armBase * gunBase) * keptArm * keptGun * Quaternion.Inverse(armTurn * rawGunTurn) * toCamera;
+    }
+
+    private static Quaternion LineOfSight(ProceduralWeaponAnimation animation, Transform sightBone, Transform anim, Quaternion weaponInCamera)
+    {
+        Vector3 axis = sightBone.name == "aim_camera" ? -sightBone.up : -sightBone.forward;
+        Vector3 sightInCamera = weaponInCamera * (Quaternion.Inverse(anim.rotation) * axis);
+        float zeroing = 0f;
+        try
+        {
+            zeroing = LineOfSightAngle(animation);
+        }
+        catch
+        {
+        }
+        if (Mathf.Abs(zeroing) > 0.0001f)
+            sightInCamera = Quaternion.AngleAxis(-zeroing, weaponInCamera * Vector3.right) * sightInCamera;
+        return Quaternion.FromToRotation(sightInCamera, Vector3.forward);
     }
 
     internal static void ObserveHead(Player player, Vector3 cameraPosition, Quaternion cameraRotation)
