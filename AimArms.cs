@@ -49,6 +49,7 @@ internal static class AimArms
     internal static bool Chase = true;
     internal static float FollowDelay;
     internal static float MouseSmoothSeconds = 0.05f;
+    internal static float WalkHeadSway;
     private static Vector2 _pendingMouse;
     private static bool _releasingMouse;
     private const float MaxDelayDegrees = 15f;
@@ -92,6 +93,8 @@ internal static class AimArms
     private static float _leanTilt;
     private static float _leanLogUntil;
     private static Quaternion _headTurnRaw = Quaternion.identity;
+    private static bool _hasYawCenter;
+    private static float _yawCenter;
     private static Vector3 _leanArm;
     private static float _leanArmTurn;
     private static Vector3 _leanGunMove;
@@ -600,6 +603,31 @@ internal static class AimArms
         if (Mathf.Abs(zeroing) > 0.0001f)
             sightInCamera = Quaternion.AngleAxis(-zeroing, weaponInCamera * Vector3.right) * sightInCamera;
         return Quaternion.FromToRotation(sightInCamera, Vector3.forward);
+    }
+
+    internal static void CalmWalkHead(Player player, Transform head)
+    {
+        if (player.MovementContext == null || player.HeadRotation.sqrMagnitude > 0.01f || _smoothedHead.sqrMagnitude > 0.01f)
+            return;
+
+        Vector3 look = Vector3.ProjectOnPlane(CameraDirection.Resolve(head.rotation) * Vector3.forward, Vector3.up);
+        if (look.sqrMagnitude < 0.0001f)
+            return;
+
+        float yaw = Vector3.SignedAngle(Quaternion.Euler(0f, player.MovementContext.Rotation.x, 0f) * Vector3.forward, look, Vector3.up);
+        if (!_hasYawCenter)
+        {
+            _yawCenter = yaw;
+            _hasYawCenter = true;
+        }
+        else
+            _yawCenter = Mathf.Lerp(_yawCenter, yaw, 1f - Mathf.Exp(-Time.deltaTime / 0.5f));
+
+        float moving = Mathf.Clamp01(player.MovementContext.ActualLinearVelocity / 0.6f);
+        float keep = Mathf.Lerp(1f, WalkHeadSway, moving);
+        float fix = _yawCenter + (yaw - _yawCenter) * keep - yaw;
+        if (Mathf.Abs(fix) > 0.01f)
+            head.rotation = Quaternion.AngleAxis(fix, Vector3.up) * head.rotation;
     }
 
     internal static void ObserveHead(Player player, Vector3 cameraPosition, Quaternion cameraRotation)

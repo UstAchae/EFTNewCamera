@@ -12,12 +12,17 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "新镜头";
-    public const string PluginVersion = "0.1.129";
+    public const string PluginVersion = "0.1.130";
 
     private void Awake()
     {
         ConfigEntry<bool> enabled = Config.Bind("新镜头", "总开关", false,
             "打开后使用第三人称骨架，并把游戏镜头挂在人物头部。");
+        ConfigEntry<float> walkHead = Config.Bind("新镜头", "走路摇头", 0f,
+            new ConfigDescription("走路和跑步时头左右摆动留多少。0 是不摆，1 是游戏原样。站着不动和中键扭头不受影响。",
+                new AcceptableValueRange<float>(0f, 1f)));
+        walkHead.SettingChanged += (_, _) => AimArms.WalkHeadSway = walkHead.Value;
+        AimArms.WalkHeadSway = walkHead.Value;
         AimArms.Log = Logger;
         AimArms.Install();
         FirstPersonAudio.Install();
@@ -240,6 +245,7 @@ internal static class NewCameraSwitch
             if (head != null)
             {
                 Quaternion lastRotation = _poseRotation;
+                AimArms.CalmWalkHead(player, head);
                 _poseRotation = CameraDirection.Resolve(head.rotation);
                 _posePosition = CameraPosition.Resolve(head.position, _poseRotation);
                 LogFreeLook(player, lastRotation);
