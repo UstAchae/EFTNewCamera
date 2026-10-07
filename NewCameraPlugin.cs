@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "新镜头";
-    public const string PluginVersion = "0.1.98";
+    public const string PluginVersion = "0.1.99";
 
     private void Awake()
     {
@@ -25,6 +25,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         BindDirection();
         BindPosition();
         BindAimDistance();
+        BindSway();
     }
 
     private void BindDirection()
@@ -68,6 +69,37 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         ConfigEntry<float> distance = BindMeters("瞄准", "前后距离", 0f, "瞄准后沿镜头前方向移动枪，单位为米。正值让枪离镜头更远。");
         distance.SettingChanged += (_, _) => AimArms.ForwardDistance = distance.Value;
         AimArms.ForwardDistance = distance.Value;
+    }
+
+    private void BindSway()
+    {
+        ConfigEntry<float> gunMove = BindAmount("枪的平移", 0f,
+            "枪自己的晃（转视角时的甩动、后坐力等）带来的平移。0 是瞄具钉在眼前不动，1 是游戏原样。");
+        ConfigEntry<float> gunTurn = BindAmount("枪的旋转", 1f,
+            "枪自己的晃（转视角时的甩动、后坐力等）带来的转动。0 是不转，1 是游戏原样。");
+        ConfigEntry<float> armMove = BindAmount("手臂的平移", 0f,
+            "人物动画带着枪走的平移（呼吸、走路、手上动作等）。0 是瞄具钉在眼前不动，1 是游戏原样。");
+        ConfigEntry<float> armTurn = BindAmount("手臂的旋转", 1f,
+            "人物动画带着枪走的转动（呼吸、走路、手上动作等）。0 是不转，1 是游戏原样。");
+        void Refresh()
+        {
+            AimArms.GunMove = gunMove.Value;
+            AimArms.GunTurn = gunTurn.Value;
+            AimArms.ArmMove = armMove.Value;
+            AimArms.ArmTurn = armTurn.Value;
+        }
+
+        gunMove.SettingChanged += (_, _) => Refresh();
+        gunTurn.SettingChanged += (_, _) => Refresh();
+        armMove.SettingChanged += (_, _) => Refresh();
+        armTurn.SettingChanged += (_, _) => Refresh();
+        Refresh();
+    }
+
+    private ConfigEntry<float> BindAmount(string key, float defaultValue, string description)
+    {
+        return Config.Bind("瞄准摆动", key, defaultValue,
+            new ConfigDescription(description, new AcceptableValueRange<float>(0f, 1f)));
     }
 
     private ConfigEntry<float> BindDegrees(string section, string key, float defaultValue, string description)
