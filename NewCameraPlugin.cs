@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "新镜头";
-    public const string PluginVersion = "0.1.115";
+    public const string PluginVersion = "0.1.116";
 
     private void Awake()
     {
@@ -92,11 +92,11 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         ConfigEntry<float> mouseSmooth = Config.Bind("瞄准摆动", "鼠标抹匀（秒）", 0.05f,
             new ConfigDescription("瞄准时把鼠标每帧给的转动抹匀再交给游戏，和中键扭头去卡顿的办法一样。数越大越顺但越慢，0 是不抹匀。",
                 new AcceptableValueRange<float>(0f, 0.15f)));
-        ConfigEntry<float> cameraSway = BindAmount("画面跟着头晃", 1f,
-            "瞄准时画面跟着头自己的细小晃动（呼吸、站着时身体起伏等）走多少。0 是画面停在鼠标朝向加头的固定偏角上，不晃；1 是完全跟着头晃。");
+        ConfigEntry<float> breath = BindAmount("呼吸", 1f,
+            "手臂和枪跟着慢晃（多半是呼吸）转多少。四个摆动滑条只管快的晃动，这个管更慢的那部分。0 是不跟着转，1 是游戏原样。");
         void Refresh()
         {
-            AimArms.CameraSway = cameraSway.Value;
+            AimArms.Breath = breath.Value;
             AimArms.MouseSmoothSeconds = mouseSmooth.Value;
             AimArms.FollowDelay = followDelay.Value;
             AimArms.Chase = chase.Value;
@@ -107,7 +107,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
             AimArms.ArmTurn = armTurn.Value;
         }
 
-        cameraSway.SettingChanged += (_, _) => Refresh();
+        breath.SettingChanged += (_, _) => Refresh();
         mouseSmooth.SettingChanged += (_, _) => Refresh();
         followDelay.SettingChanged += (_, _) => Refresh();
         chase.SettingChanged += (_, _) => Refresh();
@@ -227,7 +227,6 @@ internal static class NewCameraSwitch
                 _posePosition = CameraPosition.Resolve(head.position, _poseRotation);
                 LogFreeLook(player, lastRotation);
                 AimArms.ObserveHead(player, _posePosition, _poseRotation);
-                AimArms.CalmCamera(ref _posePosition, ref _poseRotation);
                 AimArms.AlignToCamera(player, _posePosition, _poseRotation);
                 _poseFrame = Time.frameCount;
             }

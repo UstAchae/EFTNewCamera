@@ -40,7 +40,8 @@ internal static class AimArms
     internal static float HeadFollow;
     internal static bool Chase = true;
     internal static float FollowDelay;
-    internal static float CameraSway = 1f;
+    internal static float Breath = 1f;
+    private const float BreathCenterSeconds = 6f;
     internal static float MouseSmoothSeconds = 0.05f;
     private static Vector2 _pendingMouse;
     private static bool _releasingMouse;
@@ -61,6 +62,8 @@ internal static class AimArms
     private static Quaternion _armTurnMean = Quaternion.identity;
     private static Quaternion _gunTurnMean = Quaternion.identity;
     private static float _meanStart;
+    private static Quaternion _armTurnCenter = Quaternion.identity;
+    private static Quaternion _gunTurnCenter = Quaternion.identity;
     private static Quaternion _lagLook = Quaternion.identity;
     private static Vector3 _gunMoveSmooth;
     private static Quaternion _gunTurnSmooth = Quaternion.identity;
@@ -364,6 +367,8 @@ internal static class AimArms
             _gunMoveMean = rawGunMove;
             _armTurnMean = armTurn;
             _gunTurnMean = rawGunTurn;
+            _armTurnCenter = armTurn;
+            _gunTurnCenter = rawGunTurn;
             _meanSightId = sightId;
             _meanStart = Time.time;
             _hasMean = true;
@@ -423,8 +428,19 @@ internal static class AimArms
                 Signed(_smoothLook.eulerAngles.x)));
         }
 
-        Quaternion keptArm = _armTurnMean * Scale(Quaternion.Inverse(_armTurnMean) * armTurn, ArmTurn);
-        Quaternion keptGun = _gunTurnMean * Scale(Quaternion.Inverse(_gunTurnMean) * gunTurn, GunTurn);
+        float slow;
+        if (Time.time - _meanStart < AimInSeconds)
+            slow = follow;
+        else if (Time.time < _leanUntil)
+            slow = FollowDelay > 0f ? 1f - Mathf.Exp(-Time.deltaTime / FollowDelay) : 1f;
+        else
+            slow = 1f - Mathf.Exp(-Time.deltaTime / BreathCenterSeconds);
+        _armTurnCenter = Quaternion.Slerp(_armTurnCenter, _armTurnMean, slow).normalized;
+        _gunTurnCenter = Quaternion.Slerp(_gunTurnCenter, _gunTurnMean, slow).normalized;
+        Quaternion armBase = _armTurnCenter * Scale(Quaternion.Inverse(_armTurnCenter) * _armTurnMean, Breath);
+        Quaternion gunBase = _gunTurnCenter * Scale(Quaternion.Inverse(_gunTurnCenter) * _gunTurnMean, Breath);
+        Quaternion keptArm = armBase * Scale(Quaternion.Inverse(_armTurnMean) * armTurn, ArmTurn);
+        Quaternion keptGun = gunBase * Scale(Quaternion.Inverse(_gunTurnMean) * gunTurn, GunTurn);
         turn = cameraRotation * keptArm * keptGun * Quaternion.Inverse(armTurn * rawGunTurn) * toCamera;
     }
 
@@ -452,16 +468,6 @@ internal static class AimArms
         }
 
         _hasObserved = true;
-    }
-
-    internal static void CalmCamera(ref Vector3 position, ref Quaternion rotation)
-    {
-        if (!_hasObserved || CameraSway >= 1f || _headLock <= 0f)
-            return;
-
-        float weight = _headLock * _headLock * (3f - 2f * _headLock) * (1f - CameraSway);
-        position = Vector3.Lerp(position, _neckPosition + _smoothLook * _centerPosition, weight);
-        rotation = Quaternion.Slerp(rotation, _smoothLook * _centerTurn, weight);
     }
 
     private static float CenterFollow()
