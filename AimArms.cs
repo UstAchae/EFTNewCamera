@@ -39,15 +39,15 @@ internal static class AimArms
         public float ArmTurn;
         public float HeadFollow;
         public float Breath;
+        public float Recenter;
     }
 
-    internal static readonly SwayAmounts Normal = new() { GunMove = 0.2f, GunTurn = 0.2f, ArmMove = 0.2f, ArmTurn = 0.2f, HeadFollow = 0.2f, Breath = 1f };
-    internal static readonly SwayAmounts Holding = new();
-    internal static readonly SwayAmounts Exhausted = new() { GunMove = 1f, GunTurn = 1f, ArmMove = 1f, ArmTurn = 1f, HeadFollow = 1f, Breath = 1f };
-    private static readonly SwayAmounts Now = new() { GunMove = 0.2f, GunTurn = 0.2f, ArmMove = 0.2f, ArmTurn = 0.2f, HeadFollow = 0.2f, Breath = 1f };
+    internal static readonly SwayAmounts Normal = new() { GunMove = 0.2f, GunTurn = 0.2f, ArmMove = 0.2f, ArmTurn = 0.2f, HeadFollow = 0.2f, Breath = 1f, Recenter = 1f };
+    internal static readonly SwayAmounts Holding = new() { Recenter = 10f };
+    internal static readonly SwayAmounts Exhausted = new() { GunMove = 1f, GunTurn = 1f, ArmMove = 1f, ArmTurn = 1f, HeadFollow = 1f, Breath = 1f, Recenter = 1f };
+    private static readonly SwayAmounts Now = new() { GunMove = 0.2f, GunTurn = 0.2f, ArmMove = 0.2f, ArmTurn = 0.2f, HeadFollow = 0.2f, Breath = 1f, Recenter = 1f };
     internal static bool Chase = true;
     internal static float FollowDelay;
-    internal static float RecenterSeconds = 1f;
     internal static float MouseSmoothSeconds = 0.05f;
     private static Vector2 _pendingMouse;
     private static bool _releasingMouse;
@@ -624,6 +624,7 @@ internal static class AimArms
         Now.ArmTurn = Mix(Normal.ArmTurn, Holding.ArmTurn, Exhausted.ArmTurn);
         Now.HeadFollow = Mix(Normal.HeadFollow, Holding.HeadFollow, Exhausted.HeadFollow);
         Now.Breath = Mix(Normal.Breath, Holding.Breath, Exhausted.Breath);
+        Now.Recenter = Mix(Normal.Recenter, Holding.Recenter, Exhausted.Recenter);
     }
 
     private static float Smooth(float t)
@@ -680,7 +681,7 @@ internal static class AimArms
 
     private static float CenterFollow()
     {
-        return RecenterSeconds > 0f ? 1f - Mathf.Exp(-Time.deltaTime / RecenterSeconds) : 1f;
+        return Now.Recenter > 0f ? 1f - Mathf.Exp(-Time.deltaTime / Now.Recenter) : 1f;
     }
 
     private static bool UpdateTurn(Player player, Quaternion rawCamera)

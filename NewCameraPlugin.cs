@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "新镜头";
-    public const string PluginVersion = "0.1.125";
+    public const string PluginVersion = "0.1.126";
 
     private void Awake()
     {
@@ -74,9 +74,9 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 
     private void BindSway()
     {
-        BindSwaySet("瞄准摆动-平时", "平时（不屏息、手臂有体力）", AimArms.Normal, 0.2f, 1f);
-        BindSwaySet("瞄准摆动-屏息", "按住左 Alt 屏息时", AimArms.Holding, 0f, 0f);
-        BindSwaySet("瞄准摆动-没体力", "手臂没体力时（优先于屏息）", AimArms.Exhausted, 1f, 1f);
+        BindSwaySet("瞄准摆动-平时", "平时（不屏息、手臂有体力）", AimArms.Normal, 0.2f, 1f, 1f);
+        BindSwaySet("瞄准摆动-屏息", "按住左 Alt 屏息时", AimArms.Holding, 0f, 0f, 10f);
+        BindSwaySet("瞄准摆动-没体力", "手臂没体力时（优先于屏息）", AimArms.Exhausted, 1f, 1f, 1f);
         ConfigEntry<bool> chase = Config.Bind("瞄准摆动", "照原版慢半拍跟上", true,
             "打开时瞄具不再每帧钉死在眼前，而是像原版第一人称那样慢半拍追过去，拉栓这类快动作会先把枪带走再回来。关掉就是每帧钉死。");
         ConfigEntry<float> followDelay = Config.Bind("瞄准摆动", "跟手延迟（秒）", 0f,
@@ -88,19 +88,14 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         ConfigEntry<float> recoilKick = Config.Bind("瞄准摆动", "后坐力上跳", 1f,
             new ConfigDescription("瞄准开枪时枪口上跳的力度，1 是原版第一人称的力度，0 是不跳。子弹跟着枪口走。不受上面摆动滑条影响。",
                 new AcceptableValueRange<float>(0f, 2f)));
-        ConfigEntry<float> recenter = Config.Bind("瞄准摆动", "回正时间（秒）", 1f,
-            new ConfigDescription("枪任何时候都在往正确的瞄准位置追，这是追上要的时间。开镜、换姿势、探头、碰到障碍都一样。数越小回正越快，但头部和呼吸的慢晃也会被一起追掉、显得更小。0 是立刻。",
-                new AcceptableValueRange<float>(0f, 10f)));
         void Refresh()
         {
-            AimArms.RecenterSeconds = recenter.Value;
             AimArms.RecoilKick = recoilKick.Value;
             AimArms.MouseSmoothSeconds = mouseSmooth.Value;
             AimArms.FollowDelay = followDelay.Value;
             AimArms.Chase = chase.Value;
         }
 
-        recenter.SettingChanged += (_, _) => Refresh();
         recoilKick.SettingChanged += (_, _) => Refresh();
         mouseSmooth.SettingChanged += (_, _) => Refresh();
         followDelay.SettingChanged += (_, _) => Refresh();
@@ -108,8 +103,11 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         Refresh();
     }
 
-    private void BindSwaySet(string section, string when, AimArms.SwayAmounts target, float sway, float breathDefault)
+    private void BindSwaySet(string section, string when, AimArms.SwayAmounts target, float sway, float breathDefault, float recenterDefault)
     {
+        ConfigEntry<float> recenter = Config.Bind(section, "回正时间（秒）", recenterDefault,
+            new ConfigDescription(when + "：枪任何时候都在往正确的瞄准位置追，这是追上要的时间。开镜、换姿势、探头、碰到障碍都一样。数越小回正越快，但头随呼吸的起伏也会被追进去，瞄的位置跟着变；数越大瞄的位置越稳。0 是立刻。",
+                new AcceptableValueRange<float>(0f, 10f)));
         ConfigEntry<float> gunMove = BindAmount(section, "枪的平移", sway,
             when + "：枪自己的晃（转视角时的甩动、后坐力等）带来的平移。0 是瞄具钉在眼前不动，1 是游戏原样。");
         ConfigEntry<float> gunTurn = BindAmount(section, "枪的旋转", sway,
@@ -130,8 +128,10 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
             target.ArmTurn = armTurn.Value;
             target.HeadFollow = headFollow.Value;
             target.Breath = breath.Value;
+            target.Recenter = recenter.Value;
         }
 
+        recenter.SettingChanged += (_, _) => Refresh();
         gunMove.SettingChanged += (_, _) => Refresh();
         gunTurn.SettingChanged += (_, _) => Refresh();
         armMove.SettingChanged += (_, _) => Refresh();
