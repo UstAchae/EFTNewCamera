@@ -27,6 +27,8 @@ internal static class AimArms
     private const float GunSmoothSeconds = 0.04f;
     private const float HeadSmoothSeconds = 0.05f;
     private const float ReleaseSeconds = 0.3f;
+    private const float LookSmoothSeconds = 0.05f;
+    private const float CenterSeconds = 3f;
 
     internal static float ForwardDistance;
     internal static float GunMove;
@@ -60,8 +62,14 @@ internal static class AimArms
     private static bool _hasChase;
     private static Vector3 _chase;
     private static bool _hasHeadMean;
-    private static Vector3 _headPositionMean;
-    private static Quaternion _headTurnMean = Quaternion.identity;
+    private static bool _hasCenter;
+    private static bool _hasObserved;
+    private static Quaternion _smoothLook = Quaternion.identity;
+    private static Vector3 _neckPosition;
+    private static Vector3 _headPositionNow;
+    private static Quaternion _headTurnNow = Quaternion.identity;
+    private static Vector3 _centerPosition;
+    private static Quaternion _centerTurn = Quaternion.identity;
     private static Vector3 _heldHeadPosition;
     private static Quaternion _heldHeadTurn = Quaternion.identity;
     private static float _release;
@@ -332,13 +340,15 @@ internal static class AimArms
             float speedNow = animation.AimingSpeed * animation.CameraSmoothBlender.Value;
             Vector3 lag = (pinned - _chase) * 100f;
             Log.LogInfo(string.Format(System.Globalization.CultureInfo.InvariantCulture,
-                "开镜 t={0:F3} dt={1:F4} 手臂位置cm=({2:F2},{3:F2},{4:F2}) 枪自身位置cm=({5:F2},{6:F2},{7:F2}) 手臂转角={8:F2} 枪自身转角={9:F2} 追的差cm=({10:F2},{11:F2},{12:F2}) 追速={13:F2} 混合={14:F2} 头偏平均角={15:F2} 头偏平均cm=({16:F2},{17:F2},{18:F2})",
+                "开镜 t={0:F3} dt={1:F4} 手臂位置cm=({2:F2},{3:F2},{4:F2}) 枪自身位置cm=({5:F2},{6:F2},{7:F2}) 手臂转角={8:F2} 枪自身转角={9:F2} 追的差cm=({10:F2},{11:F2},{12:F2}) 追速={13:F2} 混合={14:F2} 头偏中心角={15:F2} 头偏中心cm=({16:F2},{17:F2},{18:F2}) 中心偏角=({19:F2},{20:F2},{21:F2}) 俯仰={22:F1}",
                 1.5f - (_logUntil - Time.time), Time.deltaTime,
                 armMove.x * 100f, armMove.y * 100f, armMove.z * 100f,
                 rawGunMove.x * 100f, rawGunMove.y * 100f, rawGunMove.z * 100f,
                 Quaternion.Angle(_armTurnMean, armTurn), Quaternion.Angle(_gunTurnMean, rawGunTurn),
                 lag.x, lag.y, lag.z, speedNow, _blend,
-                _logHeadTurn, _logHeadShift.x, _logHeadShift.y, _logHeadShift.z));
+                _logHeadTurn, _logHeadShift.x, _logHeadShift.y, _logHeadShift.z,
+                Signed(_centerTurn.eulerAngles.x), Signed(_centerTurn.eulerAngles.y), Signed(_centerTurn.eulerAngles.z),
+                Signed(_smoothLook.eulerAngles.x)));
         }
 
         Quaternion keptArm = _armTurnMean * Scale(Quaternion.Inverse(_armTurnMean) * armTurn, ArmTurn);
@@ -346,10 +356,13 @@ internal static class AimArms
         turn = cameraRotation * keptArm * keptGun * Quaternion.Inverse(armTurn * rawGunTurn) * toCamera;
     }
 
-    private static void SteadyHead(Player player, Vector3 cameraPosition, Quaternion cameraRotation, out Vector3 position, out Quaternion rotation)
+    internal static void ObserveHead(Player player, Vector3 cameraPosition, Quaternion cameraRotation)
     {
-        position = cameraPosition;
-        rotation = cameraRotation;
+        _hasObserved = false;
+        Transform? neck = player.PlayerBones?.Neck;
+        if (neck == null)
+            return;
+
         Vector2 mouse;
         try
         {
@@ -363,43 +376,61 @@ internal static class AimArms
         }
 
         Quaternion look = Quaternion.Euler(mouse.y, mouse.x, 0f);
-        Transform root = ((Component)player).transform;
-        Vector3 headPosition = Quaternion.Inverse(root.rotation) * (cameraPosition - root.position);
-        Quaternion headTurn = Quaternion.Inverse(look) * cameraRotation;
+        if (!_hasCenter)
+            _smoothLook = look;
+        else
+            _smoothLook = Quaternion.Slerp(_smoothLook, look, 1f - Mathf.Exp(-Time.deltaTime / LookSmoothSeconds)).normalized;
+
+        _neckPosition = neck.position;
+        _headPositionNow = Quaternion.Inverse(_smoothLook) * (cameraPosition - _neckPosition);
+        _headTurnNow = Quaternion.Inverse(_smoothLook) * cameraRotation;
+        if (!_hasCenter)
+        {
+            _centerPosition = _headPositionNow;
+            _centerTurn = _headTurnNow;
+            _hasCenter = true;
+        }
+        else if (_smoothedHead.sqrMagnitude <= 0.01f)
+        {
+            float follow = 1f - Mathf.Exp(-Time.deltaTime / CenterSeconds);
+            _centerPosition = Vector3.Lerp(_centerPosition, _headPositionNow, follow);
+            _centerTurn = Quaternion.Slerp(_centerTurn, _headTurnNow, follow).normalized;
+        }
+
+        _hasObserved = true;
+    }
+
+    private static void SteadyHead(Player player, Vector3 cameraPosition, Quaternion cameraRotation, out Vector3 position, out Quaternion rotation)
+    {
+        position = cameraPosition;
+        rotation = cameraRotation;
+        if (!_hasObserved)
+            return;
+
         if (_smoothedHead.sqrMagnitude > 0.01f)
         {
             if (!_hasHeadMean)
             {
-                _headPositionMean = headPosition;
-                _headTurnMean = Quaternion.identity;
-                _heldHeadPosition = headPosition;
-                _heldHeadTurn = Quaternion.identity;
+                _heldHeadPosition = _centerPosition;
+                _heldHeadTurn = _centerTurn;
                 _hasHeadMean = true;
             }
             _release = 1f;
-            position = root.position + root.rotation * _heldHeadPosition;
-            rotation = look * _heldHeadTurn;
+            position = _neckPosition + _smoothLook * _heldHeadPosition;
+            rotation = _smoothLook * _heldHeadTurn;
             return;
         }
 
         if (!_hasHeadMean)
         {
-            _headPositionMean = headPosition;
-            _headTurnMean = headTurn;
             _release = 0f;
             _hasHeadMean = true;
         }
-        else
-        {
-            float follow = 1f - Mathf.Exp(-Time.deltaTime / MeanSeconds);
-            _headPositionMean = Vector3.Lerp(_headPositionMean, headPosition, follow);
-            _headTurnMean = Quaternion.Slerp(_headTurnMean, headTurn, follow).normalized;
-        }
 
-        _logHeadTurn = Quaternion.Angle(_headTurnMean, headTurn);
-        _logHeadShift = (headPosition - _headPositionMean) * 100f;
-        Vector3 steadyPosition = Vector3.Lerp(_headPositionMean, headPosition, HeadFollow);
-        Quaternion steadyTurn = _headTurnMean * Scale(Quaternion.Inverse(_headTurnMean) * headTurn, HeadFollow);
+        _logHeadTurn = Quaternion.Angle(_centerTurn, _headTurnNow);
+        _logHeadShift = (_headPositionNow - _centerPosition) * 100f;
+        Vector3 steadyPosition = Vector3.Lerp(_centerPosition, _headPositionNow, HeadFollow);
+        Quaternion steadyTurn = _centerTurn * Scale(Quaternion.Inverse(_centerTurn) * _headTurnNow, HeadFollow);
         if (_release > 0f)
         {
             _release = Mathf.Max(0f, _release - Time.deltaTime / ReleaseSeconds);
@@ -410,8 +441,8 @@ internal static class AimArms
 
         _heldHeadPosition = steadyPosition;
         _heldHeadTurn = steadyTurn;
-        position = root.position + root.rotation * steadyPosition;
-        rotation = look * steadyTurn;
+        position = _neckPosition + _smoothLook * steadyPosition;
+        rotation = _smoothLook * steadyTurn;
     }
 
     private static void RotateHeadPrefix(PlayerBones __instance, ref Vector3 offset)
@@ -432,6 +463,11 @@ internal static class AimArms
         }
 
         offset = _smoothedHead;
+    }
+
+    private static float Signed(float degrees)
+    {
+        return degrees > 180f ? degrees - 360f : degrees;
     }
 
     private static Quaternion Scale(Quaternion rotation, float amount)
