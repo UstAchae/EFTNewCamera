@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "新镜头";
-    public const string PluginVersion = "0.1.90";
+    public const string PluginVersion = "0.1.91";
 
     private void Awake()
     {
@@ -33,9 +33,14 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
     private void BindSwayAmount()
     {
         ConfigEntry<float> sway = Config.Bind("瞄准", "摆动幅度", 0.5f,
-            new ConfigDescription("瞄准时枪的所有摆动一起按这个比例缩放：站着、走路、手臂、身体，拉栓等动作和后坐力也在内。1 表示照游戏原样摆，0 表示完全不摆。", new AcceptableValueRange<float>(0f, 1f)));
+            new ConfigDescription("瞄准时画面和枪的所有摆动一起按这个比例缩放：头、站着、走路、手臂、身体，拉栓等动作也在内，后坐力不在内。1 表示照游戏原样摆，0 表示只跟鼠标走、完全不摆。", new AcceptableValueRange<float>(0f, 1f)));
         sway.SettingChanged += (_, _) => AimArms.SwayAmount = sway.Value;
         AimArms.SwayAmount = sway.Value;
+
+        ConfigEntry<float> recoil = Config.Bind("瞄准", "后坐力幅度", 1f,
+            new ConfigDescription("瞄准时开枪把枪往后顶的那一下，单独按这个比例缩放，不受「摆动幅度」影响。1 表示照游戏原样，0 表示枪不被顶动。", new AcceptableValueRange<float>(0f, 1f)));
+        recoil.SettingChanged += (_, _) => AimArms.RecoilAmount = recoil.Value;
+        AimArms.RecoilAmount = recoil.Value;
     }
 
     private void BindCone()
