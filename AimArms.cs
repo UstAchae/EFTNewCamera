@@ -27,8 +27,9 @@ internal static class AimArms
     private const float GunSmoothSeconds = 0.04f;
     private const float HeadSmoothSeconds = 0.05f;
     private const float ReleaseSeconds = 0.3f;
-    internal static float CenterSeconds = 3f;
-    private const float LeanSettleSeconds = 0.3f;
+    private const float CenterSeconds = 10f;
+    private const float SettleSeconds = 0.3f;
+    private const float AimSettleSeconds = 1f;
     private const float LookSmoothSeconds = 0.05f;
     private const float HeadLockSeconds = 0.2f;
 
@@ -76,7 +77,9 @@ internal static class AimArms
     private static bool _hasHeadMean;
     private static bool _hasCenter;
     private static float _lastTilt;
-    private static float _leanUntil;
+    private static float _lastPose;
+    private static bool _lastAiming;
+    private static float _settleUntil;
     private static bool _hasCenterPosition;
     private static int _turnFrame = -1;
     private static Quaternion _headTurnSmooth = Quaternion.identity;
@@ -495,7 +498,7 @@ internal static class AimArms
         float slow;
         if (Time.time - _meanStart < AimInSeconds)
             slow = follow;
-        else if (Time.time < _leanUntil)
+        else if (Time.time < _settleUntil)
             slow = FollowDelay > 0f ? 1f - Mathf.Exp(-Time.deltaTime / FollowDelay) : 1f;
         else
             slow = 1f - Mathf.Exp(-Time.deltaTime / BreathCenterSeconds);
@@ -536,21 +539,25 @@ internal static class AimArms
 
     private static float CenterFollow()
     {
-        if (Time.time < _leanUntil)
+        if (Time.time < _settleUntil)
             return FollowDelay > 0f ? 1f - Mathf.Exp(-Time.deltaTime / FollowDelay) : 1f;
-        return CenterSeconds > 0f ? 1f - Mathf.Exp(-Time.deltaTime / CenterSeconds) : 1f;
+        return 1f - Mathf.Exp(-Time.deltaTime / CenterSeconds);
     }
 
     private static bool UpdateTurn(Player player, Quaternion rawCamera)
     {
         Vector2 mouse;
         float tilt;
+        float pose;
+        bool aiming;
         try
         {
             if (player.MovementContext == null)
                 return false;
             mouse = player.MovementContext.Rotation;
             tilt = player.MovementContext.SmoothedTilt;
+            pose = player.MovementContext.SmoothedPoseLevel;
+            aiming = player.HandsController != null && player.HandsController.IsAiming;
         }
         catch
         {
@@ -572,9 +579,13 @@ internal static class AimArms
         if (behind > MaxDelayDegrees)
             _lagLook = Quaternion.Slerp(_smoothLook, _lagLook, MaxDelayDegrees / behind).normalized;
 
-        if (Mathf.Abs(tilt - _lastTilt) > 0.0001f)
-            _leanUntil = Time.time + LeanSettleSeconds;
+        if (aiming && !_lastAiming)
+            _settleUntil = Mathf.Max(_settleUntil, Time.time + AimSettleSeconds);
+        if (Mathf.Abs(tilt - _lastTilt) > 0.0001f || Mathf.Abs(pose - _lastPose) > 0.0001f)
+            _settleUntil = Mathf.Max(_settleUntil, Time.time + SettleSeconds);
+        _lastAiming = aiming;
         _lastTilt = tilt;
+        _lastPose = pose;
 
         Quaternion rawTurn = Quaternion.Inverse(_smoothLook) * rawCamera;
         if (!_hasCenter)

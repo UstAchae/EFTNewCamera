@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "新镜头";
-    public const string PluginVersion = "0.1.118";
+    public const string PluginVersion = "0.1.119";
 
     private void Awake()
     {
@@ -87,19 +87,15 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         ConfigEntry<bool> chase = Config.Bind("瞄准摆动", "照原版慢半拍跟上", true,
             "打开时瞄具不再每帧钉死在眼前，而是像原版第一人称那样慢半拍追过去，拉栓这类快动作会先把枪带走再回来。关掉就是每帧钉死。");
         ConfigEntry<float> followDelay = Config.Bind("瞄准摆动", "跟手延迟（秒）", 0f,
-            new ConfigDescription("晃鼠标时枪慢半拍跟上的快慢，数越大越慢。0 是不延迟。站着和走路都一样。",
+            new ConfigDescription("晃鼠标时枪慢半拍跟上的快慢，数越大越慢。0 是不延迟。站着和走路都一样。开镜、探头、蹲起时枪回正也按这个速度。",
                 new AcceptableValueRange<float>(0f, 0.3f)));
         ConfigEntry<float> mouseSmooth = Config.Bind("瞄准摆动", "鼠标抹匀（秒）", 0.05f,
             new ConfigDescription("瞄准时把鼠标每帧给的转动抹匀再交给游戏，和中键扭头去卡顿的办法一样。数越大越顺但越慢，0 是不抹匀。",
                 new AcceptableValueRange<float>(0f, 0.15f)));
         ConfigEntry<float> breath = BindAmount("呼吸", 1f,
             "手臂和枪跟着慢晃（多半是呼吸）转多少。四个摆动滑条只管快的晃动，这个管更慢的那部分。0 是不跟着转，1 是游戏原样。");
-        ConfigEntry<float> centerSeconds = Config.Bind("瞄准摆动", "头中心跟随（秒）", 3f,
-            new ConfigDescription("枪对准的“鼠标朝向加头的固定偏角”里，那个偏角跟上头的姿势变化要多久。开镜后枪回正慢就调短；调短后头的细小晃动会更多地带到枪上，0 就是完全跟头走。",
-                new AcceptableValueRange<float>(0f, 5f)));
         void Refresh()
         {
-            AimArms.CenterSeconds = centerSeconds.Value;
             AimArms.Breath = breath.Value;
             AimArms.MouseSmoothSeconds = mouseSmooth.Value;
             AimArms.FollowDelay = followDelay.Value;
@@ -111,7 +107,6 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
             AimArms.ArmTurn = armTurn.Value;
         }
 
-        centerSeconds.SettingChanged += (_, _) => Refresh();
         breath.SettingChanged += (_, _) => Refresh();
         mouseSmooth.SettingChanged += (_, _) => Refresh();
         followDelay.SettingChanged += (_, _) => Refresh();
