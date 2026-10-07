@@ -29,6 +29,7 @@ internal static class AimArms
     internal static float ArmMove = 1f;
     internal static float ArmTurn = 1f;
     internal static float HeadFollow;
+    internal static bool Chase = true;
 
     private static bool _suppress;
     private static bool _blendAiming;
@@ -44,6 +45,8 @@ internal static class AimArms
     private static Vector3 _gunMoveMean;
     private static Quaternion _armTurnMean = Quaternion.identity;
     private static Quaternion _gunTurnMean = Quaternion.identity;
+    private static bool _hasChase;
+    private static Vector3 _chase;
     private static bool _hasHeadMean;
     private static Vector3 _headPositionMean;
     private static Quaternion _headTurnMean = Quaternion.identity;
@@ -137,7 +140,7 @@ internal static class AimArms
                 Vector3 aimPoint = new Vector3(0f, 0f, ForwardDistance + relief);
                 SteadyHead(player, cameraPosition, cameraRotation, out Vector3 steadyPosition, out Quaternion steadyRotation);
                 if (bones.Weapon_Root_Third != null && bones.Weapon_Root_Anim != null)
-                    Sway(bones.Weapon_Root_Third, bones.Weapon_Root_Anim, bone.position, sightId, steadyPosition, steadyRotation, aimPoint, out target, out turn);
+                    Sway(animation, bones.Weapon_Root_Third, bones.Weapon_Root_Anim, bone.position, sightId, steadyPosition, steadyRotation, aimPoint, out target, out turn);
                 else
                     target = steadyPosition - bone.position + steadyRotation * aimPoint;
             }
@@ -233,7 +236,7 @@ internal static class AimArms
         transform.SetPositionAndRotation(pivot + displacement + turn * (transform.position - pivot), turn * transform.rotation);
     }
 
-    private static void Sway(Transform third, Transform anim, Vector3 sight, int sightId, Vector3 cameraPosition, Quaternion cameraRotation, Vector3 aimPoint, out Vector3 displacement, out Quaternion turn)
+    private static void Sway(ProceduralWeaponAnimation animation, Transform third, Transform anim, Vector3 sight, int sightId, Vector3 cameraPosition, Quaternion cameraRotation, Vector3 aimPoint, out Vector3 displacement, out Quaternion turn)
     {
         Quaternion toCamera = Quaternion.Inverse(cameraRotation);
         Vector3 sightOnThird = third.position + third.rotation * (Quaternion.Inverse(anim.rotation) * (sight - anim.position));
@@ -250,6 +253,7 @@ internal static class AimArms
             _gunTurnMean = gunTurn;
             _meanSightId = sightId;
             _hasMean = true;
+            _hasChase = false;
         }
         else
         {
@@ -262,6 +266,24 @@ internal static class AimArms
 
         Vector3 sway = ArmMove * (armMove - _armMoveMean) + GunMove * (gunMove - _gunMoveMean);
         displacement = cameraPosition + cameraRotation * (aimPoint + sway) - sight;
+        Vector3 pinned = toCamera * displacement;
+        if (Chase && _hasChase)
+        {
+            float speed = animation.AimingSpeed * animation.CameraSmoothBlender.Value;
+            if (speed <= 0f)
+                speed = 16f;
+            float side = 1f - Mathf.Exp(-speed * Time.deltaTime);
+            float depth = 1f - Mathf.Exp(-animation.CameraSmoothTime * Time.deltaTime);
+            _chase.x += (pinned.x - _chase.x) * side;
+            _chase.y += (pinned.y - _chase.y) * side;
+            _chase.z += (pinned.z - _chase.z) * depth;
+        }
+        else
+        {
+            _chase = pinned;
+            _hasChase = true;
+        }
+        displacement = cameraRotation * _chase;
 
         Quaternion keptArm = _armTurnMean * Scale(Quaternion.Inverse(_armTurnMean) * armTurn, ArmTurn);
         Quaternion keptGun = _gunTurnMean * Scale(Quaternion.Inverse(_gunTurnMean) * gunTurn, GunTurn);
@@ -503,6 +525,7 @@ internal static class AimArms
         _turnFrom = Quaternion.identity;
         _hasMean = false;
         _hasHeadMean = false;
+        _hasChase = false;
         RestoreSkins();
         if (!_suppress)
             return;
