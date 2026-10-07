@@ -28,6 +28,7 @@ internal static class AimArms
     internal static float GunTurn = 1f;
     internal static float ArmMove = 1f;
     internal static float ArmTurn = 1f;
+    internal static float HeadFollow;
 
     private static bool _suppress;
     private static bool _blendAiming;
@@ -43,6 +44,9 @@ internal static class AimArms
     private static Vector3 _gunMoveMean;
     private static Quaternion _armTurnMean = Quaternion.identity;
     private static Quaternion _gunTurnMean = Quaternion.identity;
+    private static bool _hasHeadMean;
+    private static Vector3 _headPositionMean;
+    private static Quaternion _headTurnMean = Quaternion.identity;
     private static bool _patched;
     private static bool _replayingLaser;
     private static bool _hasLaserDisplacement;
@@ -131,15 +135,19 @@ internal static class AimArms
                 sightId = bone.GetInstanceID();
                 float relief = SightRelief(animation, bone);
                 Vector3 aimPoint = new Vector3(0f, 0f, ForwardDistance + relief);
+                SteadyHead(player, cameraPosition, cameraRotation, out Vector3 steadyPosition, out Quaternion steadyRotation);
                 if (bones.Weapon_Root_Third != null && bones.Weapon_Root_Anim != null)
-                    Sway(bones.Weapon_Root_Third, bones.Weapon_Root_Anim, bone.position, sightId, cameraPosition, cameraRotation, aimPoint, out target, out turn);
+                    Sway(bones.Weapon_Root_Third, bones.Weapon_Root_Anim, bone.position, sightId, steadyPosition, steadyRotation, aimPoint, out target, out turn);
                 else
-                    target = cameraPosition - bone.position + cameraRotation * aimPoint;
+                    target = steadyPosition - bone.position + steadyRotation * aimPoint;
             }
         }
 
         if (!aiming)
+        {
             _hasMean = false;
+            _hasHeadMean = false;
+        }
 
         if (!aiming && !_blendAiming && _offset.sqrMagnitude < 0.00000001f && _turn == Quaternion.identity && _blend >= 1f)
         {
@@ -258,6 +266,43 @@ internal static class AimArms
         Quaternion keptArm = _armTurnMean * Scale(Quaternion.Inverse(_armTurnMean) * armTurn, ArmTurn);
         Quaternion keptGun = _gunTurnMean * Scale(Quaternion.Inverse(_gunTurnMean) * gunTurn, GunTurn);
         turn = cameraRotation * keptArm * keptGun * Quaternion.Inverse(armTurn * gunTurn) * toCamera;
+    }
+
+    private static void SteadyHead(Player player, Vector3 cameraPosition, Quaternion cameraRotation, out Vector3 position, out Quaternion rotation)
+    {
+        position = cameraPosition;
+        rotation = cameraRotation;
+        Vector2 mouse;
+        try
+        {
+            if (player.MovementContext == null)
+                return;
+            mouse = player.MovementContext.Rotation;
+        }
+        catch
+        {
+            return;
+        }
+
+        Quaternion look = Quaternion.Euler(mouse.y, mouse.x, 0f);
+        Transform root = ((Component)player).transform;
+        Vector3 headPosition = Quaternion.Inverse(root.rotation) * (cameraPosition - root.position);
+        Quaternion headTurn = Quaternion.Inverse(look) * cameraRotation;
+        if (!_hasHeadMean)
+        {
+            _headPositionMean = headPosition;
+            _headTurnMean = headTurn;
+            _hasHeadMean = true;
+        }
+        else
+        {
+            float follow = 1f - Mathf.Exp(-Time.deltaTime / MeanSeconds);
+            _headPositionMean = Vector3.Lerp(_headPositionMean, headPosition, follow);
+            _headTurnMean = Quaternion.Slerp(_headTurnMean, headTurn, follow).normalized;
+        }
+
+        position = root.position + root.rotation * Vector3.Lerp(_headPositionMean, headPosition, HeadFollow);
+        rotation = look * _headTurnMean * Scale(Quaternion.Inverse(_headTurnMean) * headTurn, HeadFollow);
     }
 
     private static Quaternion Scale(Quaternion rotation, float amount)
@@ -457,6 +502,7 @@ internal static class AimArms
         _turn = Quaternion.identity;
         _turnFrom = Quaternion.identity;
         _hasMean = false;
+        _hasHeadMean = false;
         RestoreSkins();
         if (!_suppress)
             return;
