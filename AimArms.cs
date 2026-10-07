@@ -45,6 +45,10 @@ internal static class AimArms
     private static Vector3 _gunMoveMean;
     private static Quaternion _armTurnMean = Quaternion.identity;
     private static Quaternion _gunTurnMean = Quaternion.identity;
+    internal static BepInEx.Logging.ManualLogSource? Log;
+    private static float _logUntil;
+    private static float _logHeadTurn;
+    private static Vector3 _logHeadShift;
     private static bool _hasChase;
     private static Vector3 _chase;
     private static bool _hasHeadMean;
@@ -254,6 +258,7 @@ internal static class AimArms
             _meanSightId = sightId;
             _hasMean = true;
             _hasChase = false;
+            _logUntil = Time.time + 1.5f;
         }
         else
         {
@@ -284,6 +289,20 @@ internal static class AimArms
             _hasChase = true;
         }
         displacement = cameraRotation * _chase;
+
+        if (Log != null && Time.time < _logUntil)
+        {
+            float speedNow = animation.AimingSpeed * animation.CameraSmoothBlender.Value;
+            Vector3 lag = (pinned - _chase) * 100f;
+            Log.LogInfo(string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                "开镜 t={0:F3} dt={1:F4} 手臂位置cm=({2:F2},{3:F2},{4:F2}) 枪自身位置cm=({5:F2},{6:F2},{7:F2}) 手臂转角={8:F2} 枪自身转角={9:F2} 追的差cm=({10:F2},{11:F2},{12:F2}) 追速={13:F2} 混合={14:F2} 头偏平均角={15:F2} 头偏平均cm=({16:F2},{17:F2},{18:F2})",
+                1.5f - (_logUntil - Time.time), Time.deltaTime,
+                armMove.x * 100f, armMove.y * 100f, armMove.z * 100f,
+                gunMove.x * 100f, gunMove.y * 100f, gunMove.z * 100f,
+                Quaternion.Angle(_armTurnMean, armTurn), Quaternion.Angle(_gunTurnMean, gunTurn),
+                lag.x, lag.y, lag.z, speedNow, _blend,
+                _logHeadTurn, _logHeadShift.x, _logHeadShift.y, _logHeadShift.z));
+        }
 
         Quaternion keptArm = _armTurnMean * Scale(Quaternion.Inverse(_armTurnMean) * armTurn, ArmTurn);
         Quaternion keptGun = _gunTurnMean * Scale(Quaternion.Inverse(_gunTurnMean) * gunTurn, GunTurn);
@@ -323,6 +342,8 @@ internal static class AimArms
             _headTurnMean = Quaternion.Slerp(_headTurnMean, headTurn, follow).normalized;
         }
 
+        _logHeadTurn = Quaternion.Angle(_headTurnMean, headTurn);
+        _logHeadShift = (headPosition - _headPositionMean) * 100f;
         position = root.position + root.rotation * Vector3.Lerp(_headPositionMean, headPosition, HeadFollow);
         rotation = look * _headTurnMean * Scale(Quaternion.Inverse(_headTurnMean) * headTurn, HeadFollow);
     }
