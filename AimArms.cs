@@ -93,8 +93,8 @@ internal static class AimArms
     private static float _leanTilt;
     private static float _leanLogUntil;
     private static Quaternion _headTurnRaw = Quaternion.identity;
-    private static bool _hasYawCenter;
-    private static float _yawCenter;
+    private static bool _hasSideCenter;
+    private static float _sideCenter;
     private static Vector3 _leanArm;
     private static float _leanArmTurn;
     private static Vector3 _leanGunMove;
@@ -170,6 +170,10 @@ internal static class AimArms
         MethodInfo? holdBreathPostfix = typeof(AimArms).GetMethod(nameof(HoldBreathPostfix), BindingFlags.NonPublic | BindingFlags.Static);
         if (holdBreath != null && holdBreathPostfix != null)
             harmony.Patch(holdBreath, postfix: new HarmonyMethod(holdBreathPostfix));
+        MethodInfo? visualPass = AccessTools.Method(typeof(Player), "VisualPass");
+        MethodInfo? visualPassPostfix = typeof(AimArms).GetMethod(nameof(VisualPassPostfix), BindingFlags.NonPublic | BindingFlags.Static);
+        if (visualPass != null && visualPassPostfix != null)
+            harmony.Patch(visualPass, postfix: new HarmonyMethod(visualPassPostfix) { priority = Priority.Last });
         PatchLaser(harmony);
         PatchFieldOfView(harmony);
         _patched = true;
@@ -605,29 +609,37 @@ internal static class AimArms
         return Quaternion.FromToRotation(sightInCamera, Vector3.forward);
     }
 
-    internal static void CalmWalkHead(Player player, Transform head)
+    private static void VisualPassPostfix(Player __instance)
     {
-        if (player.MovementContext == null || player.HeadRotation.sqrMagnitude > 0.01f || _smoothedHead.sqrMagnitude > 0.01f)
+        if (NewCameraSwitch.Enabled && __instance.IsYourPlayer)
+            CalmWalkHead(__instance);
+    }
+
+    internal static void CalmWalkHead(Player player)
+    {
+        Transform? head = player.PlayerBones?.Head?.Original;
+        if (head == null || player.MovementContext == null)
             return;
 
-        Vector3 look = Vector3.ProjectOnPlane(CameraDirection.Resolve(head.rotation) * Vector3.forward, Vector3.up);
-        if (look.sqrMagnitude < 0.0001f)
-            return;
-
-        float yaw = Vector3.SignedAngle(Quaternion.Euler(0f, player.MovementContext.Rotation.x, 0f) * Vector3.forward, look, Vector3.up);
-        if (!_hasYawCenter)
+        Vector3 right = Quaternion.Euler(0f, player.MovementContext.Rotation.x, 0f) * Vector3.right;
+        float side = Vector3.Dot(head.position - player.Transform.position, right);
+        if (!_hasSideCenter)
         {
-            _yawCenter = yaw;
-            _hasYawCenter = true;
+            _sideCenter = side;
+            _hasSideCenter = true;
         }
         else
-            _yawCenter = Mathf.Lerp(_yawCenter, yaw, 1f - Mathf.Exp(-Time.deltaTime / 0.5f));
+            _sideCenter = Mathf.Lerp(_sideCenter, side, 1f - Mathf.Exp(-Time.deltaTime / 0.5f));
 
         float moving = Mathf.Clamp01(player.MovementContext.ActualLinearVelocity / 0.6f);
         float keep = Mathf.Lerp(1f, WalkHeadSway, moving);
-        float fix = _yawCenter + (yaw - _yawCenter) * keep - yaw;
-        if (Mathf.Abs(fix) > 0.01f)
-            head.rotation = Quaternion.AngleAxis(fix, Vector3.up) * head.rotation;
+        float fix = _sideCenter + (side - _sideCenter) * keep - side;
+        if (Mathf.Abs(fix) < 0.00005f)
+            return;
+
+        Transform? neck = player.PlayerBones.Neck;
+        Transform moved = neck != null && head.IsChildOf(neck) ? neck : head;
+        moved.position += right * fix;
     }
 
     internal static void ObserveHead(Player player, Vector3 cameraPosition, Quaternion cameraRotation)
