@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "新镜头";
-    public const string PluginVersion = "0.1.120";
+    public const string PluginVersion = "0.1.121";
 
     private void Awake()
     {
@@ -83,7 +83,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         ConfigEntry<float> armTurn = BindAmount("手臂的旋转", 0.2f,
             "人物动画带着枪走的转动（呼吸、走路、手上动作等）。0 是不转，1 是游戏原样。屏息时归零，手臂没体力时变成 1。");
         ConfigEntry<float> headFollow = BindAmount("跟随头部", 0.2f,
-            "枪跟着头的细小晃动（走路颠簸、呼吸等）走多少。0 是枪只认头晃动的中心：方向是鼠标朝向加头的固定偏角，位置是头相对脖子的中心；1 是瞄具每帧摆到头上镜头的正前方。手臂没体力时变成 1。");
+            "枪跟着头的细小晃动（走路颠簸、呼吸等）走多少。0 是枪只认头晃动的中心：方向是鼠标朝向加头的固定偏角，位置是头相对脖子的中心；1 是瞄具每帧摆到头上镜头的正前方。屏息时归零，手臂没体力时变成 1。");
         ConfigEntry<bool> chase = Config.Bind("瞄准摆动", "照原版慢半拍跟上", true,
             "打开时瞄具不再每帧钉死在眼前，而是像原版第一人称那样慢半拍追过去，拉栓这类快动作会先把枪带走再回来。关掉就是每帧钉死。");
         ConfigEntry<float> followDelay = Config.Bind("瞄准摆动", "跟手延迟（秒）", 0f,

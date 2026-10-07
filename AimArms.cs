@@ -79,6 +79,8 @@ internal static class AimArms
     private const float StateBlendSeconds = 0.3f;
     private static float _holdWeight;
     private static float _tiredWeight;
+    private static bool _logHolding;
+    private static bool _logTired;
     private static Physical? _drainOwner;
     private static bool _aimDrain;
     private static float _lastTilt;
@@ -568,6 +570,11 @@ internal static class AimArms
         {
         }
 
+        if (Log != null && (holding != _logHolding || tired != _logTired))
+            Log.LogInfo($"屏息={holding} 手臂没体力={tired}");
+        _logHolding = holding;
+        _logTired = tired;
+
         float step = Time.deltaTime / StateBlendSeconds;
         _holdWeight = Mathf.MoveTowards(_holdWeight, holding ? 1f : 0f, step);
         _tiredWeight = Mathf.MoveTowards(_tiredWeight, tired ? 1f : 0f, step);
@@ -756,8 +763,8 @@ internal static class AimArms
 
         _logHeadTurn = Quaternion.Angle(_centerTurn, _headTurnNow);
         _logHeadShift = (_headPositionNow - _centerPosition) * 100f;
-        Vector3 steadyPosition = Vector3.Lerp(_centerPosition, _headPositionNow, Tired(HeadFollow));
-        Quaternion steadyTurn = _centerTurn * Scale(Quaternion.Inverse(_centerTurn) * _headTurnNow, Tired(HeadFollow));
+        Vector3 steadyPosition = Vector3.Lerp(_centerPosition, _headPositionNow, Calm(HeadFollow));
+        Quaternion steadyTurn = _centerTurn * Scale(Quaternion.Inverse(_centerTurn) * _headTurnNow, Calm(HeadFollow));
         if (_release > 0f)
         {
             _release = Mathf.Max(0f, _release - Time.deltaTime / ReleaseSeconds);
