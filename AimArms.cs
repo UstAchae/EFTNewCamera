@@ -56,6 +56,17 @@ internal static class AimArms
     private static Quaternion _sightMeanRotation = Quaternion.identity;
     private static Vector3 _sightMeanPosition;
     private static bool _loggedArmFrame;
+    private const float MeanStartSeconds = 0.08f;
+    private const float MeanSettleSeconds = 1f;
+    private const float PlacementBlendSeconds = 0.25f;
+    private static float _sinceReset;
+    private static bool _hasShownPose;
+    private static Vector3 _shownPosition;
+    private static Quaternion _shownRotation = Quaternion.identity;
+    private static int _blendSight;
+    private static float _blend = 1f;
+    private static Vector3 _blendFromPosition;
+    private static Quaternion _blendFromRotation = Quaternion.identity;
     private static Quaternion _armMeanRotation = Quaternion.identity;
     private static Vector3 _armMeanPosition;
     private static Vector3 _turnStage1;
@@ -170,12 +181,62 @@ internal static class AimArms
             return;
         }
 
-        if (!aiming || !TryGetLook(player, out Quaternion look) || !AlignToLook(player, cameraPosition, liveRotation, look))
-        {
+        Transform? weapon = __instance.Weapon_Root_Anim;
+        if (weapon == null)
+            return;
+
+        Vector3 gamePosition = weapon.position;
+        int placedSight = 0;
+        if (aiming && TryGetLook(player, out Quaternion look) && AlignToLook(player, cameraPosition, liveRotation, look))
+            placedSight = _swaySightId;
+        else
             ClearHold();
-            _offset = Vector3.zero;
-            _hasLaserDisplacement = false;
+
+        BlendPlacement(weapon, placedSight, cameraPosition, liveRotation);
+        Vector3 target = weapon.position - gamePosition;
+        _offset = target;
+        _laserDisplacement = target;
+        _hasLaserDisplacement = target.sqrMagnitude >= 0.00000001f;
+    }
+
+    // Aiming in or out and switching sights move the gun from wherever it was last shown, in the
+    // camera's frame, to the new pose instead of jumping there.
+    private static void BlendPlacement(Transform weapon, int placedSight, Vector3 cameraPosition, Quaternion cameraRotation)
+    {
+        Quaternion toCamera = Quaternion.Inverse(cameraRotation);
+        if (!_hasShownPose)
+        {
+            _blendSight = placedSight;
+            _blend = 1f;
         }
+        else if (placedSight != _blendSight)
+        {
+            _blendSight = placedSight;
+            _blendFromPosition = _shownPosition;
+            _blendFromRotation = _shownRotation;
+            _blend = 0f;
+        }
+
+        if (_blend < 1f)
+        {
+            _blend = Mathf.Min(1f, _blend + Time.deltaTime / PlacementBlendSeconds);
+            float t = _blend * _blend * (3f - 2f * _blend);
+            Vector3 fromPosition = cameraPosition + cameraRotation * _blendFromPosition;
+            Quaternion fromRotation = cameraRotation * _blendFromRotation;
+            weapon.SetPositionAndRotation(
+                Vector3.Lerp(fromPosition, weapon.position, t),
+                Quaternion.Slerp(fromRotation, weapon.rotation, t));
+        }
+
+        _shownPosition = toCamera * (weapon.position - cameraPosition);
+        _shownRotation = toCamera * weapon.rotation;
+        _hasShownPose = true;
+    }
+
+    private static float MeanFollow()
+    {
+        float seconds = Mathf.Lerp(MeanStartSeconds, BaseSeconds, Mathf.Clamp01(_sinceReset / MeanSettleSeconds));
+        return 1f - Mathf.Exp(-Time.deltaTime / seconds);
     }
 
     private static void PatchFieldOfView(Harmony harmony)
@@ -258,7 +319,7 @@ internal static class AimArms
         }
         else
         {
-            float follow = 1f - Mathf.Exp(-Time.deltaTime / BaseSeconds);
+            float follow = MeanFollow();
             _sightMeanRotation = Quaternion.Slerp(_sightMeanRotation, sightInCamera, follow);
             _sightMeanPosition = Vector3.Lerp(_sightMeanPosition, sightInCameraPosition, follow);
         }
@@ -291,7 +352,7 @@ internal static class AimArms
         }
         else
         {
-            float follow = 1f - Mathf.Exp(-Time.deltaTime / BaseSeconds);
+            float follow = MeanFollow();
             _armMeanRotation = Quaternion.Slerp(_armMeanRotation, armRotation, follow);
             _armMeanPosition = Vector3.Lerp(_armMeanPosition, armPosition, follow);
         }
@@ -352,11 +413,13 @@ internal static class AimArms
             _shiftStage2 = Vector3.zero;
             _swaySightId = sightId;
             _hasSway = true;
+            _sinceReset = 0f;
             return Quaternion.identity;
         }
 
         float dt = Time.deltaTime;
-        float follow = 1f - Mathf.Exp(-dt / BaseSeconds);
+        _sinceReset += dt;
+        float follow = MeanFollow();
         _bodyBaseRotation = Quaternion.Slerp(_bodyBaseRotation, bodyRotation, follow);
         _bodyBasePosition = Vector3.Lerp(_bodyBasePosition, bodyPosition, follow);
         turn = Quaternion.Inverse(_bodyBaseRotation) * bodyRotation;
