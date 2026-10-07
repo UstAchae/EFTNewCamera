@@ -40,6 +40,7 @@ internal static class AimArms
     internal static float HeadFollow;
     internal static bool Chase = true;
     internal static float FollowDelay;
+    internal static float CameraSway = 1f;
     internal static float MouseSmoothSeconds = 0.05f;
     private static Vector2 _pendingMouse;
     private static bool _releasingMouse;
@@ -451,6 +452,16 @@ internal static class AimArms
         }
 
         _hasObserved = true;
+    }
+
+    internal static void CalmCamera(ref Vector3 position, ref Quaternion rotation)
+    {
+        if (!_hasObserved || CameraSway >= 1f || _headLock <= 0f)
+            return;
+
+        float weight = _headLock * _headLock * (3f - 2f * _headLock) * (1f - CameraSway);
+        position = Vector3.Lerp(position, _neckPosition + _smoothLook * _centerPosition, weight);
+        rotation = Quaternion.Slerp(rotation, _smoothLook * _centerTurn, weight);
     }
 
     private static float CenterFollow()
