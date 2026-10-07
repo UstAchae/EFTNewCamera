@@ -34,11 +34,11 @@ internal static class AimArms
     private const float HeadLockSeconds = 0.2f;
 
     internal static float ForwardDistance;
-    internal static float GunMove;
-    internal static float GunTurn = 1f;
-    internal static float ArmMove = 1f;
-    internal static float ArmTurn = 1f;
-    internal static float HeadFollow;
+    internal static float GunMove = 0.2f;
+    internal static float GunTurn = 0.2f;
+    internal static float ArmMove = 0.2f;
+    internal static float ArmTurn = 0.2f;
+    internal static float HeadFollow = 0.2f;
     internal static bool Chase = true;
     internal static float FollowDelay;
     internal static float Breath = 1f;
@@ -76,6 +76,11 @@ internal static class AimArms
     private static Vector3 _chase;
     private static bool _hasHeadMean;
     private static bool _hasCenter;
+    private const float StateBlendSeconds = 0.3f;
+    private static float _holdWeight;
+    private static float _tiredWeight;
+    private static Physical? _drainOwner;
+    private static bool _aimDrain;
     private static float _lastTilt;
     private static float _lastPose;
     private static bool _lastAiming;
@@ -143,6 +148,14 @@ internal static class AimArms
         MethodInfo? adjustShotPrefix = typeof(AimArms).GetMethod(nameof(AdjustShotPrefix), BindingFlags.NonPublic | BindingFlags.Static);
         if (adjustShot != null && adjustShotPrefix != null)
             harmony.Patch(adjustShot, prefix: new HarmonyMethod(adjustShotPrefix));
+        MethodInfo? aim = AccessTools.Method(typeof(Physical), nameof(Physical.Aim));
+        MethodInfo? aimPrefix = typeof(AimArms).GetMethod(nameof(AimPrefix), BindingFlags.NonPublic | BindingFlags.Static);
+        if (aim != null && aimPrefix != null)
+            harmony.Patch(aim, prefix: new HarmonyMethod(aimPrefix));
+        MethodInfo? holdBreath = AccessTools.Method(typeof(Physical), nameof(Physical.HoldBreath));
+        MethodInfo? holdBreathPostfix = typeof(AimArms).GetMethod(nameof(HoldBreathPostfix), BindingFlags.NonPublic | BindingFlags.Static);
+        if (holdBreath != null && holdBreathPostfix != null)
+            harmony.Patch(holdBreath, postfix: new HarmonyMethod(holdBreathPostfix));
         PatchLaser(harmony);
         PatchFieldOfView(harmony);
         _patched = true;
@@ -459,7 +472,7 @@ internal static class AimArms
         _gunTurnMean = Quaternion.Slerp(_gunTurnMean, gunTurn, follow).normalized;
 
         Vector3 smoothSight = sight + cameraRotation * (gunMove - rawGunMove);
-        Vector3 sway = ArmMove * (armMove - _armMoveMean) + GunMove * (gunMove - _gunMoveMean);
+        Vector3 sway = Calm(ArmMove) * (armMove - _armMoveMean) + Calm(GunMove) * (gunMove - _gunMoveMean);
         Vector3 pinned = toCamera * (cameraPosition + cameraRotation * (aimPoint + sway) - smoothSight);
         if (Chase && _hasChase)
         {
@@ -504,10 +517,10 @@ internal static class AimArms
             slow = 1f - Mathf.Exp(-Time.deltaTime / BreathCenterSeconds);
         _armTurnCenter = Quaternion.Slerp(_armTurnCenter, _armTurnMean, slow).normalized;
         _gunTurnCenter = Quaternion.Slerp(_gunTurnCenter, _gunTurnMean, slow).normalized;
-        Quaternion armBase = _armTurnCenter * Scale(Quaternion.Inverse(_armTurnCenter) * _armTurnMean, Breath);
-        Quaternion gunBase = _gunTurnCenter * Scale(Quaternion.Inverse(_gunTurnCenter) * _gunTurnMean, Breath);
-        Quaternion keptArm = armBase * Scale(Quaternion.Inverse(_armTurnMean) * armTurn, ArmTurn);
-        Quaternion keptGun = gunBase * Scale(Quaternion.Inverse(_gunTurnMean) * gunTurn, GunTurn);
+        Quaternion armBase = _armTurnCenter * Scale(Quaternion.Inverse(_armTurnCenter) * _armTurnMean, Calm(Breath));
+        Quaternion gunBase = _gunTurnCenter * Scale(Quaternion.Inverse(_gunTurnCenter) * _gunTurnMean, Calm(Breath));
+        Quaternion keptArm = armBase * Scale(Quaternion.Inverse(_armTurnMean) * armTurn, Calm(ArmTurn));
+        Quaternion keptGun = gunBase * Scale(Quaternion.Inverse(_gunTurnMean) * gunTurn, Calm(GunTurn));
         turn = cameraRotation * keptArm * keptGun * Quaternion.Inverse(armTurn * rawGunTurn) * toCamera;
     }
 
@@ -535,6 +548,91 @@ internal static class AimArms
         }
 
         _hasObserved = true;
+    }
+
+    private static void UpdateBreathState(Player player)
+    {
+        bool holding = false;
+        bool tired = false;
+        try
+        {
+            if (player.Physical != null)
+            {
+                holding = player.Physical.HoldingBreath;
+                tired = player.Physical.HandsStamina != null && player.Physical.HandsStamina.Exhausted;
+                if (NewCameraSwitch.Enabled && player.Physical is Physical physical)
+                    ApplyAimDrain(physical);
+            }
+        }
+        catch
+        {
+        }
+
+        float step = Time.deltaTime / StateBlendSeconds;
+        _holdWeight = Mathf.MoveTowards(_holdWeight, holding ? 1f : 0f, step);
+        _tiredWeight = Mathf.MoveTowards(_tiredWeight, tired ? 1f : 0f, step);
+    }
+
+    private static float Calm(float amount)
+    {
+        return Tired(Mathf.Lerp(amount, 0f, Smooth(_holdWeight)));
+    }
+
+    private static float Tired(float amount)
+    {
+        return Mathf.Lerp(amount, 1f, Smooth(_tiredWeight));
+    }
+
+    private static float Smooth(float t)
+    {
+        return t * t * (3f - 2f * t);
+    }
+
+    private static bool AimPrefix(Physical __instance, float mass)
+    {
+        Player? player = Singleton<GameWorld>.Instance?.MainPlayer;
+        if (player == null || !ReferenceEquals(player.Physical, __instance))
+            return true;
+        if (!NewCameraSwitch.Enabled)
+        {
+            SetAimDrain(__instance, false);
+            return true;
+        }
+
+        __instance._aimMass = mass;
+        __instance.Consumptions[Physical.EConsumptionType.Aim].Delta.SetDirty();
+        ApplyAimDrain(__instance);
+        return false;
+    }
+
+    private static void HoldBreathPostfix(Physical __instance)
+    {
+        Player? player = Singleton<GameWorld>.Instance?.MainPlayer;
+        if (player == null || !ReferenceEquals(player.Physical, __instance) || !NewCameraSwitch.Enabled)
+            return;
+        ApplyAimDrain(__instance);
+    }
+
+    private static void ApplyAimDrain(Physical physical)
+    {
+        SetAimDrain(physical, physical._aimMass > 0f && physical.HoldingBreath);
+    }
+
+    private static void SetAimDrain(Physical physical, bool active)
+    {
+        if (!ReferenceEquals(_drainOwner, physical))
+        {
+            _drainOwner = physical;
+            _aimDrain = false;
+        }
+        if (_aimDrain == active)
+            return;
+
+        _aimDrain = active;
+        Physical.Consumption consumption = physical.Consumptions[Physical.EConsumptionType.Aim];
+        consumption.SetActive(physical, active);
+        if (!active)
+            physical.Stamina.RemoveConsumption(consumption);
     }
 
     private static float CenterFollow()
@@ -579,6 +677,7 @@ internal static class AimArms
         if (behind > MaxDelayDegrees)
             _lagLook = Quaternion.Slerp(_smoothLook, _lagLook, MaxDelayDegrees / behind).normalized;
 
+        UpdateBreathState(player);
         if (aiming && !_lastAiming)
             _settleUntil = Mathf.Max(_settleUntil, Time.time + AimSettleSeconds);
         if (Mathf.Abs(tilt - _lastTilt) > 0.0001f || Mathf.Abs(pose - _lastPose) > 0.0001f)
@@ -657,8 +756,8 @@ internal static class AimArms
 
         _logHeadTurn = Quaternion.Angle(_centerTurn, _headTurnNow);
         _logHeadShift = (_headPositionNow - _centerPosition) * 100f;
-        Vector3 steadyPosition = Vector3.Lerp(_centerPosition, _headPositionNow, HeadFollow);
-        Quaternion steadyTurn = _centerTurn * Scale(Quaternion.Inverse(_centerTurn) * _headTurnNow, HeadFollow);
+        Vector3 steadyPosition = Vector3.Lerp(_centerPosition, _headPositionNow, Tired(HeadFollow));
+        Quaternion steadyTurn = _centerTurn * Scale(Quaternion.Inverse(_centerTurn) * _headTurnNow, Tired(HeadFollow));
         if (_release > 0f)
         {
             _release = Mathf.Max(0f, _release - Time.deltaTime / ReleaseSeconds);

@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "新镜头";
-    public const string PluginVersion = "0.1.119";
+    public const string PluginVersion = "0.1.120";
 
     private void Awake()
     {
@@ -74,16 +74,16 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 
     private void BindSway()
     {
-        ConfigEntry<float> gunMove = BindAmount("枪的平移", 0f,
-            "枪自己的晃（转视角时的甩动、后坐力等）带来的平移。0 是瞄具钉在眼前不动，1 是游戏原样。");
-        ConfigEntry<float> gunTurn = BindAmount("枪的旋转", 1f,
-            "枪自己的晃（转视角时的甩动、后坐力等）带来的转动。0 是不转，1 是游戏原样。");
-        ConfigEntry<float> armMove = BindAmount("手臂的平移", 0f,
-            "人物动画带着枪走的平移（呼吸、走路、手上动作等）。0 是瞄具钉在眼前不动，1 是游戏原样。");
-        ConfigEntry<float> armTurn = BindAmount("手臂的旋转", 1f,
-            "人物动画带着枪走的转动（呼吸、走路、手上动作等）。0 是不转，1 是游戏原样。");
-        ConfigEntry<float> headFollow = BindAmount("跟随头部", 0f,
-            "枪跟着头的细小晃动（走路颠簸、呼吸等）走多少。0 是枪只认头晃动的中心：方向是鼠标朝向加头的固定偏角，位置是头相对脖子的中心；1 是瞄具每帧摆到头上镜头的正前方。");
+        ConfigEntry<float> gunMove = BindAmount("枪的平移", 0.2f,
+            "枪自己的晃（转视角时的甩动、后坐力等）带来的平移。0 是瞄具钉在眼前不动，1 是游戏原样。屏息时归零，手臂没体力时变成 1。");
+        ConfigEntry<float> gunTurn = BindAmount("枪的旋转", 0.2f,
+            "枪自己的晃（转视角时的甩动、后坐力等）带来的转动。0 是不转，1 是游戏原样。屏息时归零，手臂没体力时变成 1。");
+        ConfigEntry<float> armMove = BindAmount("手臂的平移", 0.2f,
+            "人物动画带着枪走的平移（呼吸、走路、手上动作等）。0 是瞄具钉在眼前不动，1 是游戏原样。屏息时归零，手臂没体力时变成 1。");
+        ConfigEntry<float> armTurn = BindAmount("手臂的旋转", 0.2f,
+            "人物动画带着枪走的转动（呼吸、走路、手上动作等）。0 是不转，1 是游戏原样。屏息时归零，手臂没体力时变成 1。");
+        ConfigEntry<float> headFollow = BindAmount("跟随头部", 0.2f,
+            "枪跟着头的细小晃动（走路颠簸、呼吸等）走多少。0 是枪只认头晃动的中心：方向是鼠标朝向加头的固定偏角，位置是头相对脖子的中心；1 是瞄具每帧摆到头上镜头的正前方。手臂没体力时变成 1。");
         ConfigEntry<bool> chase = Config.Bind("瞄准摆动", "照原版慢半拍跟上", true,
             "打开时瞄具不再每帧钉死在眼前，而是像原版第一人称那样慢半拍追过去，拉栓这类快动作会先把枪带走再回来。关掉就是每帧钉死。");
         ConfigEntry<float> followDelay = Config.Bind("瞄准摆动", "跟手延迟（秒）", 0f,
@@ -93,7 +93,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
             new ConfigDescription("瞄准时把鼠标每帧给的转动抹匀再交给游戏，和中键扭头去卡顿的办法一样。数越大越顺但越慢，0 是不抹匀。",
                 new AcceptableValueRange<float>(0f, 0.15f)));
         ConfigEntry<float> breath = BindAmount("呼吸", 1f,
-            "手臂和枪跟着慢晃（多半是呼吸）转多少。四个摆动滑条只管快的晃动，这个管更慢的那部分。0 是不跟着转，1 是游戏原样。");
+            "手臂和枪跟着慢晃（多半是呼吸）转多少。四个摆动滑条只管快的晃动，这个管更慢的那部分。0 是不跟着转，1 是游戏原样。屏息时归零，手臂没体力时变成 1。");
         void Refresh()
         {
             AimArms.Breath = breath.Value;
