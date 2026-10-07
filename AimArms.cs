@@ -280,8 +280,8 @@ internal static class AimArms
         return true;
     }
 
-    // While walking, the arm layer's sideways swing (turning left/right about the camera's up axis
-    // and sliding along its right axis) is taken out around its slow mean; vertical motion stays.
+    // While walking, the arm layer's sideways and vertical swing (turning about the camera's up and
+    // right axes, sliding along them) is taken out around its slow mean; roll and fore-aft stay.
     private static void DropArmSideSway(Quaternion frameInCamera, bool reset, ref Quaternion armRotation, ref Vector3 armPosition)
     {
         if (reset)
@@ -302,18 +302,17 @@ internal static class AimArms
 
         Quaternion meanInCamera = frameInCamera * _armMeanRotation;
         Quaternion deviation = frameInCamera * armRotation * Quaternion.Inverse(meanInCamera);
-        Quaternion yaw = new Quaternion(0f, deviation.y, 0f, deviation.w);
-        float yawLength = Mathf.Sqrt(yaw.y * yaw.y + yaw.w * yaw.w);
-        if (yawLength > 0.0001f)
+        Quaternion roll = new Quaternion(0f, 0f, deviation.z, deviation.w);
+        float rollLength = Mathf.Sqrt(roll.z * roll.z + roll.w * roll.w);
+        if (rollLength > 0.0001f)
         {
-            yaw = new Quaternion(0f, yaw.y / yawLength, 0f, yaw.w / yawLength);
-            Quaternion withoutYaw = deviation * Quaternion.Inverse(yaw);
-            deviation = Quaternion.Slerp(deviation, withoutYaw, strength);
+            roll = new Quaternion(0f, 0f, roll.z / rollLength, roll.w / rollLength);
+            deviation = Quaternion.Slerp(deviation, roll, strength);
             armRotation = Quaternion.Inverse(frameInCamera) * deviation * meanInCamera;
         }
 
         Vector3 slide = frameInCamera * (armPosition - _armMeanPosition);
-        armPosition -= Quaternion.Inverse(frameInCamera) * new Vector3(slide.x * strength, 0f, 0f);
+        armPosition -= Quaternion.Inverse(frameInCamera) * new Vector3(slide.x * strength, slide.y * strength, 0f);
     }
 
     private static Transform ArmFrame(PlayerBones bones, Transform body)
