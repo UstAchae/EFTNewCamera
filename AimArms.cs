@@ -27,9 +27,6 @@ internal static class AimArms
     private const float GunSmoothSeconds = 0.04f;
     private const float HeadSmoothSeconds = 0.05f;
     private const float ReleaseSeconds = 0.3f;
-    private const float CenterSeconds = 10f;
-    private const float SettleSeconds = 0.3f;
-    private const float AimSettleSeconds = 1f;
     private const float LookSmoothSeconds = 0.05f;
     private const float HeadLockSeconds = 0.2f;
 
@@ -50,7 +47,7 @@ internal static class AimArms
     private static readonly SwayAmounts Now = new() { GunMove = 0.2f, GunTurn = 0.2f, ArmMove = 0.2f, ArmTurn = 0.2f, HeadFollow = 0.2f, Breath = 1f };
     internal static bool Chase = true;
     internal static float FollowDelay;
-    private const float BreathCenterSeconds = 6f;
+    internal static float RecenterSeconds = 1f;
     internal static float MouseSmoothSeconds = 0.05f;
     private static Vector2 _pendingMouse;
     private static bool _releasingMouse;
@@ -91,14 +88,6 @@ internal static class AimArms
     private static bool _logTired;
     private static Physical? _drainOwner;
     private static bool _aimDrain;
-    private static float _lastTilt;
-    private static float _lastPose;
-    private static string _lastState = "";
-    private static bool _lastProne;
-    private static bool _lastMounted;
-    private static float _gapLogAt;
-    private static bool _lastAiming;
-    private static float _settleUntil;
     private static bool _hasCenterPosition;
     private static int _turnFrame = -1;
     private static Quaternion _headTurnSmooth = Quaternion.identity;
@@ -547,13 +536,7 @@ internal static class AimArms
                 Signed(_smoothLook.eulerAngles.x)));
         }
 
-        float slow;
-        if (Time.time - _meanStart < AimInSeconds)
-            slow = follow;
-        else if (Time.time < _settleUntil)
-            slow = FollowDelay > 0f ? 1f - Mathf.Exp(-Time.deltaTime / FollowDelay) : 1f;
-        else
-            slow = 1f - Mathf.Exp(-Time.deltaTime / BreathCenterSeconds);
+        float slow = CenterFollow();
         _armTurnCenter = Quaternion.Slerp(_armTurnCenter, _armTurnMean, slow).normalized;
         _gunTurnCenter = Quaternion.Slerp(_gunTurnCenter, _gunTurnMean, slow).normalized;
         Quaternion armBase = _armTurnCenter * Scale(Quaternion.Inverse(_armTurnCenter) * _armTurnMean, Now.Breath);
@@ -695,45 +678,19 @@ internal static class AimArms
             physical.Stamina.RemoveConsumption(consumption);
     }
 
-    private static float OverlapDepth(Player player)
-    {
-        try
-        {
-            return player.MovementContext.OverlapDepth;
-        }
-        catch
-        {
-            return -1f;
-        }
-    }
-
     private static float CenterFollow()
     {
-        if (Time.time < _settleUntil)
-            return FollowDelay > 0f ? 1f - Mathf.Exp(-Time.deltaTime / FollowDelay) : 1f;
-        return 1f - Mathf.Exp(-Time.deltaTime / CenterSeconds);
+        return RecenterSeconds > 0f ? 1f - Mathf.Exp(-Time.deltaTime / RecenterSeconds) : 1f;
     }
 
     private static bool UpdateTurn(Player player, Quaternion rawCamera)
     {
         Vector2 mouse;
-        float tilt;
-        float pose;
-        bool aiming;
-        string state;
-        bool prone;
-        bool mounted;
         try
         {
             if (player.MovementContext == null)
                 return false;
             mouse = player.MovementContext.Rotation;
-            tilt = player.MovementContext.SmoothedTilt;
-            pose = player.MovementContext.SmoothedPoseLevel;
-            aiming = player.HandsController != null && player.HandsController.IsAiming;
-            state = player.MovementContext.CurrentState != null ? player.MovementContext.CurrentState.Name.ToString() : "";
-            prone = player.MovementContext.IsInPronePose;
-            mounted = player.MovementContext.IsInMountedState;
         }
         catch
         {
@@ -756,22 +713,6 @@ internal static class AimArms
             _lagLook = Quaternion.Slerp(_smoothLook, _lagLook, MaxDelayDegrees / behind).normalized;
 
         UpdateBreathState(player);
-        if (aiming && !_lastAiming)
-            _settleUntil = Mathf.Max(_settleUntil, Time.time + AimSettleSeconds);
-        if (Mathf.Abs(tilt - _lastTilt) > 0.0001f || Mathf.Abs(pose - _lastPose) > 0.0001f)
-            _settleUntil = Mathf.Max(_settleUntil, Time.time + SettleSeconds);
-        if (state != _lastState || prone != _lastProne || mounted != _lastMounted)
-        {
-            _settleUntil = Mathf.Max(_settleUntil, Time.time + SettleSeconds);
-            if (aiming)
-                Log?.LogInfo($"回正：姿势 {_lastState}→{state} 趴={prone} 架枪={mounted}");
-        }
-        _lastAiming = aiming;
-        _lastTilt = tilt;
-        _lastPose = pose;
-        _lastState = state;
-        _lastProne = prone;
-        _lastMounted = mounted;
 
         Quaternion rawTurn = Quaternion.Inverse(_smoothLook) * rawCamera;
         if (!_hasCenter)
@@ -785,14 +726,6 @@ internal static class AimArms
             _headTurnSmooth = Quaternion.Slerp(_headTurnSmooth, rawTurn, 1f - Mathf.Exp(-Time.deltaTime / HeadSmoothSeconds)).normalized;
             if (_smoothedHead.sqrMagnitude <= 0.01f)
                 _centerTurn = Quaternion.Slerp(_centerTurn, rawTurn, CenterFollow()).normalized;
-            float gap = Quaternion.Angle(_centerTurn, _headTurnSmooth);
-            if (aiming && gap > 4f && Time.time >= _settleUntil && Time.time >= _gapLogAt)
-            {
-                _gapLogAt = Time.time + 2f;
-                Log?.LogInfo(string.Format(System.Globalization.CultureInfo.InvariantCulture,
-                    "没回正：头偏中心 {0:F1}° 姿势={1} 趴={2} 高度={3:F2} 探头={4:F2} 贴墙={5:F2}",
-                    gap, state, prone, pose, tilt, OverlapDepth(player)));
-            }
         }
 
         return true;
