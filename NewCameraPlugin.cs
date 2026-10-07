@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "新镜头";
-    public const string PluginVersion = "0.1.105";
+    public const string PluginVersion = "0.1.106";
 
     private void Awake()
     {
@@ -203,8 +203,10 @@ internal static class NewCameraSwitch
             Transform? head = player.PlayerBones?.Head?.Original;
             if (head != null)
             {
+                Quaternion lastRotation = _poseRotation;
                 _poseRotation = CameraDirection.Resolve(head.rotation);
                 _posePosition = CameraPosition.Resolve(head.position, _poseRotation);
+                LogFreeLook(player, lastRotation);
                 AimArms.AlignToCamera(player, _posePosition, _poseRotation);
                 _poseFrame = Time.frameCount;
             }
@@ -216,6 +218,32 @@ internal static class NewCameraSwitch
             AimArms.CarryOptic(camera);
 
         AimArms.ReplayLasers(camera);
+    }
+
+    private static float _freeLookLogUntil;
+    private static bool _freeLooking;
+
+    private static void LogFreeLook(Player player, Quaternion lastRotation)
+    {
+        if (AimArms.Log == null)
+            return;
+
+        Vector3 head = player.HeadRotation;
+        bool freeLooking = head.sqrMagnitude > 0.01f;
+        if (freeLooking && !_freeLooking)
+            _freeLookLogUntil = Time.time + 3f;
+        _freeLooking = freeLooking;
+        if (!freeLooking || Time.time > _freeLookLogUntil)
+            return;
+
+        Vector2 mouse = player.MovementContext != null ? player.MovementContext.Rotation : Vector2.zero;
+        Quaternion delta = Quaternion.Inverse(lastRotation) * _poseRotation;
+        float turned = 2f * Mathf.Atan2(new Vector3(delta.x, delta.y, delta.z).magnitude, Mathf.Abs(delta.w)) * Mathf.Rad2Deg;
+        AimArms.Log.LogInfo(string.Format(System.Globalization.CultureInfo.InvariantCulture,
+            "扭头 帧={0} dt={1:F4} 扭头角=({2:F3},{3:F3}) 画面转={4:F3} 鼠标=({5:F3},{6:F3}) 瞄准={7}",
+            Time.frameCount, Time.deltaTime, head.x, head.y,
+            turned, mouse.x, mouse.y,
+            player.HandsController != null && player.HandsController.IsAiming));
     }
 
     internal static void OnCameraPreRender(Camera camera)
