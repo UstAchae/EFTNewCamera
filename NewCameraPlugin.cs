@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "新镜头";
-    public const string PluginVersion = "0.1.89";
+    public const string PluginVersion = "0.1.90";
 
     private void Awake()
     {
@@ -27,15 +27,15 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         BindPosition();
         BindAimDistance();
         BindCone();
-        BindWalkingArmSway();
+        BindSwayAmount();
     }
 
-    private void BindWalkingArmSway()
+    private void BindSwayAmount()
     {
-        ConfigEntry<float> sway = Config.Bind("瞄准", "走路时手臂摆动", 0.4f,
-            new ConfigDescription("瞄准走路时保留多少手臂给枪的摆动。1 表示照游戏原样摆，0 表示完全不摆，枪定住。站着时不受影响。", new AcceptableValueRange<float>(0f, 1f)));
-        sway.SettingChanged += (_, _) => AimArms.WalkingArmSway = sway.Value;
-        AimArms.WalkingArmSway = sway.Value;
+        ConfigEntry<float> sway = Config.Bind("瞄准", "摆动幅度", 0.5f,
+            new ConfigDescription("瞄准时枪的所有摆动一起按这个比例缩放：站着、走路、手臂、身体，拉栓等动作和后坐力也在内。1 表示照游戏原样摆，0 表示完全不摆。", new AcceptableValueRange<float>(0f, 1f)));
+        sway.SettingChanged += (_, _) => AimArms.SwayAmount = sway.Value;
+        AimArms.SwayAmount = sway.Value;
     }
 
     private void BindCone()

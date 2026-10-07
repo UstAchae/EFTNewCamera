@@ -46,7 +46,7 @@ internal static class AimArms
     private const float MouseSpeedSeconds = 0.1f;
     internal static float ForwardDistance;
     internal static bool UseCone;
-    internal static float WalkingArmSway = 0.4f;
+    internal static float SwayAmount = 0.5f;
     internal static float HoldSeconds = 0.6f;
 
     private static bool _hasSwayMean;
@@ -365,7 +365,7 @@ internal static class AimArms
 
         Quaternion filteredFrame = _bodyBaseRotation * sway;
         Vector3 filteredFramePosition = _bodyBasePosition + swayShift;
-        DropArmSideSway(filteredFrame, reset, ref armRotation, ref armPosition);
+        TrackArmMean(reset, armRotation, armPosition);
         Quaternion sightInCamera = filteredFrame * armRotation * boneLocalRotation;
         Vector3 sightInCameraPosition = filteredFramePosition + filteredFrame * (armPosition + armRotation * boneLocalPosition);
         if (reset)
@@ -384,12 +384,16 @@ internal static class AimArms
         _logSightShift = (sightInCameraPosition - _sightMeanPosition).magnitude * 100f;
         _logGunOnBody = Quaternion.Angle(Quaternion.identity, Quaternion.Inverse(body.rotation) * weapon.rotation);
         _logArmTurn = Quaternion.Angle(_armMeanRotation, armRotation);
+        // Every swing (body, arms, actions, recoil) is the sight's departure from its average, so one
+        // scale turns them all down together.
+        Quaternion shownSight = Quaternion.SlerpUnclamped(_sightMeanRotation, sightInCamera, SwayAmount);
+        Vector3 shownShift = (sightInCameraPosition - _sightMeanPosition) * SwayAmount;
         Quaternion meanSight = look * _sightMeanRotation;
         Quaternion correction = AlignSightTo(meanSight, look * Vector3.forward) * Quaternion.Inverse(meanSight);
-        Quaternion sightRotation = correction * look * sightInCamera;
+        Quaternion sightRotation = correction * look * shownSight;
         float relief = SightRelief(animation, bone);
         Vector3 sightPoint = cameraPosition + look * new Vector3(0f, 0f, ForwardDistance + relief)
-            + correction * (look * (sightInCameraPosition - _sightMeanPosition));
+            + correction * (look * shownShift);
         Quaternion targetWeaponRotation = sightRotation * Quaternion.Inverse(boneLocalRotation);
         Vector3 targetWeaponPosition = sightPoint - targetWeaponRotation * boneLocalPosition;
         Vector3 target = targetWeaponPosition - weapon.position;
@@ -401,8 +405,7 @@ internal static class AimArms
         return true;
     }
 
-    // While walking, the arm layer's swing around its slow mean is scaled down to WalkingArmSway.
-    private static void DropArmSideSway(Quaternion frameInCamera, bool reset, ref Quaternion armRotation, ref Vector3 armPosition)
+    private static void TrackArmMean(bool reset, Quaternion armRotation, Vector3 armPosition)
     {
         if (reset)
         {
@@ -415,13 +418,6 @@ internal static class AimArms
             _armMeanRotation = Quaternion.Slerp(_armMeanRotation, armRotation, follow);
             _armMeanPosition = Vector3.Lerp(_armMeanPosition, armPosition, follow);
         }
-
-        float strength = (1f - _actionWeight) * (1f - WalkingArmSway);
-        if (strength <= 0f)
-            return;
-
-        armRotation = Quaternion.Slerp(armRotation, _armMeanRotation, strength);
-        armPosition = Vector3.Lerp(armPosition, _armMeanPosition, strength);
     }
 
     private static Transform ArmFrame(PlayerBones bones, Transform body)
@@ -448,9 +444,7 @@ internal static class AimArms
         reset = false;
         Quaternion turn = Quaternion.Inverse(_bodyBaseRotation) * bodyRotation;
         Vector3 offset = bodyPosition - _bodyBasePosition;
-        bool jumped = _actionWeight <= 0f
-            && (Quaternion.Angle(Quaternion.identity, turn) > SwaySnapDegrees || offset.sqrMagnitude > SwaySnapMeters * SwaySnapMeters);
-        if (!_hasSway || sightId != _swaySightId || jumped)
+        if (!_hasSway || sightId != _swaySightId)
         {
             reset = true;
             _bodyBaseRotation = bodyRotation;
@@ -469,10 +463,8 @@ internal static class AimArms
         turn = Quaternion.Inverse(_bodyBaseRotation) * bodyRotation;
         offset = bodyPosition - _bodyBasePosition;
 
-        // Standing still, or during a recognised hands action, the body's motion on the gun is kept
-        // whole (bolt cycling, fire mode, breathing); walking holds it at its average.
-        shift = offset * _actionWeight;
-        return Quaternion.Slerp(Quaternion.identity, turn, _actionWeight);
+        shift = offset;
+        return turn;
     }
 
     private static Quaternion AlignSightTo(Quaternion sightRotation, Vector3 cameraForward)
