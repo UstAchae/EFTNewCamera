@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "新镜头";
-    public const string PluginVersion = "0.1.104";
+    public const string PluginVersion = "0.1.105";
 
     private void Awake()
     {
@@ -212,6 +212,8 @@ internal static class NewCameraSwitch
 
         if (main && _poseFrame == Time.frameCount)
             camera.transform.SetPositionAndRotation(_posePosition, _poseRotation);
+        if (optic && _poseFrame == Time.frameCount)
+            AimArms.CarryOptic(camera);
 
         AimArms.ReplayLasers(camera);
     }

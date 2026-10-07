@@ -69,6 +69,7 @@ internal static class AimArms
     private static MethodInfo? _laserLateUpdate;
     private static Camera? _drawCamera;
     private static int _laserFrame = -1;
+    private static int _opticFrame = -1;
     private static readonly List<MonoBehaviour> DeferredLasers = new();
     private static int _skinOwnerId;
     private static readonly List<Transform> Upperarms = new();
@@ -239,6 +240,15 @@ internal static class AimArms
         }
 
         Carry(weapon, pivot, displacement, _turn);
+    }
+
+    internal static void CarryOptic(Camera camera)
+    {
+        if (!_hasLaserDisplacement || _opticFrame == Time.frameCount)
+            return;
+
+        _opticFrame = Time.frameCount;
+        Carry(camera.transform, _laserPivot, _laserDisplacement, _laserTurn);
     }
 
     private static void Carry(Transform transform, Vector3 pivot, Vector3 displacement, Quaternion turn)
