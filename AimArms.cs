@@ -22,6 +22,9 @@ internal static class AimArms
 
     private const float BlendSeconds = 0.2f;
     private const float MeanSeconds = 1f;
+    private const float AimInSeconds = 0.7f;
+    private const float AimInMeanSeconds = 0.08f;
+    private const float GunSmoothSeconds = 0.04f;
 
     internal static float ForwardDistance;
     internal static float GunMove;
@@ -45,6 +48,9 @@ internal static class AimArms
     private static Vector3 _gunMoveMean;
     private static Quaternion _armTurnMean = Quaternion.identity;
     private static Quaternion _gunTurnMean = Quaternion.identity;
+    private static float _meanStart;
+    private static Vector3 _gunMoveSmooth;
+    private static Quaternion _gunTurnSmooth = Quaternion.identity;
     internal static BepInEx.Logging.ManualLogSource? Log;
     private static float _logUntil;
     private static float _logHeadTurn;
@@ -245,33 +251,43 @@ internal static class AimArms
         Quaternion toCamera = Quaternion.Inverse(cameraRotation);
         Vector3 sightOnThird = third.position + third.rotation * (Quaternion.Inverse(anim.rotation) * (sight - anim.position));
         Vector3 armMove = toCamera * (sightOnThird - cameraPosition);
-        Vector3 gunMove = toCamera * (sight - sightOnThird);
+        Vector3 rawGunMove = toCamera * (sight - sightOnThird);
         Quaternion armTurn = toCamera * third.rotation;
-        Quaternion gunTurn = Quaternion.Inverse(third.rotation) * anim.rotation;
+        Quaternion rawGunTurn = Quaternion.Inverse(third.rotation) * anim.rotation;
 
         if (!_hasMean || sightId != _meanSightId)
         {
+            _gunMoveSmooth = rawGunMove;
+            _gunTurnSmooth = rawGunTurn;
             _armMoveMean = armMove;
-            _gunMoveMean = gunMove;
+            _gunMoveMean = rawGunMove;
             _armTurnMean = armTurn;
-            _gunTurnMean = gunTurn;
+            _gunTurnMean = rawGunTurn;
             _meanSightId = sightId;
+            _meanStart = Time.time;
             _hasMean = true;
             _hasChase = false;
             _logUntil = Time.time + 1.5f;
         }
         else
         {
-            float follow = 1f - Mathf.Exp(-Time.deltaTime / MeanSeconds);
-            _armMoveMean = Vector3.Lerp(_armMoveMean, armMove, follow);
-            _gunMoveMean = Vector3.Lerp(_gunMoveMean, gunMove, follow);
-            _armTurnMean = Quaternion.Slerp(_armTurnMean, armTurn, follow).normalized;
-            _gunTurnMean = Quaternion.Slerp(_gunTurnMean, gunTurn, follow).normalized;
+            float smooth = 1f - Mathf.Exp(-Time.deltaTime / GunSmoothSeconds);
+            _gunMoveSmooth = Vector3.Lerp(_gunMoveSmooth, rawGunMove, smooth);
+            _gunTurnSmooth = Quaternion.Slerp(_gunTurnSmooth, rawGunTurn, smooth).normalized;
         }
 
+        Vector3 gunMove = _gunMoveSmooth;
+        Quaternion gunTurn = _gunTurnSmooth;
+        float meanSeconds = Time.time - _meanStart < AimInSeconds ? AimInMeanSeconds : MeanSeconds;
+        float follow = 1f - Mathf.Exp(-Time.deltaTime / meanSeconds);
+        _armMoveMean = Vector3.Lerp(_armMoveMean, armMove, follow);
+        _gunMoveMean = Vector3.Lerp(_gunMoveMean, gunMove, follow);
+        _armTurnMean = Quaternion.Slerp(_armTurnMean, armTurn, follow).normalized;
+        _gunTurnMean = Quaternion.Slerp(_gunTurnMean, gunTurn, follow).normalized;
+
+        Vector3 smoothSight = sight + cameraRotation * (gunMove - rawGunMove);
         Vector3 sway = ArmMove * (armMove - _armMoveMean) + GunMove * (gunMove - _gunMoveMean);
-        displacement = cameraPosition + cameraRotation * (aimPoint + sway) - sight;
-        Vector3 pinned = toCamera * displacement;
+        Vector3 pinned = toCamera * (cameraPosition + cameraRotation * (aimPoint + sway) - smoothSight);
         if (Chase && _hasChase)
         {
             float speed = animation.AimingSpeed * animation.CameraSmoothBlender.Value;
@@ -288,7 +304,7 @@ internal static class AimArms
             _chase = pinned;
             _hasChase = true;
         }
-        displacement = cameraRotation * _chase;
+        displacement = smoothSight - sight + cameraRotation * _chase;
 
         if (Log != null && Time.time < _logUntil)
         {
@@ -298,15 +314,15 @@ internal static class AimArms
                 "开镜 t={0:F3} dt={1:F4} 手臂位置cm=({2:F2},{3:F2},{4:F2}) 枪自身位置cm=({5:F2},{6:F2},{7:F2}) 手臂转角={8:F2} 枪自身转角={9:F2} 追的差cm=({10:F2},{11:F2},{12:F2}) 追速={13:F2} 混合={14:F2} 头偏平均角={15:F2} 头偏平均cm=({16:F2},{17:F2},{18:F2})",
                 1.5f - (_logUntil - Time.time), Time.deltaTime,
                 armMove.x * 100f, armMove.y * 100f, armMove.z * 100f,
-                gunMove.x * 100f, gunMove.y * 100f, gunMove.z * 100f,
-                Quaternion.Angle(_armTurnMean, armTurn), Quaternion.Angle(_gunTurnMean, gunTurn),
+                rawGunMove.x * 100f, rawGunMove.y * 100f, rawGunMove.z * 100f,
+                Quaternion.Angle(_armTurnMean, armTurn), Quaternion.Angle(_gunTurnMean, rawGunTurn),
                 lag.x, lag.y, lag.z, speedNow, _blend,
                 _logHeadTurn, _logHeadShift.x, _logHeadShift.y, _logHeadShift.z));
         }
 
         Quaternion keptArm = _armTurnMean * Scale(Quaternion.Inverse(_armTurnMean) * armTurn, ArmTurn);
         Quaternion keptGun = _gunTurnMean * Scale(Quaternion.Inverse(_gunTurnMean) * gunTurn, GunTurn);
-        turn = cameraRotation * keptArm * keptGun * Quaternion.Inverse(armTurn * gunTurn) * toCamera;
+        turn = cameraRotation * keptArm * keptGun * Quaternion.Inverse(armTurn * rawGunTurn) * toCamera;
     }
 
     private static void SteadyHead(Player player, Vector3 cameraPosition, Quaternion cameraRotation, out Vector3 position, out Quaternion rotation)
