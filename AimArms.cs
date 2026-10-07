@@ -20,18 +20,16 @@ internal static class AimArms
         public bool UpdateWhenOffscreen;
     }
 
-    internal static BepInEx.Logging.ManualLogSource? Log;
+    private const float BlendSeconds = 0.2f;
+
     internal static float ForwardDistance;
-    private const float PlacementBlendSeconds = 0.25f;
-    private static bool _hasShownPose;
-    private static Vector3 _shownPosition;
-    private static Quaternion _shownRotation = Quaternion.identity;
-    private static int _blendSight;
-    private static float _blend = 1f;
-    private static Vector3 _blendFromPosition;
-    private static Quaternion _blendFromRotation = Quaternion.identity;
+
     private static bool _suppress;
+    private static bool _blendAiming;
+    private static int _blendSightId;
+    private static float _blend = 1f;
     private static Vector3 _offset;
+    private static Vector3 _blendFrom;
     private static bool _patched;
     private static bool _replayingLaser;
     private static bool _hasLaserDisplacement;
@@ -56,87 +54,9 @@ internal static class AimArms
 
         Harmony harmony = new Harmony(NewCameraPlugin.PluginGuid + ".aimarms");
         harmony.Patch(target, prefix: new HarmonyMethod(prefix));
-        PatchShiftWeaponRoot(harmony);
         PatchLaser(harmony);
         PatchFieldOfView(harmony);
         _patched = true;
-    }
-
-    private static void PatchShiftWeaponRoot(Harmony harmony)
-    {
-        MethodInfo? shift = AccessTools.Method(typeof(PlayerBones), nameof(PlayerBones.ShiftWeaponRoot));
-        MethodInfo? postfix = typeof(AimArms).GetMethod(nameof(ShiftWeaponRootPostfix), BindingFlags.NonPublic | BindingFlags.Static);
-        if (shift == null || postfix == null)
-            return;
-
-        harmony.Patch(shift, postfix: new HarmonyMethod(postfix) { priority = Priority.Last });
-    }
-
-    // Runs before hand IK, so the hands still grip the gun after it is placed.
-    private static void ShiftWeaponRootPostfix(PlayerBones __instance, EPointOfView pv)
-    {
-        if (!NewCameraSwitch.Enabled || pv != EPointOfView.ThirdPerson || __instance == null)
-            return;
-
-        Player? player = __instance.Player;
-        if (player == null || !player.IsYourPlayer)
-            return;
-
-        Transform? head = __instance.Head?.Original;
-        Transform? weapon = __instance.Weapon_Root_Anim;
-        if (head == null || weapon == null)
-            return;
-
-        Quaternion liveRotation = CameraDirection.Resolve(head.rotation);
-        Vector3 cameraPosition = CameraPosition.Resolve(head.position, liveRotation);
-        bool aiming = player.HandsController != null && player.HandsController.IsAiming;
-        Vector3 gamePosition = weapon.position;
-        int placedSight = 0;
-        if (!aiming || !AimSway.Place(player, __instance, head, cameraPosition, liveRotation, ForwardDistance, out placedSight))
-        {
-            placedSight = 0;
-            AimSway.Reset();
-        }
-
-        BlendPlacement(weapon, placedSight, cameraPosition, liveRotation);
-        Vector3 target = weapon.position - gamePosition;
-        _offset = target;
-        _laserDisplacement = target;
-        _hasLaserDisplacement = target.sqrMagnitude >= 0.00000001f;
-    }
-
-    // Aiming in or out and switching sights move the gun from wherever it was last shown, in the
-    // camera's frame, to the new pose instead of jumping there.
-    private static void BlendPlacement(Transform weapon, int placedSight, Vector3 cameraPosition, Quaternion cameraRotation)
-    {
-        Quaternion toCamera = Quaternion.Inverse(cameraRotation);
-        if (!_hasShownPose)
-        {
-            _blendSight = placedSight;
-            _blend = 1f;
-        }
-        else if (placedSight != _blendSight)
-        {
-            _blendSight = placedSight;
-            _blendFromPosition = _shownPosition;
-            _blendFromRotation = _shownRotation;
-            _blend = 0f;
-        }
-
-        if (_blend < 1f)
-        {
-            _blend = Mathf.Min(1f, _blend + Time.deltaTime / PlacementBlendSeconds);
-            float t = _blend * _blend * (3f - 2f * _blend);
-            Vector3 fromPosition = cameraPosition + cameraRotation * _blendFromPosition;
-            Quaternion fromRotation = cameraRotation * _blendFromRotation;
-            weapon.SetPositionAndRotation(
-                Vector3.Lerp(fromPosition, weapon.position, t),
-                Quaternion.Slerp(fromRotation, weapon.rotation, t));
-        }
-
-        _shownPosition = toCamera * (weapon.position - cameraPosition);
-        _shownRotation = toCamera * weapon.rotation;
-        _hasShownPose = true;
     }
 
     private static void PatchFieldOfView(Harmony harmony)
@@ -175,9 +95,114 @@ internal static class AimArms
         player.MovementContext?.PlayerAnimator?.SetAiming(false);
     }
 
-    internal static void ClearHold()
+    internal static void AlignToCamera(Player player, Vector3 cameraPosition, Quaternion cameraRotation)
     {
-        AimSway.Reset();
+        PlayerBones bones = player.PlayerBones;
+        bool aiming = player.HandsController != null && player.HandsController.IsAiming;
+        int sightId = 0;
+        Vector3 target = Vector3.zero;
+        if (aiming && bones != null)
+        {
+            ProceduralWeaponAnimation? animation = player.ProceduralWeaponAnimation;
+            Transform? bone = animation != null && animation.ScopeAimTransforms != null && animation.ScopeAimTransforms.Count > 0
+                ? animation.CurrentScope?.Bone
+                : null;
+            if (bone != null && animation != null)
+            {
+                sightId = bone.GetInstanceID();
+                float relief = SightRelief(animation, bone);
+                target = cameraPosition - bone.position + cameraRotation * new Vector3(0f, 0f, ForwardDistance + relief);
+            }
+        }
+
+        if (!aiming && !_blendAiming && _offset.sqrMagnitude < 0.00000001f && _blend >= 1f)
+        {
+            _hasLaserDisplacement = false;
+            return;
+        }
+
+        if (bones == null)
+        {
+            _hasLaserDisplacement = false;
+            return;
+        }
+
+        if (aiming != _blendAiming || sightId != _blendSightId)
+        {
+            _blendFrom = _offset;
+            _blend = 0f;
+            _blendAiming = aiming;
+            _blendSightId = sightId;
+        }
+
+        if (_blend < 1f)
+        {
+            _blend = Mathf.Min(1f, _blend + Time.deltaTime / BlendSeconds);
+            float t = _blend * _blend * (3f - 2f * _blend);
+            _offset = Vector3.Lerp(_blendFrom, target, t);
+        }
+        else
+        {
+            _offset = target;
+        }
+
+        Vector3 displacement = _offset;
+        _laserDisplacement = displacement;
+        _hasLaserDisplacement = displacement.sqrMagnitude >= 0.00000001f;
+        EnsureUpperarms(player);
+        for (int i = Upperarms.Count - 1; i >= 0; i--)
+        {
+            Transform arm = Upperarms[i];
+            if (arm == null)
+            {
+                Upperarms.RemoveAt(i);
+                continue;
+            }
+
+            for (int j = 0; j < Upperarms.Count; j++)
+            {
+                Transform other = Upperarms[j];
+                if (i != j && other != null && arm.IsChildOf(other))
+                {
+                    Upperarms.RemoveAt(i);
+                    break;
+                }
+            }
+        }
+
+        foreach (Transform arm in Upperarms)
+        {
+            if (arm != null)
+                arm.position += displacement;
+        }
+
+        Transform? weapon = bones.Weapon_Root_Anim;
+        if (weapon == null)
+            return;
+        foreach (Transform arm in Upperarms)
+        {
+            if (arm != null && weapon.IsChildOf(arm))
+                return;
+        }
+
+        weapon.position += displacement;
+    }
+
+    private static float SightRelief(ProceduralWeaponAnimation animation, Transform bone)
+    {
+        if (animation.HandsContainer == null || animation.HandsContainer.Weapon == null)
+            return 0f;
+
+        WeaponPrefab.AimPlane? plane = animation._currentAimingPlane;
+        if (animation.CurrentScope != null && animation.CurrentScope.IsOptic)
+            plane = animation.HandsContainer.DefaultAimPlane;
+        if (plane == null)
+            plane = animation.HandsContainer.DefaultAimPlane;
+        if (plane == null)
+            return 0f;
+
+        float boneDepth = 0f - animation.HandsContainer.Weapon.InverseTransformPoint(bone.position).y;
+        return boneDepth - plane.Depth;
     }
 
     internal static void ReplayLasers(Camera camera)
@@ -344,8 +369,11 @@ internal static class AimArms
 
     internal static void Release(Player? player)
     {
+        _blendAiming = false;
+        _blendSightId = 0;
+        _blend = 1f;
         _offset = Vector3.zero;
-        ClearHold();
+        _blendFrom = Vector3.zero;
         RestoreSkins();
         if (!_suppress)
             return;

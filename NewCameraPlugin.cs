@@ -12,14 +12,12 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "新镜头";
-    public const string PluginVersion = "0.1.97";
+    public const string PluginVersion = "0.1.98";
 
     private void Awake()
     {
         ConfigEntry<bool> enabled = Config.Bind("新镜头", "总开关", false,
             "打开后使用第三人称骨架，并把游戏镜头挂在人物头部。");
-        AimArms.Log = Logger;
-        AimSway.Log = Logger;
         AimArms.Install();
         FirstPersonAudio.Install();
         NewCameraSwitch.Enabled = enabled.Value;
@@ -27,48 +25,6 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         BindDirection();
         BindPosition();
         BindAimDistance();
-        BindSways();
-    }
-
-    private void BindSways()
-    {
-        string[] parts = { "头", "脖子", "手臂", "枪" };
-        string[] partNotes =
-        {
-            "头带着镜头动、枪不跟着动时，枪在画面里看起来的晃。画面本身不受影响。",
-            "脖子带着头和镜头动、枪不跟着动时，枪在画面里看起来的晃。画面本身不受影响。",
-            "手臂动画带着枪的晃，站着和走路时手臂的摆都在这里。",
-            "枪在手上自己的晃，游戏程序给的那部分，不含后坐力。"
-        };
-        string[] axes = { "左右转", "上下转", "侧倾", "左右移", "上下移", "前后移" };
-        string[] axisNotes = { "枪口左右转", "枪口上下转", "枪身绕枪管歪斜", "左右平移", "上下平移", "前后平移" };
-        for (int part = 0; part < parts.Length; part++)
-        {
-            for (int axis = 0; axis < axes.Length; axis++)
-            {
-                int p = part;
-                int a = axis;
-                BindPortion(parts[part] + "-" + axes[axis], v => AimSway.Amounts[p, a] = v,
-                    partNotes[part] + "这一项只管" + axisNotes[axis] + "。1 是游戏原来的，0 是这一项不晃。");
-            }
-        }
-
-        string[] recoilAxes = { "左右移", "上下移", "前后移" };
-        for (int axis = 0; axis < recoilAxes.Length; axis++)
-        {
-            int a = axis;
-            BindPortion("后坐力-" + recoilAxes[axis], v => AimSway.RecoilAmounts[a] = v,
-                "开枪时枪被顶动的" + recoilAxes[axis] + "。1 是游戏原来的，0 是不顶。");
-        }
-    }
-
-    private void BindPortion(string key, System.Action<float> apply, string description)
-    {
-        ConfigEntry<float> entry = Config.Bind("瞄准摆动", key, 1f,
-            new ConfigDescription(description + " 拉栓、切开火模式、换弹这些手上动作不受影响，始终照游戏原样。",
-                new AcceptableValueRange<float>(0f, 1f)));
-        entry.SettingChanged += (_, _) => apply(entry.Value);
-        apply(entry.Value);
     }
 
     private void BindDirection()
@@ -152,6 +108,7 @@ internal static class NewCameraSwitch
     private static int _poseFrame = -1;
     private static Vector3 _posePosition;
     private static Quaternion _poseRotation;
+
     internal static void LateUpdate()
     {
         Player? player = Singleton<GameWorld>.Instance?.MainPlayer;
@@ -207,6 +164,7 @@ internal static class NewCameraSwitch
             {
                 _poseRotation = CameraDirection.Resolve(head.rotation);
                 _posePosition = CameraPosition.Resolve(head.position, _poseRotation);
+                AimArms.AlignToCamera(player, _posePosition, _poseRotation);
                 _poseFrame = Time.frameCount;
             }
         }
