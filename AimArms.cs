@@ -35,6 +35,10 @@ internal static class AimArms
     internal static BepInEx.Logging.ManualLogSource? Log;
     private static float _aimSince;
     private static float _nextAimLog;
+    private static float _logSightTurn;
+    private static float _logSightShift;
+    private static float _logGunOnBody;
+    private static float _logArmTurn;
     private static Quaternion _headMean = Quaternion.identity;
     private static bool _hasHeadInLook;
     private static Quaternion _headInLook = Quaternion.identity;
@@ -274,7 +278,9 @@ internal static class AimArms
             -Mathf.Asin(Mathf.Clamp(headOffset.y, -1f, 1f)) * Mathf.Rad2Deg,
             Vector3.Angle(aim * Vector3.forward, look * _headInLook * Vector3.forward),
             Quaternion.Angle(_headMean, _headInLook),
-            Vector3.Angle(liveRotation * Vector3.forward, look * _headInLook * Vector3.forward)));
+            Vector3.Angle(liveRotation * Vector3.forward, look * _headInLook * Vector3.forward))
+            + string.Format(" | 瞄具偏离平均 {0:F2}度 {1:F1}厘米 | 手臂层偏离平均 {2:F2}度 | 枪相对身体骨头 {3:F2}度",
+                _logSightTurn, _logSightShift, _logArmTurn, _logGunOnBody));
     }
 
     private static float MeanFollow()
@@ -368,6 +374,10 @@ internal static class AimArms
             _sightMeanPosition = Vector3.Lerp(_sightMeanPosition, sightInCameraPosition, follow);
         }
 
+        _logSightTurn = Quaternion.Angle(_sightMeanRotation, sightInCamera);
+        _logSightShift = (sightInCameraPosition - _sightMeanPosition).magnitude * 100f;
+        _logGunOnBody = Quaternion.Angle(Quaternion.identity, Quaternion.Inverse(body.rotation) * weapon.rotation);
+        _logArmTurn = Quaternion.Angle(_armMeanRotation, armRotation);
         Quaternion meanSight = look * _sightMeanRotation;
         Quaternion correction = AlignSightTo(meanSight, look * Vector3.forward) * Quaternion.Inverse(meanSight);
         Quaternion sightRotation = correction * look * sightInCamera;
