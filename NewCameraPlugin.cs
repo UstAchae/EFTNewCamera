@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "新镜头";
-    public const string PluginVersion = "0.1.112";
+    public const string PluginVersion = "0.1.113";
 
     private void Awake()
     {
@@ -89,12 +89,8 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         ConfigEntry<float> followDelay = Config.Bind("瞄准摆动", "跟手延迟（秒）", 0f,
             new ConfigDescription("晃鼠标时枪慢半拍跟上的快慢，数越大越慢。0 是不延迟。站着和走路都一样。",
                 new AcceptableValueRange<float>(0f, 0.3f)));
-        ConfigEntry<float> mouseSmooth = Config.Bind("瞄准摆动", "鼠标抹匀（秒）", 0.05f,
-            new ConfigDescription("瞄准时把鼠标每帧给的转动抹匀再交给游戏，和中键扭头去卡顿的办法一样。数越大越顺但越慢，0 是不抹匀。",
-                new AcceptableValueRange<float>(0f, 0.15f)));
         void Refresh()
         {
-            AimArms.MouseSmoothSeconds = mouseSmooth.Value;
             AimArms.FollowDelay = followDelay.Value;
             AimArms.Chase = chase.Value;
             AimArms.HeadFollow = headFollow.Value;
@@ -104,7 +100,6 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
             AimArms.ArmTurn = armTurn.Value;
         }
 
-        mouseSmooth.SettingChanged += (_, _) => Refresh();
         followDelay.SettingChanged += (_, _) => Refresh();
         chase.SettingChanged += (_, _) => Refresh();
         headFollow.SettingChanged += (_, _) => Refresh();
@@ -143,11 +138,6 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
     {
         Camera.onPreCull -= NewCameraSwitch.OnCameraPreCull;
         Camera.onPreRender -= NewCameraSwitch.OnCameraPreRender;
-    }
-
-    private void Update()
-    {
-        AimArms.ReleaseMouse();
     }
 
     private void LateUpdate()
