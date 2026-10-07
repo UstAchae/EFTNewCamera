@@ -46,6 +46,7 @@ internal static class AimArms
     private const float MouseSpeedSeconds = 0.1f;
     internal static float ForwardDistance;
     internal static bool UseCone;
+    internal static float WalkingArmSway = 0.4f;
     internal static float HoldSeconds = 0.6f;
 
     private static bool _hasSwayMean;
@@ -400,7 +401,7 @@ internal static class AimArms
         return true;
     }
 
-    // While walking, the arm layer is held at its slow mean.
+    // While walking, the arm layer's swing around its slow mean is scaled down to WalkingArmSway.
     private static void DropArmSideSway(Quaternion frameInCamera, bool reset, ref Quaternion armRotation, ref Vector3 armPosition)
     {
         if (reset)
@@ -415,7 +416,7 @@ internal static class AimArms
             _armMeanPosition = Vector3.Lerp(_armMeanPosition, armPosition, follow);
         }
 
-        float strength = 1f - _actionWeight;
+        float strength = (1f - _actionWeight) * (1f - WalkingArmSway);
         if (strength <= 0f)
             return;
 
