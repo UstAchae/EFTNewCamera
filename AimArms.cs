@@ -345,6 +345,19 @@ internal static class AimArms
         Transform root = ((Component)player).transform;
         Vector3 headPosition = Quaternion.Inverse(root.rotation) * (cameraPosition - root.position);
         Quaternion headTurn = Quaternion.Inverse(look) * cameraRotation;
+        if (player.HeadRotation.sqrMagnitude > 0.01f)
+        {
+            if (!_hasHeadMean)
+            {
+                _headPositionMean = headPosition;
+                _headTurnMean = Quaternion.identity;
+                _hasHeadMean = true;
+            }
+            position = root.position + root.rotation * _headPositionMean;
+            rotation = look * _headTurnMean;
+            return;
+        }
+
         if (!_hasHeadMean)
         {
             _headPositionMean = headPosition;
