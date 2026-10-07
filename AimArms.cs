@@ -40,6 +40,9 @@ internal static class AimArms
     internal static float HeadFollow;
     internal static bool Chase = true;
     internal static float FollowDelay;
+    internal static float MouseSmoothSeconds = 0.05f;
+    private static Vector2 _pendingMouse;
+    private static bool _releasingMouse;
     private const float MaxDelayDegrees = 15f;
 
     private static bool _suppress;
@@ -118,9 +121,59 @@ internal static class AimArms
         MethodInfo? rotateHeadPostfix = typeof(AimArms).GetMethod(nameof(RotateHeadPostfix), BindingFlags.NonPublic | BindingFlags.Static);
         if (rotateHead != null && rotateHeadPrefix != null && rotateHeadPostfix != null)
             harmony.Patch(rotateHead, prefix: new HarmonyMethod(rotateHeadPrefix), postfix: new HarmonyMethod(rotateHeadPostfix) { priority = Priority.Last });
+        MethodInfo? rotate = AccessTools.Method(typeof(Player), nameof(Player.Rotate));
+        MethodInfo? rotatePrefix = typeof(AimArms).GetMethod(nameof(RotatePrefix), BindingFlags.NonPublic | BindingFlags.Static);
+        if (rotate != null && rotatePrefix != null)
+            harmony.Patch(rotate, prefix: new HarmonyMethod(rotatePrefix));
         PatchLaser(harmony);
         PatchFieldOfView(harmony);
         _patched = true;
+    }
+
+    private static bool RotatePrefix(Player __instance, Vector2 deltaRotation, bool ignoreClamp)
+    {
+        if (_releasingMouse || ignoreClamp || !NewCameraSwitch.Enabled || MouseSmoothSeconds <= 0f)
+            return true;
+        if (!ReferenceEquals(__instance, Singleton<GameWorld>.Instance?.MainPlayer))
+            return true;
+        if (__instance.HandsController == null || !__instance.HandsController.IsAiming)
+            return true;
+        if (deltaRotation.IsAnyComponentInfinity() || deltaRotation.IsAnyComponentNaN())
+            return true;
+
+        _pendingMouse += deltaRotation;
+        return false;
+    }
+
+    internal static void ReleaseMouse()
+    {
+        if (_pendingMouse == Vector2.zero)
+            return;
+
+        Player? player = Singleton<GameWorld>.Instance?.MainPlayer;
+        if (player == null)
+        {
+            _pendingMouse = Vector2.zero;
+            return;
+        }
+
+        bool smoothing = NewCameraSwitch.Enabled && MouseSmoothSeconds > 0f
+            && player.HandsController != null && player.HandsController.IsAiming;
+        Vector2 step = smoothing
+            ? _pendingMouse * (1f - Mathf.Exp(-Time.deltaTime / MouseSmoothSeconds))
+            : _pendingMouse;
+        if ((_pendingMouse - step).sqrMagnitude < 0.00000001f)
+            step = _pendingMouse;
+        _pendingMouse -= step;
+        _releasingMouse = true;
+        try
+        {
+            player.Rotate(step);
+        }
+        finally
+        {
+            _releasingMouse = false;
+        }
     }
 
     private static void PatchFieldOfView(Harmony harmony)
