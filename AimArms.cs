@@ -27,7 +27,7 @@ internal static class AimArms
     private const float GunSmoothSeconds = 0.04f;
     private const float HeadSmoothSeconds = 0.05f;
     private const float ReleaseSeconds = 0.3f;
-    private const float CenterSeconds = 3f;
+    internal static float CenterSeconds = 3f;
     private const float LeanSettleSeconds = 0.3f;
     private const float LookSmoothSeconds = 0.05f;
     private const float HeadLockSeconds = 0.2f;
@@ -538,7 +538,7 @@ internal static class AimArms
     {
         if (Time.time < _leanUntil)
             return FollowDelay > 0f ? 1f - Mathf.Exp(-Time.deltaTime / FollowDelay) : 1f;
-        return 1f - Mathf.Exp(-Time.deltaTime / CenterSeconds);
+        return CenterSeconds > 0f ? 1f - Mathf.Exp(-Time.deltaTime / CenterSeconds) : 1f;
     }
 
     private static bool UpdateTurn(Player player, Quaternion rawCamera)
