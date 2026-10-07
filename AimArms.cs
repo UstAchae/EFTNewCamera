@@ -25,6 +25,8 @@ internal static class AimArms
     private const float AimInSeconds = 0.7f;
     private const float AimInMeanSeconds = 0.08f;
     private const float GunSmoothSeconds = 0.04f;
+    private const float HeadSmoothSeconds = 0.05f;
+    private const float ReleaseSeconds = 0.3f;
 
     internal static float ForwardDistance;
     internal static float GunMove;
@@ -60,6 +62,11 @@ internal static class AimArms
     private static bool _hasHeadMean;
     private static Vector3 _headPositionMean;
     private static Quaternion _headTurnMean = Quaternion.identity;
+    private static Vector3 _heldHeadPosition;
+    private static Quaternion _heldHeadTurn = Quaternion.identity;
+    private static float _release;
+    private static Vector3 _smoothedHead;
+    private static int _headSmoothFrame = -1;
     private static bool _patched;
     private static bool _replayingLaser;
     private static bool _hasLaserDisplacement;
@@ -87,6 +94,10 @@ internal static class AimArms
 
         Harmony harmony = new Harmony(NewCameraPlugin.PluginGuid + ".aimarms");
         harmony.Patch(target, prefix: new HarmonyMethod(prefix));
+        MethodInfo? rotateHead = AccessTools.Method(typeof(PlayerBones), nameof(PlayerBones.RotateHead));
+        MethodInfo? rotateHeadPrefix = typeof(AimArms).GetMethod(nameof(RotateHeadPrefix), BindingFlags.NonPublic | BindingFlags.Static);
+        if (rotateHead != null && rotateHeadPrefix != null)
+            harmony.Patch(rotateHead, prefix: new HarmonyMethod(rotateHeadPrefix));
         PatchLaser(harmony);
         PatchFieldOfView(harmony);
         _patched = true;
@@ -355,16 +366,19 @@ internal static class AimArms
         Transform root = ((Component)player).transform;
         Vector3 headPosition = Quaternion.Inverse(root.rotation) * (cameraPosition - root.position);
         Quaternion headTurn = Quaternion.Inverse(look) * cameraRotation;
-        if (player.HeadRotation.sqrMagnitude > 0.01f)
+        if (_smoothedHead.sqrMagnitude > 0.01f)
         {
             if (!_hasHeadMean)
             {
                 _headPositionMean = headPosition;
                 _headTurnMean = Quaternion.identity;
+                _heldHeadPosition = headPosition;
+                _heldHeadTurn = Quaternion.identity;
                 _hasHeadMean = true;
             }
-            position = root.position + root.rotation * _headPositionMean;
-            rotation = look * _headTurnMean;
+            _release = 1f;
+            position = root.position + root.rotation * _heldHeadPosition;
+            rotation = look * _heldHeadTurn;
             return;
         }
 
@@ -372,6 +386,7 @@ internal static class AimArms
         {
             _headPositionMean = headPosition;
             _headTurnMean = headTurn;
+            _release = 0f;
             _hasHeadMean = true;
         }
         else
@@ -383,8 +398,40 @@ internal static class AimArms
 
         _logHeadTurn = Quaternion.Angle(_headTurnMean, headTurn);
         _logHeadShift = (headPosition - _headPositionMean) * 100f;
-        position = root.position + root.rotation * Vector3.Lerp(_headPositionMean, headPosition, HeadFollow);
-        rotation = look * _headTurnMean * Scale(Quaternion.Inverse(_headTurnMean) * headTurn, HeadFollow);
+        Vector3 steadyPosition = Vector3.Lerp(_headPositionMean, headPosition, HeadFollow);
+        Quaternion steadyTurn = _headTurnMean * Scale(Quaternion.Inverse(_headTurnMean) * headTurn, HeadFollow);
+        if (_release > 0f)
+        {
+            _release = Mathf.Max(0f, _release - Time.deltaTime / ReleaseSeconds);
+            float held = _release * _release * (3f - 2f * _release);
+            steadyPosition = Vector3.Lerp(steadyPosition, _heldHeadPosition, held);
+            steadyTurn = Quaternion.Slerp(steadyTurn, _heldHeadTurn, held);
+        }
+
+        _heldHeadPosition = steadyPosition;
+        _heldHeadTurn = steadyTurn;
+        position = root.position + root.rotation * steadyPosition;
+        rotation = look * steadyTurn;
+    }
+
+    private static void RotateHeadPrefix(PlayerBones __instance, ref Vector3 offset)
+    {
+        if (!NewCameraSwitch.Enabled)
+            return;
+
+        Player? player = Comfort.Common.Singleton<GameWorld>.Instance?.MainPlayer;
+        if (player == null || !ReferenceEquals(player.PlayerBones, __instance))
+            return;
+
+        if (_headSmoothFrame != Time.frameCount)
+        {
+            _headSmoothFrame = Time.frameCount;
+            _smoothedHead = Vector3.Lerp(_smoothedHead, offset, 1f - Mathf.Exp(-Time.deltaTime / HeadSmoothSeconds));
+            if (offset == Vector3.zero && _smoothedHead.sqrMagnitude < 0.0001f)
+                _smoothedHead = Vector3.zero;
+        }
+
+        offset = _smoothedHead;
     }
 
     private static Quaternion Scale(Quaternion rotation, float amount)
@@ -586,6 +633,8 @@ internal static class AimArms
         _hasMean = false;
         _hasHeadMean = false;
         _hasChase = false;
+        _release = 0f;
+        _smoothedHead = Vector3.zero;
         RestoreSkins();
         if (!_suppress)
             return;
