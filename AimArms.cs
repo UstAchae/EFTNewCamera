@@ -66,6 +66,7 @@ internal static class AimArms
     private static Vector3 _sightMeanPosition;
     private static bool _loggedArmFrame;
     private const float MeanStartSeconds = 0.08f;
+    private const float MeanSettleHoldSeconds = 2f;
     private const float MeanSettleSeconds = 1f;
     private const float PlacementBlendSeconds = 0.25f;
     private static float _sinceReset;
@@ -167,7 +168,7 @@ internal static class AimArms
         }
 
         _aimSince += Time.deltaTime;
-        float seconds = Mathf.Lerp(MeanStartSeconds, HeadMeanSeconds, Mathf.Clamp01(_aimSince / MeanSettleSeconds));
+        float seconds = SettlingSeconds(_aimSince, HeadMeanSeconds);
         _headMean = Quaternion.Slerp(_headMean, _headInLook, 1f - Mathf.Exp(-Time.deltaTime / seconds));
         head.rotation = CameraDirection.Unresolve(look * _headInLook);
     }
@@ -265,7 +266,7 @@ internal static class AimArms
 
     private static void LogAimIn(Quaternion look, Quaternion liveRotation)
     {
-        if (Log == null || _aimSince > 2f || Time.time < _nextAimLog)
+        if (Log == null || _aimSince > 3.5f || Time.time < _nextAimLog)
             return;
 
         _nextAimLog = Time.time + 0.1f;
@@ -285,8 +286,17 @@ internal static class AimArms
 
     private static float MeanFollow()
     {
-        float seconds = Mathf.Lerp(MeanStartSeconds, BaseSeconds, Mathf.Clamp01(_sinceReset / MeanSettleSeconds));
-        return 1f - Mathf.Exp(-Time.deltaTime / seconds);
+        return 1f - Mathf.Exp(-Time.deltaTime / SettlingSeconds(_sinceReset, BaseSeconds));
+    }
+
+    // After aiming in, the body keeps settling into its aiming pose for about one and a half
+    // seconds (head pitch, arm and sight drift by a degree or two and a couple of centimetres).
+    // The averages track that closely so it is not shown as sway, then relax to their full time.
+    private static float SettlingSeconds(float elapsed, float fullSeconds)
+    {
+        if (elapsed <= MeanSettleHoldSeconds)
+            return MeanStartSeconds;
+        return Mathf.Lerp(MeanStartSeconds, fullSeconds, Mathf.Clamp01((elapsed - MeanSettleHoldSeconds) / MeanSettleSeconds));
     }
 
     private static void PatchFieldOfView(Harmony harmony)
