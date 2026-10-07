@@ -88,6 +88,15 @@ internal static class AimArms
     private static Physical? _drainOwner;
     private static bool _aimDrain;
     private static int _turnFrame = -1;
+    private static int _rotateHeadFrame = -1;
+    private static float _leanTilt;
+    private static float _leanLogUntil;
+    private static Quaternion _leanRawTurn = Quaternion.identity;
+    private static Vector3 _leanArm;
+    private static float _leanArmTurn;
+    private static Vector3 _leanGunMove;
+    private static float _leanGunTurn;
+    private static float _leanGunLag;
     private static Quaternion _headTurnSmooth = Quaternion.identity;
     private static float _headLock;
     private static bool _hasObserved;
@@ -371,7 +380,36 @@ internal static class AimArms
             ? firearm.CurrentFireport.Original.position
             : (Vector3?)null;
         if (aiming)
+        {
             LogSteady(weapon, sightPoint.HasValue ? pivot + displacement : (Vector3?)null, cameraPosition, cameraRotation);
+            LogLean(player, weapon, sightPoint.HasValue ? pivot + displacement : (Vector3?)null, cameraPosition, cameraRotation);
+        }
+    }
+
+    private static void LogLean(Player player, Transform weapon, Vector3? sight, Vector3 cameraPosition, Quaternion cameraRotation)
+    {
+        if (Log == null || player.MovementContext == null)
+            return;
+
+        float tilt = player.MovementContext.SmoothedTilt;
+        if (Mathf.Abs(tilt - _leanTilt) > 0.0001f)
+            _leanLogUntil = Time.time + 0.5f;
+        _leanTilt = tilt;
+        if (Time.time >= _leanLogUntil)
+            return;
+
+        Quaternion toCamera = Quaternion.Inverse(cameraRotation);
+        Vector3 sightLocal = sight.HasValue ? toCamera * (sight.Value - cameraPosition) * 100f : Vector3.zero;
+        Vector3 gun = (toCamera * weapon.rotation).eulerAngles;
+        Vector3 head = _leanRawTurn.eulerAngles;
+        Vector3 smooth = _headTurnSmooth.eulerAngles;
+        Log.LogInfo(string.Format(System.Globalization.CultureInfo.InvariantCulture,
+            "探头 帧={0} dt={1:F4} 探头值={2:F3} 头钩子={3} 头锁={4:F2} 头原始=({5:F2},{6:F2},{7:F2}) 头抹匀=({8:F2},{9:F2},{10:F2}) 镜头离目标={11:F2} " +
+            "瞄具cm=({12:F2},{13:F2},{14:F2}) 枪相对镜头=({15:F2},{16:F2},{17:F2}) 手臂cm=({18:F2},{19:F2},{20:F2}) 手臂转偏={21:F2} 枪自身cm=({22:F2},{23:F2},{24:F2}) 枪自身转偏={25:F2} 枪抹匀差={26:F2}",
+            Time.frameCount, Time.deltaTime, tilt, _rotateHeadFrame == Time.frameCount, _headLock,
+            Signed(head.x), Signed(head.y), Signed(head.z), Signed(smooth.x), Signed(smooth.y), Signed(smooth.z), _logHeadTurn,
+            sightLocal.x, sightLocal.y, sightLocal.z, Signed(gun.x), Signed(gun.y), Signed(gun.z),
+            _leanArm.x, _leanArm.y, _leanArm.z, _leanArmTurn, _leanGunMove.x, _leanGunMove.y, _leanGunMove.z, _leanGunTurn, _leanGunLag));
     }
 
     private static void AdjustShotPrefix(Player.FirearmController __instance, ref Vector3 position, ref Vector3 direction)
@@ -495,6 +533,11 @@ internal static class AimArms
         _armTurnMean = Quaternion.Slerp(_armTurnMean, armTurn, follow).normalized;
         _gunTurnMean = Quaternion.Slerp(_gunTurnMean, gunTurn, follow).normalized;
 
+        _leanArm = toCamera * (sightOnThird - cameraPosition) * 100f;
+        _leanArmTurn = Quaternion.Angle(_armTurnMean, armTurn);
+        _leanGunMove = rawGunMove * 100f;
+        _leanGunTurn = Quaternion.Angle(_gunTurnMean, gunTurn);
+        _leanGunLag = Quaternion.Angle(gunTurn, rawGunTurn);
         Vector3 smoothSight = sight + cameraRotation * (gunMove - rawGunMove);
         Vector3 sway = Now.ArmMove * (armMove - _armMoveMean) + Now.GunMove * (gunMove - _gunMoveMean);
         Vector3 pinned = toCamera * (cameraPosition + cameraRotation * (aimPoint + sway) - smoothSight);
@@ -696,6 +739,7 @@ internal static class AimArms
         UpdateBreathState(player);
 
         Quaternion rawTurn = Quaternion.Inverse(_smoothLook) * rawCamera;
+        _leanRawTurn = rawTurn;
         if (!_hasCenter)
         {
             _headTurnSmooth = rawTurn;
@@ -732,6 +776,7 @@ internal static class AimArms
         if (player == null || head == null || !ReferenceEquals(player.PlayerBones, __instance))
             return;
 
+        _rotateHeadFrame = Time.frameCount;
         if (!UpdateTurn(player, CameraDirection.Resolve(head.rotation)))
             return;
 
