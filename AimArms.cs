@@ -20,9 +20,6 @@ internal static class AimArms
         public bool UpdateWhenOffscreen;
     }
 
-    // Standing sway is breathing-paced; walking adds step-paced sway. Two filter stages at this
-    // time constant keep most of the former and remove most of the latter.
-    private const float WalkFilterSeconds = 0.2f;
     private const float BaseSeconds = 2f;
     private const float SwaySnapDegrees = 20f;
     private const float SwaySnapMeters = 0.15f;
@@ -79,10 +76,6 @@ internal static class AimArms
     private static Quaternion _blendFromRotation = Quaternion.identity;
     private static Quaternion _armMeanRotation = Quaternion.identity;
     private static Vector3 _armMeanPosition;
-    private static Vector3 _turnStage1;
-    private static Vector3 _turnStage2;
-    private static Vector3 _shiftStage1;
-    private static Vector3 _shiftStage2;
     private static bool _suppress;
     private static Vector3 _offset;
     private static bool _patched;
@@ -294,9 +287,11 @@ internal static class AimArms
     // The averages track that closely so it is not shown as sway, then relax to their full time.
     private static float SettlingSeconds(float elapsed, float fullSeconds)
     {
-        if (elapsed <= MeanSettleHoldSeconds)
-            return MeanStartSeconds;
-        return Mathf.Lerp(MeanStartSeconds, fullSeconds, Mathf.Clamp01((elapsed - MeanSettleHoldSeconds) / MeanSettleSeconds));
+        float settling = elapsed <= MeanSettleHoldSeconds
+            ? MeanStartSeconds
+            : Mathf.Lerp(MeanStartSeconds, fullSeconds, Mathf.Clamp01((elapsed - MeanSettleHoldSeconds) / MeanSettleSeconds));
+        // Walking, a tight average would ride along with the steps it is meant to hold out.
+        return Mathf.Lerp(fullSeconds, settling, _actionWeight);
     }
 
     private static void PatchFieldOfView(Harmony harmony)
@@ -405,8 +400,7 @@ internal static class AimArms
         return true;
     }
 
-    // While walking, the arm layer's sideways and vertical swing (turning about the camera's up and
-    // right axes, sliding along them) is taken out around its slow mean; roll and fore-aft stay.
+    // While walking, the arm layer is held at its slow mean.
     private static void DropArmSideSway(Quaternion frameInCamera, bool reset, ref Quaternion armRotation, ref Vector3 armPosition)
     {
         if (reset)
@@ -425,19 +419,8 @@ internal static class AimArms
         if (strength <= 0f)
             return;
 
-        Quaternion meanInCamera = frameInCamera * _armMeanRotation;
-        Quaternion deviation = frameInCamera * armRotation * Quaternion.Inverse(meanInCamera);
-        Quaternion roll = new Quaternion(0f, 0f, deviation.z, deviation.w);
-        float rollLength = Mathf.Sqrt(roll.z * roll.z + roll.w * roll.w);
-        if (rollLength > 0.0001f)
-        {
-            roll = new Quaternion(0f, 0f, roll.z / rollLength, roll.w / rollLength);
-            deviation = Quaternion.Slerp(deviation, roll, strength);
-            armRotation = Quaternion.Inverse(frameInCamera) * deviation * meanInCamera;
-        }
-
-        Vector3 slide = frameInCamera * (armPosition - _armMeanPosition);
-        armPosition -= Quaternion.Inverse(frameInCamera) * new Vector3(slide.x * strength, slide.y * strength, 0f);
+        armRotation = Quaternion.Slerp(armRotation, _armMeanRotation, strength);
+        armPosition = Vector3.Lerp(armPosition, _armMeanPosition, strength);
     }
 
     private static Transform ArmFrame(PlayerBones bones, Transform body)
@@ -471,10 +454,6 @@ internal static class AimArms
             reset = true;
             _bodyBaseRotation = bodyRotation;
             _bodyBasePosition = bodyPosition;
-            _turnStage1 = Vector3.zero;
-            _turnStage2 = Vector3.zero;
-            _shiftStage1 = Vector3.zero;
-            _shiftStage2 = Vector3.zero;
             _swaySightId = sightId;
             _hasSway = true;
             _sinceReset = 0f;
@@ -489,31 +468,10 @@ internal static class AimArms
         turn = Quaternion.Inverse(_bodyBaseRotation) * bodyRotation;
         offset = bodyPosition - _bodyBasePosition;
 
-        float pass = 1f - Mathf.Exp(-dt / WalkFilterSeconds);
-        _turnStage1 = Vector3.Lerp(_turnStage1, ToRotationVector(turn), pass);
-        _turnStage2 = Vector3.Lerp(_turnStage2, _turnStage1, pass);
-        _shiftStage1 = Vector3.Lerp(_shiftStage1, offset, pass);
-        _shiftStage2 = Vector3.Lerp(_shiftStage2, _shiftStage1, pass);
         // Standing still, or during a recognised hands action, the body's motion on the gun is kept
-        // whole (bolt cycling, fire mode, breathing); only walking gets the step-paced sway removed.
-        shift = Vector3.Lerp(_shiftStage2, offset, _actionWeight);
-        return Quaternion.Slerp(FromRotationVector(_turnStage2), turn, _actionWeight);
-    }
-
-    private static Vector3 ToRotationVector(Quaternion rotation)
-    {
-        rotation.ToAngleAxis(out float angle, out Vector3 axis);
-        if (angle > 180f)
-            angle -= 360f;
-        if (Mathf.Abs(angle) < 0.0001f || float.IsNaN(axis.x) || float.IsInfinity(axis.x))
-            return Vector3.zero;
-        return axis * angle;
-    }
-
-    private static Quaternion FromRotationVector(Vector3 vector)
-    {
-        float angle = vector.magnitude;
-        return angle < 0.0001f ? Quaternion.identity : Quaternion.AngleAxis(angle, vector / angle);
+        // whole (bolt cycling, fire mode, breathing); walking holds it at its average.
+        shift = offset * _actionWeight;
+        return Quaternion.Slerp(Quaternion.identity, turn, _actionWeight);
     }
 
     private static Quaternion AlignSightTo(Quaternion sightRotation, Vector3 cameraForward)
