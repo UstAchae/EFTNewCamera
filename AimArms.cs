@@ -27,9 +27,8 @@ internal static class AimArms
     private const float GunSmoothSeconds = 0.04f;
     private const float HeadSmoothSeconds = 0.05f;
     private const float ReleaseSeconds = 0.3f;
-    private const float LookSmoothSeconds = 0.05f;
     private const float CenterSeconds = 3f;
-    private const float HeadLockSeconds = 0.2f;
+    private const float LeanSettleSeconds = 0.3f;
 
     internal static float ForwardDistance;
     internal static float GunMove;
@@ -59,12 +58,7 @@ internal static class AimArms
     private static Quaternion _armTurnMean = Quaternion.identity;
     private static Quaternion _gunTurnMean = Quaternion.identity;
     private static float _meanStart;
-    private static Vector3 _armMoveSmooth;
-    private static Quaternion _armTurnSmooth = Quaternion.identity;
     private static Quaternion _lagLook = Quaternion.identity;
-    private static Quaternion _logLook = Quaternion.identity;
-    private static float _turnLogStart;
-    private static float _turnLogUntil;
     private static Vector3 _gunMoveSmooth;
     private static Quaternion _gunTurnSmooth = Quaternion.identity;
     internal static BepInEx.Logging.ManualLogSource? Log;
@@ -75,12 +69,10 @@ internal static class AimArms
     private static Vector3 _chase;
     private static bool _hasHeadMean;
     private static bool _hasCenter;
-    private static bool _hasCenterPosition;
-    private static int _turnFrame = -1;
-    private static Quaternion _headTurnSmooth = Quaternion.identity;
-    private static float _headLock;
+    private static float _lastTilt;
+    private static float _leanUntil;
     private static bool _hasObserved;
-    private static Quaternion _smoothLook = Quaternion.identity;
+    private static Quaternion _look = Quaternion.identity;
     private static Vector3 _neckPosition;
     private static Vector3 _headPositionNow;
     private static Quaternion _headTurnNow = Quaternion.identity;
@@ -120,9 +112,8 @@ internal static class AimArms
         harmony.Patch(target, prefix: new HarmonyMethod(prefix));
         MethodInfo? rotateHead = AccessTools.Method(typeof(PlayerBones), nameof(PlayerBones.RotateHead));
         MethodInfo? rotateHeadPrefix = typeof(AimArms).GetMethod(nameof(RotateHeadPrefix), BindingFlags.NonPublic | BindingFlags.Static);
-        MethodInfo? rotateHeadPostfix = typeof(AimArms).GetMethod(nameof(RotateHeadPostfix), BindingFlags.NonPublic | BindingFlags.Static);
-        if (rotateHead != null && rotateHeadPrefix != null && rotateHeadPostfix != null)
-            harmony.Patch(rotateHead, prefix: new HarmonyMethod(rotateHeadPrefix), postfix: new HarmonyMethod(rotateHeadPostfix) { priority = Priority.Last });
+        if (rotateHead != null && rotateHeadPrefix != null)
+            harmony.Patch(rotateHead, prefix: new HarmonyMethod(rotateHeadPrefix));
         MethodInfo? rotate = AccessTools.Method(typeof(Player), nameof(Player.Rotate));
         MethodInfo? rotatePrefix = typeof(AimArms).GetMethod(nameof(RotatePrefix), BindingFlags.NonPublic | BindingFlags.Static);
         if (rotate != null && rotatePrefix != null)
@@ -241,7 +232,7 @@ internal static class AimArms
                 else
                     target = steadyPosition - bone.position + steadyRotation * aimPoint;
 
-                Quaternion delay = steadyRotation * (Quaternion.Inverse(_smoothLook) * _lagLook) * Quaternion.Inverse(steadyRotation);
+                Quaternion delay = steadyRotation * (Quaternion.Inverse(_look) * _lagLook) * Quaternion.Inverse(steadyRotation);
                 Vector3 placed = bone.position + target;
                 target = steadyPosition + delay * (placed - steadyPosition) - bone.position;
                 turn = delay * turn;
@@ -353,22 +344,17 @@ internal static class AimArms
         Vector3 sightOnThird = third.position + third.rotation * (Quaternion.Inverse(anim.rotation) * (sight - anim.position));
         Vector3 armMove = toCamera * (sightOnThird - cameraPosition);
         Vector3 rawGunMove = toCamera * (sight - sightOnThird);
-        Quaternion rawArmTurn = toCamera * third.rotation;
-        Vector3 rawArmMove = armMove;
+        Quaternion armTurn = toCamera * third.rotation;
         Quaternion rawGunTurn = Quaternion.Inverse(third.rotation) * anim.rotation;
 
         if (!_hasMean || sightId != _meanSightId)
         {
-            _armMoveSmooth = armMove;
-            _armTurnSmooth = rawArmTurn;
             _gunMoveSmooth = rawGunMove;
             _gunTurnSmooth = rawGunTurn;
-            _lagLook = _smoothLook;
-            _turnLogStart = Time.time;
-            _turnLogUntil = 0f;
+            _lagLook = _look;
             _armMoveMean = armMove;
             _gunMoveMean = rawGunMove;
-            _armTurnMean = rawArmTurn;
+            _armTurnMean = armTurn;
             _gunTurnMean = rawGunTurn;
             _meanSightId = sightId;
             _meanStart = Time.time;
@@ -381,12 +367,8 @@ internal static class AimArms
             float smooth = 1f - Mathf.Exp(-Time.deltaTime / GunSmoothSeconds);
             _gunMoveSmooth = Vector3.Lerp(_gunMoveSmooth, rawGunMove, smooth);
             _gunTurnSmooth = Quaternion.Slerp(_gunTurnSmooth, rawGunTurn, smooth).normalized;
-            _armMoveSmooth = Vector3.Lerp(_armMoveSmooth, armMove, smooth);
-            _armTurnSmooth = Quaternion.Slerp(_armTurnSmooth, rawArmTurn, smooth).normalized;
         }
 
-        armMove = _armMoveSmooth;
-        Quaternion armTurn = _armTurnSmooth;
         Vector3 gunMove = _gunMoveSmooth;
         Quaternion gunTurn = _gunTurnSmooth;
         float meanSeconds = Time.time - _meanStart < AimInSeconds ? AimInMeanSeconds : MeanSeconds;
@@ -396,7 +378,7 @@ internal static class AimArms
         _armTurnMean = Quaternion.Slerp(_armTurnMean, armTurn, follow).normalized;
         _gunTurnMean = Quaternion.Slerp(_gunTurnMean, gunTurn, follow).normalized;
 
-        Vector3 smoothSight = sight + cameraRotation * (gunMove - rawGunMove + armMove - rawArmMove);
+        Vector3 smoothSight = sight + cameraRotation * (gunMove - rawGunMove);
         Vector3 sway = ArmMove * (armMove - _armMoveMean) + GunMove * (gunMove - _gunMoveMean);
         Vector3 pinned = toCamera * (cameraPosition + cameraRotation * (aimPoint + sway) - smoothSight);
         if (Chase && _hasChase)
@@ -430,50 +412,12 @@ internal static class AimArms
                 lag.x, lag.y, lag.z, speedNow, _blend,
                 _logHeadTurn, _logHeadShift.x, _logHeadShift.y, _logHeadShift.z,
                 Signed(_centerTurn.eulerAngles.x), Signed(_centerTurn.eulerAngles.y), Signed(_centerTurn.eulerAngles.z),
-                Signed(_smoothLook.eulerAngles.x)));
+                Signed(_look.eulerAngles.x)));
         }
 
         Quaternion keptArm = _armTurnMean * Scale(Quaternion.Inverse(_armTurnMean) * armTurn, ArmTurn);
         Quaternion keptGun = _gunTurnMean * Scale(Quaternion.Inverse(_gunTurnMean) * gunTurn, GunTurn);
-        turn = cameraRotation * keptArm * keptGun * Quaternion.Inverse(rawArmTurn * rawGunTurn) * toCamera;
-        LogTurn(rawArmTurn, armTurn);
-    }
-
-    private static void LogTurn(Quaternion rawArmTurn, Quaternion armTurn)
-    {
-        float speed = Time.deltaTime > 0f ? Quaternion.Angle(_logLook, _smoothLook) / Time.deltaTime : 0f;
-        _logLook = _smoothLook;
-        if (Log == null || Time.time - _turnLogStart > 20f)
-            return;
-        if (speed > 5f)
-            _turnLogUntil = Time.time + 0.5f;
-        if (Time.time >= _turnLogUntil)
-            return;
-
-        Player? player = Singleton<GameWorld>.Instance?.MainPlayer;
-        float walk = 0f;
-        float body = 0f;
-        try
-        {
-            if (player?.MovementContext != null)
-            {
-                walk = player.MovementContext.ActualLinearVelocity;
-                body = player.MovementContext.HandsToBodyAngle;
-            }
-        }
-        catch
-        {
-        }
-
-        Quaternion raw = Quaternion.Inverse(_armTurnMean) * rawArmTurn;
-        Quaternion smooth = Quaternion.Inverse(_armTurnMean) * armTurn;
-        Quaternion lag = Quaternion.Inverse(_smoothLook) * _lagLook;
-        Log.LogInfo(string.Format(System.Globalization.CultureInfo.InvariantCulture,
-            "转动 帧={0} dt={1:F4} 鼠标转速={2:F1} 走速={3:F2} 身手夹角={4:F2} 手臂偏原始=({5:F2},{6:F2}) 手臂偏平滑=({7:F2},{8:F2}) 延迟角=({9:F2},{10:F2})",
-            Time.frameCount, Time.deltaTime, speed, walk, body,
-            Signed(raw.eulerAngles.x), Signed(raw.eulerAngles.y),
-            Signed(smooth.eulerAngles.x), Signed(smooth.eulerAngles.y),
-            Signed(lag.eulerAngles.x), Signed(lag.eulerAngles.y)));
+        turn = cameraRotation * keptArm * keptGun * Quaternion.Inverse(armTurn * rawGunTurn) * toCamera;
     }
 
     internal static void ObserveHead(Player player, Vector3 cameraPosition, Quaternion cameraRotation)
@@ -483,93 +427,54 @@ internal static class AimArms
         if (neck == null)
             return;
 
-        if (_turnFrame != Time.frameCount && !UpdateTurn(player, cameraRotation))
-            return;
-
-        _neckPosition = neck.position;
-        _headPositionNow = Quaternion.Inverse(_smoothLook) * (cameraPosition - _neckPosition);
-        _headTurnNow = Quaternion.Inverse(_smoothLook) * cameraRotation;
-        if (!_hasCenterPosition)
-        {
-            _centerPosition = _headPositionNow;
-            _hasCenterPosition = true;
-        }
-        else if (_smoothedHead.sqrMagnitude <= 0.01f)
-        {
-            _centerPosition = Vector3.Lerp(_centerPosition, _headPositionNow, 1f - Mathf.Exp(-Time.deltaTime / CenterSeconds));
-        }
-
-        _hasObserved = true;
-    }
-
-    private static bool UpdateTurn(Player player, Quaternion rawCamera)
-    {
         Vector2 mouse;
+        float tilt;
         try
         {
             if (player.MovementContext == null)
-                return false;
+                return;
             mouse = player.MovementContext.Rotation;
+            tilt = player.MovementContext.SmoothedTilt;
         }
         catch
         {
-            return false;
+            return;
         }
 
-        _turnFrame = Time.frameCount;
-        Quaternion look = Quaternion.Euler(mouse.y, mouse.x, 0f);
-        if (!_hasCenter)
-            _smoothLook = look;
-        else
-            _smoothLook = Quaternion.Slerp(_smoothLook, look, 1f - Mathf.Exp(-Time.deltaTime / LookSmoothSeconds)).normalized;
-
+        _look = Quaternion.Euler(mouse.y, mouse.x, 0f);
         if (!_hasCenter || FollowDelay <= 0f)
-            _lagLook = _smoothLook;
+            _lagLook = _look;
         else
-            _lagLook = Quaternion.Slerp(_lagLook, _smoothLook, 1f - Mathf.Exp(-Time.deltaTime / FollowDelay)).normalized;
-        float behind = Quaternion.Angle(_smoothLook, _lagLook);
+            _lagLook = Quaternion.Slerp(_lagLook, _look, 1f - Mathf.Exp(-Time.deltaTime / FollowDelay)).normalized;
+        float behind = Quaternion.Angle(_look, _lagLook);
         if (behind > MaxDelayDegrees)
-            _lagLook = Quaternion.Slerp(_smoothLook, _lagLook, MaxDelayDegrees / behind).normalized;
+            _lagLook = Quaternion.Slerp(_look, _lagLook, MaxDelayDegrees / behind).normalized;
 
-        Quaternion rawTurn = Quaternion.Inverse(_smoothLook) * rawCamera;
+        if (Mathf.Abs(tilt - _lastTilt) > 0.0001f)
+            _leanUntil = Time.time + LeanSettleSeconds;
+        _lastTilt = tilt;
+
+        _neckPosition = neck.position;
+        _headPositionNow = Quaternion.Inverse(_look) * (cameraPosition - _neckPosition);
+        _headTurnNow = Quaternion.Inverse(_look) * cameraRotation;
         if (!_hasCenter)
         {
-            _centerTurn = rawTurn;
-            _headTurnSmooth = rawTurn;
+            _centerPosition = _headPositionNow;
+            _centerTurn = _headTurnNow;
             _hasCenter = true;
         }
-        else
+        else if (_smoothedHead.sqrMagnitude <= 0.01f)
         {
-            _headTurnSmooth = Quaternion.Slerp(_headTurnSmooth, rawTurn, 1f - Mathf.Exp(-Time.deltaTime / HeadSmoothSeconds)).normalized;
-            if (_smoothedHead.sqrMagnitude <= 0.01f)
-                _centerTurn = Quaternion.Slerp(_centerTurn, rawTurn, 1f - Mathf.Exp(-Time.deltaTime / CenterSeconds)).normalized;
+            float follow;
+            if (Time.time < _leanUntil)
+                follow = FollowDelay > 0f ? 1f - Mathf.Exp(-Time.deltaTime / FollowDelay) : 1f;
+            else
+                follow = 1f - Mathf.Exp(-Time.deltaTime / CenterSeconds);
+            _centerPosition = Vector3.Lerp(_centerPosition, _headPositionNow, follow);
+            _centerTurn = Quaternion.Slerp(_centerTurn, _headTurnNow, follow).normalized;
         }
 
-        return true;
-    }
-
-    private static void RotateHeadPostfix(PlayerBones __instance)
-    {
-        if (!NewCameraSwitch.Enabled || _turnFrame == Time.frameCount)
-            return;
-
-        Player? player = Comfort.Common.Singleton<GameWorld>.Instance?.MainPlayer;
-        Transform? head = __instance.Head?.Original;
-        if (player == null || head == null || !ReferenceEquals(player.PlayerBones, __instance))
-            return;
-
-        if (!UpdateTurn(player, CameraDirection.Resolve(head.rotation)))
-            return;
-
-        bool aiming = player.HandsController != null && player.HandsController.IsAiming;
-        float target = aiming && _smoothedHead.sqrMagnitude <= 0.01f ? 1f : 0f;
-        _headLock = Mathf.MoveTowards(_headLock, target, Time.deltaTime / HeadLockSeconds);
-        if (_headLock <= 0f)
-            return;
-
-        float weight = _headLock * _headLock * (3f - 2f * _headLock);
-        Quaternion locked = CameraDirection.Unresolve(_smoothLook * _headTurnSmooth);
-        head.rotation = Quaternion.Slerp(head.rotation, locked, weight);
+        _hasObserved = true;
     }
 
     private static void SteadyHead(Player player, Vector3 cameraPosition, Quaternion cameraRotation, out Vector3 position, out Quaternion rotation)
@@ -588,8 +493,8 @@ internal static class AimArms
                 _hasHeadMean = true;
             }
             _release = 1f;
-            position = _neckPosition + _smoothLook * _heldHeadPosition;
-            rotation = _smoothLook * _heldHeadTurn;
+            position = _neckPosition + _look * _heldHeadPosition;
+            rotation = _look * _heldHeadTurn;
             return;
         }
 
@@ -613,8 +518,8 @@ internal static class AimArms
 
         _heldHeadPosition = steadyPosition;
         _heldHeadTurn = steadyTurn;
-        position = _neckPosition + _smoothLook * steadyPosition;
-        rotation = _smoothLook * steadyTurn;
+        position = _neckPosition + _look * steadyPosition;
+        rotation = _look * steadyTurn;
     }
 
     private static void RotateHeadPrefix(PlayerBones __instance, ref Vector3 offset)
@@ -843,7 +748,6 @@ internal static class AimArms
         _hasChase = false;
         _release = 0f;
         _smoothedHead = Vector3.zero;
-        _headLock = 0f;
         RestoreSkins();
         if (!_suppress)
             return;
