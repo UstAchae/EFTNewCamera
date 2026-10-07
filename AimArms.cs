@@ -93,6 +93,10 @@ internal static class AimArms
     private static bool _aimDrain;
     private static float _lastTilt;
     private static float _lastPose;
+    private static string _lastState = "";
+    private static bool _lastProne;
+    private static bool _lastMounted;
+    private static float _gapLogAt;
     private static bool _lastAiming;
     private static float _settleUntil;
     private static bool _hasCenterPosition;
@@ -691,6 +695,18 @@ internal static class AimArms
             physical.Stamina.RemoveConsumption(consumption);
     }
 
+    private static float OverlapDepth(Player player)
+    {
+        try
+        {
+            return player.MovementContext.OverlapDepth;
+        }
+        catch
+        {
+            return -1f;
+        }
+    }
+
     private static float CenterFollow()
     {
         if (Time.time < _settleUntil)
@@ -704,6 +720,9 @@ internal static class AimArms
         float tilt;
         float pose;
         bool aiming;
+        string state;
+        bool prone;
+        bool mounted;
         try
         {
             if (player.MovementContext == null)
@@ -712,6 +731,9 @@ internal static class AimArms
             tilt = player.MovementContext.SmoothedTilt;
             pose = player.MovementContext.SmoothedPoseLevel;
             aiming = player.HandsController != null && player.HandsController.IsAiming;
+            state = player.MovementContext.CurrentState != null ? player.MovementContext.CurrentState.Name.ToString() : "";
+            prone = player.MovementContext.IsInPronePose;
+            mounted = player.MovementContext.IsInMountedState;
         }
         catch
         {
@@ -738,9 +760,18 @@ internal static class AimArms
             _settleUntil = Mathf.Max(_settleUntil, Time.time + AimSettleSeconds);
         if (Mathf.Abs(tilt - _lastTilt) > 0.0001f || Mathf.Abs(pose - _lastPose) > 0.0001f)
             _settleUntil = Mathf.Max(_settleUntil, Time.time + SettleSeconds);
+        if (state != _lastState || prone != _lastProne || mounted != _lastMounted)
+        {
+            _settleUntil = Mathf.Max(_settleUntil, Time.time + SettleSeconds);
+            if (aiming)
+                Log?.LogInfo($"回正：姿势 {_lastState}→{state} 趴={prone} 架枪={mounted}");
+        }
         _lastAiming = aiming;
         _lastTilt = tilt;
         _lastPose = pose;
+        _lastState = state;
+        _lastProne = prone;
+        _lastMounted = mounted;
 
         Quaternion rawTurn = Quaternion.Inverse(_smoothLook) * rawCamera;
         if (!_hasCenter)
@@ -754,6 +785,14 @@ internal static class AimArms
             _headTurnSmooth = Quaternion.Slerp(_headTurnSmooth, rawTurn, 1f - Mathf.Exp(-Time.deltaTime / HeadSmoothSeconds)).normalized;
             if (_smoothedHead.sqrMagnitude <= 0.01f)
                 _centerTurn = Quaternion.Slerp(_centerTurn, rawTurn, CenterFollow()).normalized;
+            float gap = Quaternion.Angle(_centerTurn, _headTurnSmooth);
+            if (aiming && gap > 4f && Time.time >= _settleUntil && Time.time >= _gapLogAt)
+            {
+                _gapLogAt = Time.time + 2f;
+                Log?.LogInfo(string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                    "没回正：头偏中心 {0:F1}° 姿势={1} 趴={2} 高度={3:F2} 探头={4:F2} 贴墙={5:F2}",
+                    gap, state, prone, pose, tilt, OverlapDepth(player)));
+            }
         }
 
         return true;
