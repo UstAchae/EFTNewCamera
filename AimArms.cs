@@ -330,9 +330,9 @@ internal static class AimArms
         player.MovementContext?.PlayerAnimator?.SetAiming(false);
     }
 
-    // The chain from the ribcage out to the gun (the arms' and weapon's own animation, recoil) is
-    // kept whole. The ribcage's motion against the camera is the rest of the body; standing it is
-    // kept, walking only its breathing-paced part. The result is laid onto the mouse look and the
+    // The chain from the gun bone's parent (Spine3) out to the gun (the arms' and weapon's own
+    // animation, recoil) is kept whole. That parent's motion against the camera is the rest of the
+    // body; standing it is kept, walking it is held at its average. The result is laid onto the mouse look and the
     // sight keeps the displacement that chain gives it, so swings pivot where the game pivots them.
     private static bool AlignToLook(Player player, Vector3 cameraPosition, Quaternion liveRotation, Quaternion look)
     {
@@ -364,7 +364,7 @@ internal static class AimArms
 
         Quaternion filteredFrame = _bodyBaseRotation * sway;
         Vector3 filteredFramePosition = _bodyBasePosition + swayShift;
-        DropArmSideSway(filteredFrame, reset, ref armRotation, ref armPosition);
+        TrackArmMean(reset, armRotation, armPosition);
         Quaternion sightInCamera = filteredFrame * armRotation * boneLocalRotation;
         Vector3 sightInCameraPosition = filteredFramePosition + filteredFrame * (armPosition + armRotation * boneLocalPosition);
         if (reset)
@@ -400,8 +400,7 @@ internal static class AimArms
         return true;
     }
 
-    // While walking, the arm layer is held at its slow mean.
-    private static void DropArmSideSway(Quaternion frameInCamera, bool reset, ref Quaternion armRotation, ref Vector3 armPosition)
+    private static void TrackArmMean(bool reset, Quaternion armRotation, Vector3 armPosition)
     {
         if (reset)
         {
@@ -414,13 +413,6 @@ internal static class AimArms
             _armMeanRotation = Quaternion.Slerp(_armMeanRotation, armRotation, follow);
             _armMeanPosition = Vector3.Lerp(_armMeanPosition, armPosition, follow);
         }
-
-        float strength = 1f - _actionWeight;
-        if (strength <= 0f)
-            return;
-
-        armRotation = Quaternion.Slerp(armRotation, _armMeanRotation, strength);
-        armPosition = Vector3.Lerp(armPosition, _armMeanPosition, strength);
     }
 
     private static Transform ArmFrame(PlayerBones bones, Transform body)
