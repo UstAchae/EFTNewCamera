@@ -103,6 +103,13 @@ internal static class AimArms
     private static Camera? _drawCamera;
     private static int _laserFrame = -1;
     private static int _opticFrame = -1;
+    private static int _shotFrame = -1;
+    private static Vector3? _shotFireport;
+    private const float SteadyLogFrom = 1.5f;
+    private const float SteadyLogTo = 6f;
+    private static bool _hasSteadyRef;
+    private static Vector3 _steadySight;
+    private static Quaternion _steadyGun = Quaternion.identity;
     private static readonly List<MonoBehaviour> DeferredLasers = new();
     private static int _skinOwnerId;
     private static readonly List<Transform> Upperarms = new();
@@ -129,6 +136,10 @@ internal static class AimArms
         MethodInfo? rotatePrefix = typeof(AimArms).GetMethod(nameof(RotatePrefix), BindingFlags.NonPublic | BindingFlags.Static);
         if (rotate != null && rotatePrefix != null)
             harmony.Patch(rotate, prefix: new HarmonyMethod(rotatePrefix));
+        MethodInfo? adjustShot = AccessTools.Method(typeof(Player.FirearmController), nameof(Player.FirearmController.AdjustShotVectors));
+        MethodInfo? adjustShotPrefix = typeof(AimArms).GetMethod(nameof(AdjustShotPrefix), BindingFlags.NonPublic | BindingFlags.Static);
+        if (adjustShot != null && adjustShotPrefix != null)
+            harmony.Patch(adjustShot, prefix: new HarmonyMethod(adjustShotPrefix));
         PatchLaser(harmony);
         PatchFieldOfView(harmony);
         _patched = true;
@@ -326,13 +337,65 @@ internal static class AimArms
         Transform? weapon = bones.Weapon_Root_Anim;
         if (weapon == null)
             return;
+        bool carried = false;
         foreach (Transform arm in Upperarms)
         {
             if (arm != null && weapon.IsChildOf(arm))
-                return;
+                carried = true;
         }
 
-        Carry(weapon, pivot, displacement, _turn);
+        if (!carried)
+            Carry(weapon, pivot, displacement, _turn);
+        _shotFrame = Time.frameCount;
+        _shotFireport = player.HandsController is Player.FirearmController firearm && firearm.CurrentFireport?.Original != null
+            ? firearm.CurrentFireport.Original.position
+            : (Vector3?)null;
+        if (aiming)
+            LogSteady(weapon, sightPoint.HasValue ? pivot + displacement : (Vector3?)null, cameraPosition, cameraRotation);
+    }
+
+    private static void AdjustShotPrefix(Player.FirearmController __instance, ref Vector3 position, ref Vector3 direction)
+    {
+        if (!NewCameraSwitch.Enabled || !_hasLaserDisplacement || Time.frameCount - _shotFrame > 2)
+            return;
+        Player? player = Singleton<GameWorld>.Instance?.MainPlayer;
+        if (player == null || !ReferenceEquals(player.HandsController, __instance))
+            return;
+        if (_shotFireport.HasValue && (__instance.CurrentFireport?.Original?.position - _shotFireport.Value)?.sqrMagnitude < 0.000001f)
+            return;
+
+        position = _laserPivot + _laserDisplacement + _laserTurn * (position - _laserPivot);
+        direction = _laserTurn * direction;
+    }
+
+    private static void LogSteady(Transform weapon, Vector3? sight, Vector3 cameraPosition, Quaternion cameraRotation)
+    {
+        if (Log == null || sight == null)
+            return;
+        float t = Time.time - _meanStart;
+        if (t < SteadyLogFrom || t > SteadyLogTo)
+            return;
+
+        Quaternion toCamera = Quaternion.Inverse(cameraRotation);
+        Vector3 sightLocal = toCamera * (sight.Value - cameraPosition);
+        Quaternion gunLocal = toCamera * weapon.rotation;
+        if (!_hasSteadyRef)
+        {
+            _steadySight = sightLocal;
+            _steadyGun = gunLocal;
+            _hasSteadyRef = true;
+        }
+
+        Vector3 shift = (sightLocal - _steadySight) * 100f;
+        Quaternion swing = Quaternion.Inverse(_steadyGun) * gunLocal;
+        Quaternion headSway = Quaternion.Inverse(_centerTurn) * _headTurnSmooth;
+        Quaternion breath = Quaternion.Inverse(_armTurnCenter) * _armTurnMean;
+        Log.LogInfo(string.Format(System.Globalization.CultureInfo.InvariantCulture,
+            "静止 t={0:F3} 瞄具偏cm=({1:F2},{2:F2},{3:F2}) 枪转=({4:F2},{5:F2},{6:F2}) 头偏中心=({7:F2},{8:F2},{9:F2}) 手臂慢晃=({10:F2},{11:F2},{12:F2})",
+            t, shift.x, shift.y, shift.z,
+            Signed(swing.eulerAngles.x), Signed(swing.eulerAngles.y), Signed(swing.eulerAngles.z),
+            Signed(headSway.eulerAngles.x), Signed(headSway.eulerAngles.y), Signed(headSway.eulerAngles.z),
+            Signed(breath.eulerAngles.x), Signed(breath.eulerAngles.y), Signed(breath.eulerAngles.z)));
     }
 
     internal static void CarryOptic(Camera camera)
@@ -369,6 +432,7 @@ internal static class AimArms
             _gunTurnMean = rawGunTurn;
             _armTurnCenter = armTurn;
             _gunTurnCenter = rawGunTurn;
+            _hasSteadyRef = false;
             _meanSightId = sightId;
             _meanStart = Time.time;
             _hasMean = true;
