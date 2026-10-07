@@ -40,7 +40,10 @@ internal static class AimArms
     private static float _actionWeight;
 
     internal static float ForwardDistance;
-    internal static float BodyAmount = 1f;
+    internal static float PelvisAmount = 1f;
+    internal static float Spine1Amount = 1f;
+    internal static float Spine2Amount = 1f;
+    internal static float ChestAmount = 1f;
     internal static float GunAmount = 1f;
     internal static float RecoilAmount = 1f;
     internal static float ActionAmount = 1f;
@@ -51,10 +54,18 @@ internal static class AimArms
     private static float _handsAction;
     private static Quaternion _viewMean = Quaternion.identity;
 
+    private struct BodyPart
+    {
+        public Transform Bone;
+        public int Kind;
+        public Quaternion MeanRotation;
+        public Vector3 MeanPosition;
+    }
+
+    private static BodyPart[] _bodyParts = System.Array.Empty<BodyPart>();
+    private static int _bodyPartsOwner;
     private static bool _hasSway;
     private static int _swaySightId;
-    private static Quaternion _bodyBaseRotation = Quaternion.identity;
-    private static Vector3 _bodyBasePosition;
     private static Quaternion _sightMeanRotation = Quaternion.identity;
     private static Vector3 _sightMeanPosition;
     private static bool _loggedArmFrame;
@@ -360,7 +371,7 @@ internal static class AimArms
         float walking = Mathf.Clamp01(new Vector2(velocity.x, velocity.z).magnitude / WalkingSpeed);
         float raw = acting ? 1f : 1f - walking;
         _actionWeight = Mathf.MoveTowards(_actionWeight, raw, Time.deltaTime / ActionBlendSeconds);
-        Quaternion bodyTurn = FilterBodySway(bone.GetInstanceID(), frameInCamera, frameInCameraPosition, out Vector3 bodyShift, out bool reset);
+        bool reset = NoteSway(bone.GetInstanceID());
         bool handsActing = HandsActing(player);
         _handsAction = Mathf.MoveTowards(_handsAction, handsActing ? 1f : 0f,
             Time.deltaTime / (handsActing ? HandsActionInSeconds : HandsActionOutSeconds));
@@ -368,14 +379,14 @@ internal static class AimArms
 
         float actionBlend = _handsAction * _handsAction * (3f - 2f * _handsAction);
         float gunScale = Mathf.Lerp(GunAmount, ActionAmount, actionBlend);
-        Quaternion shownFrame = _bodyBaseRotation * Quaternion.SlerpUnclamped(Quaternion.identity, bodyTurn, BodyAmount);
-        Vector3 shownFramePosition = _bodyBasePosition + bodyShift * BodyAmount;
+        BodyFrame(bones, frame, liveRotation, cameraPosition, reset, out Quaternion shownFrame, out Vector3 shownFramePosition,
+            out Quaternion meanFrame, out Vector3 meanFramePosition);
         Quaternion shownArm = Quaternion.SlerpUnclamped(_armMeanRotation, armRotation, gunScale);
         Vector3 shownArmPosition = Vector3.LerpUnclamped(_armMeanPosition, armPosition, gunScale);
         Quaternion shownSight = shownFrame * shownArm * boneLocalRotation;
         Vector3 shownSightPosition = shownFramePosition + shownFrame * (shownArmPosition + shownArm * boneLocalPosition);
-        Quaternion meanSightRotation = _bodyBaseRotation * _armMeanRotation * boneLocalRotation;
-        Vector3 meanSightPosition = _bodyBasePosition + _bodyBaseRotation * (_armMeanPosition + _armMeanRotation * boneLocalPosition);
+        Quaternion meanSightRotation = meanFrame * _armMeanRotation * boneLocalRotation;
+        Vector3 meanSightPosition = meanFramePosition + meanFrame * (_armMeanPosition + _armMeanRotation * boneLocalPosition);
         _sightMeanRotation = meanSightRotation;
         _sightMeanPosition = meanSightPosition;
         _logSightTurn = Quaternion.Angle(meanSightRotation, frameInCamera * armRotation * boneLocalRotation);
@@ -436,33 +447,169 @@ internal static class AimArms
         return frame;
     }
 
-    private static Quaternion FilterBodySway(int sightId, Quaternion bodyRotation, Vector3 bodyPosition, out Vector3 shift, out bool reset)
+    private static bool NoteSway(int sightId)
     {
-        shift = Vector3.zero;
-        reset = false;
-        Quaternion turn = Quaternion.Inverse(_bodyBaseRotation) * bodyRotation;
-        Vector3 offset = bodyPosition - _bodyBasePosition;
         if (!_hasSway || sightId != _swaySightId)
         {
-            reset = true;
-            _bodyBaseRotation = bodyRotation;
-            _bodyBasePosition = bodyPosition;
             _swaySightId = sightId;
             _hasSway = true;
             _sinceReset = 0f;
-            return Quaternion.identity;
+            return true;
         }
 
-        float dt = Time.deltaTime;
-        _sinceReset += dt;
-        float follow = MeanFollow();
-        _bodyBaseRotation = Quaternion.Slerp(_bodyBaseRotation, bodyRotation, follow);
-        _bodyBasePosition = Vector3.Lerp(_bodyBasePosition, bodyPosition, follow);
-        turn = Quaternion.Inverse(_bodyBaseRotation) * bodyRotation;
-        offset = bodyPosition - _bodyBasePosition;
+        _sinceReset += Time.deltaTime;
+        return false;
+    }
 
-        shift = offset;
-        return turn;
+    // Pelvis, the two waist bones and the chest, each one's own bend, scaled separately and then
+    // joined back into the chest the gun hangs on. At full scale the joined pose is the game's.
+    private static void BodyFrame(PlayerBones bones, Transform frame, Quaternion liveRotation, Vector3 cameraPosition, bool reset,
+        out Quaternion shownFrame, out Vector3 shownFramePosition, out Quaternion meanFrame, out Vector3 meanFramePosition)
+    {
+        EnsureBodyParts(bones, frame);
+        Quaternion toCamera = Quaternion.Inverse(liveRotation);
+        if (_bodyParts.Length == 0)
+        {
+            shownFrame = meanFrame = toCamera * frame.rotation;
+            shownFramePosition = meanFramePosition = toCamera * (frame.position - cameraPosition);
+            return;
+        }
+
+        Transform anchor = _bodyParts[0].Bone.parent != null ? _bodyParts[0].Bone.parent : _bodyParts[0].Bone;
+        Quaternion reproducedRotation = anchor.rotation;
+        Vector3 reproducedPosition = anchor.position;
+        Quaternion scaledRotation = reproducedRotation;
+        Vector3 scaledPosition = reproducedPosition;
+        Quaternion meanRotation = reproducedRotation;
+        Vector3 meanPosition = reproducedPosition;
+        float follow = reset ? 1f : MeanFollow();
+        for (int i = 0; i < _bodyParts.Length; i++)
+        {
+            BodyPart part = _bodyParts[i];
+            Transform bone = part.Bone;
+            if (bone == null)
+                continue;
+
+            Quaternion local = bone.localRotation;
+            Vector3 localPosition = bone.localPosition;
+            if (reset)
+            {
+                part.MeanRotation = local;
+                part.MeanPosition = localPosition;
+            }
+            else
+            {
+                part.MeanRotation = Quaternion.Slerp(part.MeanRotation, local, follow);
+                part.MeanPosition = Vector3.Lerp(part.MeanPosition, localPosition, follow);
+            }
+
+            _bodyParts[i] = part;
+            float amount = PartAmount(part.Kind);
+            Quaternion usedRotation = Quaternion.SlerpUnclamped(part.MeanRotation, local, amount);
+            Vector3 usedPosition = Vector3.LerpUnclamped(part.MeanPosition, localPosition, amount);
+            reproducedPosition += reproducedRotation * localPosition;
+            reproducedRotation *= local;
+            scaledPosition += scaledRotation * usedPosition;
+            scaledRotation *= usedRotation;
+            meanPosition += meanRotation * part.MeanPosition;
+            meanRotation *= part.MeanRotation;
+        }
+
+        Quaternion shownWorld = frame.rotation * Quaternion.Inverse(reproducedRotation) * scaledRotation;
+        Vector3 shownWorldPosition = frame.position + (scaledPosition - reproducedPosition);
+        Quaternion meanWorld = frame.rotation * Quaternion.Inverse(reproducedRotation) * meanRotation;
+        Vector3 meanWorldPosition = frame.position + (meanPosition - reproducedPosition);
+        shownFrame = toCamera * shownWorld;
+        shownFramePosition = toCamera * (shownWorldPosition - cameraPosition);
+        meanFrame = toCamera * meanWorld;
+        meanFramePosition = toCamera * (meanWorldPosition - cameraPosition);
+    }
+
+    private static float PartAmount(int kind)
+    {
+        switch (kind)
+        {
+            case 0: return PelvisAmount;
+            case 1: return Spine1Amount;
+            case 2: return Spine2Amount;
+            default: return ChestAmount;
+        }
+    }
+
+    private static void EnsureBodyParts(PlayerBones bones, Transform frame)
+    {
+        int owner = bones.GetInstanceID();
+        if (_bodyPartsOwner == owner && _bodyParts.Length > 0 && _bodyParts[0].Bone != null)
+            return;
+
+        Transform? pelvis = bones.Pelvis != null ? bones.Pelvis.Original : null;
+        Transform? spine1 = bones.Spine1;
+        Transform? spine3 = bones.Spine3 != null ? bones.Spine3.Original : null;
+        Transform? stop = pelvis != null ? pelvis : bones.RootJoint;
+        var chain = new List<Transform>();
+        for (Transform? bone = frame; bone != null; bone = bone.parent)
+        {
+            if (bones.RootJoint != null && bone == bones.RootJoint)
+                break;
+            chain.Add(bone);
+            if (stop != null && bone == stop)
+                break;
+        }
+
+        chain.Reverse();
+        var parts = new BodyPart[chain.Count];
+        string described = "";
+        for (int i = 0; i < chain.Count; i++)
+        {
+            Transform bone = chain[i];
+            int kind = PartKind(bone, pelvis, spine1, spine3);
+            parts[i] = new BodyPart
+            {
+                Bone = bone,
+                Kind = kind,
+                MeanRotation = bone.localRotation,
+                MeanPosition = bone.localPosition
+            };
+            if (described.Length > 0)
+                described += " → ";
+            described += PartName(kind) + " " + bone.name;
+        }
+
+        _bodyParts = parts;
+        _bodyPartsOwner = owner;
+        Log?.LogInfo("身体分段: " + described);
+    }
+
+    private static int PartKind(Transform bone, Transform? pelvis, Transform? spine1, Transform? spine3)
+    {
+        if (pelvis != null && bone == pelvis)
+            return 0;
+        if (spine1 != null && bone == spine1)
+            return 1;
+        if (spine3 != null && bone == spine3)
+            return 3;
+
+        string name = bone.name.Replace(" ", string.Empty).Replace("_", string.Empty);
+        if (name.IndexOf("pelvis", System.StringComparison.OrdinalIgnoreCase) >= 0)
+            return 0;
+        if (name.IndexOf("spine1", System.StringComparison.OrdinalIgnoreCase) >= 0
+            || name.IndexOf("spine01", System.StringComparison.OrdinalIgnoreCase) >= 0)
+            return 1;
+        if (name.IndexOf("spine3", System.StringComparison.OrdinalIgnoreCase) >= 0
+            || name.IndexOf("spine03", System.StringComparison.OrdinalIgnoreCase) >= 0)
+            return 3;
+        return 2;
+    }
+
+    private static string PartName(int kind)
+    {
+        switch (kind)
+        {
+            case 0: return "胯";
+            case 1: return "腰";
+            case 2: return "上腰";
+            default: return "胸";
+        }
     }
 
     private static Quaternion AlignSightTo(Quaternion sightRotation, Vector3 cameraForward)

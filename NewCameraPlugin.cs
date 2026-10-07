@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "新镜头";
-    public const string PluginVersion = "0.1.95";
+    public const string PluginVersion = "0.1.96";
 
     private void Awake()
     {
@@ -31,8 +31,14 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 
     private void BindSways()
     {
-        BindPortion("身体摆动", v => AimArms.BodyAmount = v,
-            "瞄准时胸口带着枪晃的幅度，站着的起伏和走路的颠都在里面。1 是游戏原来的，0 是胸口这块不带动枪。");
+        BindPortion("胯", v => AimArms.PelvisAmount = v,
+            "瞄准时髋部晃动带给枪的幅度。1 是游戏原来的，0 是髋部不带动枪。");
+        BindPortion("腰", v => AimArms.Spine1Amount = v,
+            "瞄准时腰靠近胯的那一节带给枪的幅度。1 是游戏原来的，0 是这一节不带动枪。");
+        BindPortion("上腰", v => AimArms.Spine2Amount = v,
+            "瞄准时腰靠近胸口的那一节带给枪的幅度。1 是游戏原来的，0 是这一节不带动枪。");
+        BindPortion("胸", v => AimArms.ChestAmount = v,
+            "瞄准时胸口这一节带给枪的幅度。1 是游戏原来的，0 是胸口不带动枪。");
         BindPortion("枪自身摆动", v => AimArms.GunAmount = v,
             "瞄准时枪在胸口上自己晃的幅度，不含开枪后坐，也不含拉栓、换弹这些手上动作。1 是游戏原来的，0 是枪自身不晃。");
         BindPortion("后坐力", v => AimArms.RecoilAmount = v,
