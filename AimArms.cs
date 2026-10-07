@@ -31,6 +31,11 @@ internal static class AimArms
     private const float HeadFollowSeconds = 0.05f;
     private const float HeadSnapDegrees = 45f;
 
+    private const float HeadMeanSeconds = 1f;
+    internal static BepInEx.Logging.ManualLogSource? Log;
+    private static float _aimSince;
+    private static float _nextAimLog;
+    private static Quaternion _headMean = Quaternion.identity;
     private static bool _hasHeadInLook;
     private static Quaternion _headInLook = Quaternion.identity;
     private static float _actionWeight;
@@ -149,8 +154,26 @@ internal static class AimArms
             _headInLook = Quaternion.Slerp(_headInLook, headInLook, 1f - Mathf.Exp(-Time.deltaTime / HeadFollowSeconds));
         }
 
-        if (player.HandsController != null && player.HandsController.IsAiming)
-            head.rotation = CameraDirection.Unresolve(look * _headInLook);
+        bool aiming = player.HandsController != null && player.HandsController.IsAiming;
+        if (!aiming)
+        {
+            _aimSince = 0f;
+            _headMean = _headInLook;
+            return;
+        }
+
+        _aimSince += Time.deltaTime;
+        float seconds = Mathf.Lerp(MeanStartSeconds, HeadMeanSeconds, Mathf.Clamp01(_aimSince / MeanSettleSeconds));
+        _headMean = Quaternion.Slerp(_headMean, _headInLook, 1f - Mathf.Exp(-Time.deltaTime / seconds));
+        head.rotation = CameraDirection.Unresolve(look * _headInLook);
+    }
+
+    // The picture hangs on the head, which sits at an angle to the mouse look that the game eases
+    // while aiming in. The gun aims along the look turned by the head's averaged angle, so it lands
+    // in the middle of the picture while still sharing the mouse signal frame by frame.
+    private static Quaternion AimLook(Quaternion look)
+    {
+        return _hasHeadInLook ? look * _headMean : look;
     }
 
     // Runs before RotateHead and hand IK, so the hands still grip the gun after it is placed.
@@ -187,8 +210,11 @@ internal static class AimArms
 
         Vector3 gamePosition = weapon.position;
         int placedSight = 0;
-        if (aiming && TryGetLook(player, out Quaternion look) && AlignToLook(player, cameraPosition, liveRotation, look))
+        if (aiming && TryGetLook(player, out Quaternion look) && AlignToLook(player, cameraPosition, liveRotation, AimLook(look)))
+        {
             placedSight = _swaySightId;
+            LogAimIn(look, liveRotation);
+        }
         else
             ClearHold();
 
@@ -231,6 +257,24 @@ internal static class AimArms
         _shownPosition = toCamera * (weapon.position - cameraPosition);
         _shownRotation = toCamera * weapon.rotation;
         _hasShownPose = true;
+    }
+
+    private static void LogAimIn(Quaternion look, Quaternion liveRotation)
+    {
+        if (Log == null || _aimSince > 2f || Time.time < _nextAimLog)
+            return;
+
+        _nextAimLog = Time.time + 0.1f;
+        Quaternion aim = AimLook(look);
+        Vector3 headOffset = (Quaternion.Inverse(look) * (look * _headInLook * Vector3.forward));
+        Log.LogInfo(string.Format(
+            "开镜 {0:F2}s 头相对鼠标 偏航{1:F1} 俯仰{2:F1} | 枪对画面中心 {3:F2}度 | 平均值对头 {4:F2}度 | 摆枪时头骨对画面 {5:F2}度",
+            _aimSince,
+            Mathf.Atan2(headOffset.x, headOffset.z) * Mathf.Rad2Deg,
+            -Mathf.Asin(Mathf.Clamp(headOffset.y, -1f, 1f)) * Mathf.Rad2Deg,
+            Vector3.Angle(aim * Vector3.forward, look * _headInLook * Vector3.forward),
+            Quaternion.Angle(_headMean, _headInLook),
+            Vector3.Angle(liveRotation * Vector3.forward, look * _headInLook * Vector3.forward)));
     }
 
     private static float MeanFollow()
@@ -388,7 +432,7 @@ internal static class AimArms
             string chain = body.name;
             for (Transform? t = body.parent; t != null && chain.Length < 400; t = t.parent)
                 chain += " <- " + t.name;
-            Debug.Log("[新镜头] 手臂层起点: " + frame.name + "；枪骨链: " + chain);
+            Log?.LogInfo("手臂层起点: " + frame.name + "；枪骨链: " + chain);
         }
 
         return frame;
