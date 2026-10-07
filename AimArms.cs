@@ -91,7 +91,7 @@ internal static class AimArms
     private static int _rotateHeadFrame = -1;
     private static float _leanTilt;
     private static float _leanLogUntil;
-    private static Quaternion _leanRawTurn = Quaternion.identity;
+    private static Quaternion _headTurnRaw = Quaternion.identity;
     private static Vector3 _leanArm;
     private static float _leanArmTurn;
     private static Vector3 _leanGunMove;
@@ -401,7 +401,7 @@ internal static class AimArms
         Quaternion toCamera = Quaternion.Inverse(cameraRotation);
         Vector3 sightLocal = sight.HasValue ? toCamera * (sight.Value - cameraPosition) * 100f : Vector3.zero;
         Vector3 gun = (toCamera * weapon.rotation).eulerAngles;
-        Vector3 head = _leanRawTurn.eulerAngles;
+        Vector3 head = _headTurnRaw.eulerAngles;
         Vector3 smooth = _headTurnSmooth.eulerAngles;
         Log.LogInfo(string.Format(System.Globalization.CultureInfo.InvariantCulture,
             "探头 帧={0} dt={1:F4} 探头值={2:F3} 头钩子={3} 头锁={4:F2} 头原始=({5:F2},{6:F2},{7:F2}) 头抹匀=({8:F2},{9:F2},{10:F2}) 镜头离目标={11:F2} " +
@@ -739,7 +739,7 @@ internal static class AimArms
         UpdateBreathState(player);
 
         Quaternion rawTurn = Quaternion.Inverse(_smoothLook) * rawCamera;
-        _leanRawTurn = rawTurn;
+        _headTurnRaw = rawTurn;
         if (!_hasCenter)
         {
             _headTurnSmooth = rawTurn;
@@ -760,10 +760,10 @@ internal static class AimArms
         return length < 0.0001f ? Quaternion.identity : new Quaternion(0f, 0f, twist.z / length, twist.w / length);
     }
 
-    private static Quaternion AimTurn(Quaternion headTurn)
+    private static Quaternion AimTurn()
     {
-        Quaternion lean = Lean(headTurn);
-        return Scale(headTurn * Quaternion.Inverse(lean), Now.HeadFollow) * lean;
+        Quaternion sway = _headTurnSmooth * Quaternion.Inverse(Lean(_headTurnSmooth));
+        return Scale(sway, Now.HeadFollow) * Lean(_headTurnRaw);
     }
 
     private static void RotateHeadPostfix(PlayerBones __instance)
@@ -787,7 +787,7 @@ internal static class AimArms
             return;
 
         float weight = _headLock * _headLock * (3f - 2f * _headLock);
-        Quaternion locked = CameraDirection.Unresolve(_smoothLook * AimTurn(_headTurnSmooth));
+        Quaternion locked = CameraDirection.Unresolve(_smoothLook * AimTurn());
         head.rotation = Quaternion.Slerp(head.rotation, locked, weight);
     }
 
@@ -803,7 +803,7 @@ internal static class AimArms
             if (!_hasHeadMean)
             {
                 _heldHeadPosition = _headPositionNow;
-                _heldHeadTurn = AimTurn(_headTurnSmooth);
+                _heldHeadTurn = AimTurn();
                 _hasHeadMean = true;
             }
             _release = 1f;
@@ -819,7 +819,7 @@ internal static class AimArms
         }
 
         Vector3 steadyPosition = _headPositionNow;
-        Quaternion steadyTurn = AimTurn(_headTurnSmooth);
+        Quaternion steadyTurn = AimTurn();
         _logHeadTurn = Quaternion.Angle(steadyTurn, _headTurnNow);
         if (_release > 0f)
         {
