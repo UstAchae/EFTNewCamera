@@ -56,6 +56,8 @@ internal static class AimArms
     private static Quaternion _sightMeanRotation = Quaternion.identity;
     private static Vector3 _sightMeanPosition;
     private static bool _loggedArmFrame;
+    private static Quaternion _armMeanRotation = Quaternion.identity;
+    private static Vector3 _armMeanPosition;
     private static Vector3 _turnStage1;
     private static Vector3 _turnStage2;
     private static Vector3 _shiftStage1;
@@ -246,6 +248,7 @@ internal static class AimArms
 
         Quaternion filteredFrame = _bodyBaseRotation * sway;
         Vector3 filteredFramePosition = _bodyBasePosition + swayShift;
+        DropArmSideSway(filteredFrame, reset, ref armRotation, ref armPosition);
         Quaternion sightInCamera = filteredFrame * armRotation * boneLocalRotation;
         Vector3 sightInCameraPosition = filteredFramePosition + filteredFrame * (armPosition + armRotation * boneLocalPosition);
         if (reset)
@@ -275,6 +278,42 @@ internal static class AimArms
         _hasLaserDisplacement = target.sqrMagnitude >= 0.00000001f;
         weapon.SetPositionAndRotation(targetWeaponPosition, targetWeaponRotation);
         return true;
+    }
+
+    // While walking, the arm layer's sideways swing (turning left/right about the camera's up axis
+    // and sliding along its right axis) is taken out around its slow mean; vertical motion stays.
+    private static void DropArmSideSway(Quaternion frameInCamera, bool reset, ref Quaternion armRotation, ref Vector3 armPosition)
+    {
+        if (reset)
+        {
+            _armMeanRotation = armRotation;
+            _armMeanPosition = armPosition;
+        }
+        else
+        {
+            float follow = 1f - Mathf.Exp(-Time.deltaTime / BaseSeconds);
+            _armMeanRotation = Quaternion.Slerp(_armMeanRotation, armRotation, follow);
+            _armMeanPosition = Vector3.Lerp(_armMeanPosition, armPosition, follow);
+        }
+
+        float strength = 1f - _actionWeight;
+        if (strength <= 0f)
+            return;
+
+        Quaternion meanInCamera = frameInCamera * _armMeanRotation;
+        Quaternion deviation = frameInCamera * armRotation * Quaternion.Inverse(meanInCamera);
+        Quaternion yaw = new Quaternion(0f, deviation.y, 0f, deviation.w);
+        float yawLength = Mathf.Sqrt(yaw.y * yaw.y + yaw.w * yaw.w);
+        if (yawLength > 0.0001f)
+        {
+            yaw = new Quaternion(0f, yaw.y / yawLength, 0f, yaw.w / yawLength);
+            Quaternion withoutYaw = deviation * Quaternion.Inverse(yaw);
+            deviation = Quaternion.Slerp(deviation, withoutYaw, strength);
+            armRotation = Quaternion.Inverse(frameInCamera) * deviation * meanInCamera;
+        }
+
+        Vector3 slide = frameInCamera * (armPosition - _armMeanPosition);
+        armPosition -= Quaternion.Inverse(frameInCamera) * new Vector3(slide.x * strength, 0f, 0f);
     }
 
     private static Transform ArmFrame(PlayerBones bones, Transform body)
