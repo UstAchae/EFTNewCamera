@@ -68,6 +68,9 @@ internal static class AimArms
     private static Quaternion _armTurnCenter = Quaternion.identity;
     private static Quaternion _gunTurnCenter = Quaternion.identity;
     private static Quaternion _lagLook = Quaternion.identity;
+    private const float FollowSpeedSeconds = 0.1f;
+    private static readonly Queue<Vector3> MouseSteps = new();
+    private static Vector2 _mouseStepSum;
     private static Vector3 _gunMoveSmooth;
     private static Quaternion _gunTurnSmooth = Quaternion.identity;
     internal static BepInEx.Logging.ManualLogSource? Log;
@@ -777,18 +780,34 @@ internal static class AimArms
         }
 
         Quaternion look = Quaternion.Euler(mouse.y, mouse.x, 0f);
-        _bodyLook = _turnFrame == Time.frameCount - 1 ? _smoothLook : look;
+        bool continuous = _turnFrame == Time.frameCount - 1;
+        _bodyLook = continuous ? _smoothLook : look;
+        if (continuous)
+        {
+            Vector2 step = new Vector2(Mathf.DeltaAngle(_mouseNow.x, mouse.x), mouse.y - _mouseNow.y);
+            MouseSteps.Enqueue(new Vector3(step.x, step.y, Time.time));
+            _mouseStepSum += step;
+        }
+        else
+        {
+            MouseSteps.Clear();
+        }
+        while (MouseSteps.Count > 0 && Time.time - MouseSteps.Peek().z >= FollowSpeedSeconds)
+        {
+            Vector3 old = MouseSteps.Dequeue();
+            _mouseStepSum -= new Vector2(old.x, old.y);
+        }
+        if (MouseSteps.Count == 0)
+            _mouseStepSum = Vector2.zero;
+
         _turnFrame = Time.frameCount;
         _mouseNow = mouse;
         _smoothLook = look;
 
-        if (!_hasCenter || FollowDelay <= 0f)
-            _lagLook = _smoothLook;
-        else
-            _lagLook = Quaternion.Slerp(_lagLook, _smoothLook, 1f - Mathf.Exp(-Time.deltaTime / FollowDelay)).normalized;
-        float behind = Quaternion.Angle(_smoothLook, _lagLook);
-        if (behind > MaxDelayDegrees)
-            _lagLook = Quaternion.Slerp(_smoothLook, _lagLook, MaxDelayDegrees / behind).normalized;
+        Vector2 behind = _hasCenter ? _mouseStepSum * (FollowDelay / FollowSpeedSeconds) : Vector2.zero;
+        if (behind.magnitude > MaxDelayDegrees)
+            behind = behind.normalized * MaxDelayDegrees;
+        _lagLook = Quaternion.Euler(mouse.y - behind.y, mouse.x - behind.x, 0f);
 
         UpdateBreathState(player);
 

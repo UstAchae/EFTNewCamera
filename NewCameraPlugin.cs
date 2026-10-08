@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "新镜头";
-    public const string PluginVersion = "0.1.142";
+    public const string PluginVersion = "0.1.143";
 
     private void Awake()
     {
@@ -85,7 +85,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         ConfigEntry<bool> chase = Config.Bind("瞄准摆动", "照原版慢半拍跟上", true,
             "打开时瞄具不再每帧钉死在眼前，而是像原版第一人称那样慢半拍追过去，拉栓这类快动作会先把枪带走再回来。关掉就是每帧钉死。");
         ConfigEntry<float> followDelay = Config.Bind("瞄准摆动", "跟手延迟（秒）", 0f,
-            new ConfigDescription("晃鼠标时枪慢半拍跟上的快慢，数越大越慢。0 是不延迟。站着和走路都一样。",
+            new ConfigDescription("晃鼠标时枪落后画面多少，按最近 0.1 秒的平均鼠标速度乘这个时间算，数越大落得越多。鼠标停下后枪在 0.1 秒内回正。0 是不延迟。",
                 new AcceptableValueRange<float>(0f, 0.3f)));
         ConfigEntry<float> recoilKick = Config.Bind("瞄准摆动", "后坐力上跳", 1f,
             new ConfigDescription("瞄准开枪时枪口上跳的力度，1 是原版第一人称的力度，0 是不跳。子弹跟着枪口走。不受上面摆动滑条影响。",
