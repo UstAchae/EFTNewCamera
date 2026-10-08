@@ -574,7 +574,7 @@ internal static class AimArms
             return;
 
         float weight = _headLock * _headLock * (3f - 2f * _headLock);
-        head.rotation = Quaternion.Slerp(head.rotation, CameraDirection.Unresolve(_smoothLook * AimTurn()), weight);
+        head.rotation = Quaternion.Slerp(head.rotation, CameraDirection.Unresolve(_smoothLook * _headTurnSmooth), weight);
     }
 
     internal static void CalmWalkHead(Player player)
@@ -751,8 +751,6 @@ internal static class AimArms
         return true;
     }
 
-    private static Quaternion _heldLean = Quaternion.identity;
-
     private static Quaternion Lean(Quaternion headTurn)
     {
         Vector4 twist = new Vector4(0f, 0f, headTurn.z, headTurn.w);
@@ -762,13 +760,8 @@ internal static class AimArms
 
     private static Quaternion AimTurn()
     {
-        Quaternion lean = Lean(_headTurnRaw);
-        float total = Quaternion.Angle(Quaternion.identity, _headTurnRaw);
-        float roll = Quaternion.Angle(Quaternion.identity, lean);
-        if (total <= roll + 1.5f)
-            _heldLean = lean;
         Quaternion sway = _headTurnSmooth * Quaternion.Inverse(Lean(_headTurnSmooth));
-        return Scale(sway, Now.HeadFollow) * _heldLean;
+        return Scale(sway, Now.HeadFollow) * Lean(_headTurnRaw);
     }
 
     private static void RotateHeadPostfix(PlayerBones __instance)
