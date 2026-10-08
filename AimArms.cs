@@ -751,18 +751,24 @@ internal static class AimArms
         return true;
     }
 
+    private static Quaternion _heldLean = Quaternion.identity;
+
     private static Quaternion Lean(Quaternion headTurn)
     {
-        Vector3 up = headTurn * Vector3.up;
-        if (up.x * up.x + up.y * up.y < 0.0001f)
-            return Quaternion.identity;
-        return Quaternion.AngleAxis(Mathf.Atan2(up.x, up.y) * Mathf.Rad2Deg, Vector3.forward);
+        Vector4 twist = new Vector4(0f, 0f, headTurn.z, headTurn.w);
+        float length = twist.magnitude;
+        return length < 0.0001f ? Quaternion.identity : new Quaternion(0f, 0f, twist.z / length, twist.w / length);
     }
 
     private static Quaternion AimTurn()
     {
+        Quaternion lean = Lean(_headTurnRaw);
+        float total = Quaternion.Angle(Quaternion.identity, _headTurnRaw);
+        float roll = Quaternion.Angle(Quaternion.identity, lean);
+        if (total <= roll + 1.5f)
+            _heldLean = lean;
         Quaternion sway = _headTurnSmooth * Quaternion.Inverse(Lean(_headTurnSmooth));
-        return Scale(sway, Now.HeadFollow) * Lean(_headTurnRaw);
+        return Scale(sway, Now.HeadFollow) * _heldLean;
     }
 
     private static void RotateHeadPostfix(PlayerBones __instance)
