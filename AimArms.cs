@@ -179,9 +179,32 @@ internal static class AimArms
         MethodInfo? visualPassPostfix = typeof(AimArms).GetMethod(nameof(VisualPassPostfix), BindingFlags.NonPublic | BindingFlags.Static);
         if (visualPass != null && visualPassPostfix != null)
             harmony.Patch(visualPass, postfix: new HarmonyMethod(visualPassPostfix) { priority = Priority.Last });
+        MethodInfo? rotate = AccessTools.Method(typeof(Player), nameof(Player.Rotate));
+        MethodInfo? rotatePostfix = typeof(AimArms).GetMethod(nameof(RotatePostfix), BindingFlags.NonPublic | BindingFlags.Static);
+        if (rotate != null && rotatePostfix != null)
+            harmony.Patch(rotate, postfix: new HarmonyMethod(rotatePostfix));
         PatchLaser(harmony);
         PatchFieldOfView(harmony);
         _patched = true;
+    }
+
+    private static int _rotateLogCount;
+
+    private static void RotatePostfix(Player __instance, Vector2 deltaRotation)
+    {
+        if (!NewCameraSwitch.Enabled || Log == null || !__instance.IsYourPlayer || deltaRotation.sqrMagnitude < 0.0000001f)
+            return;
+        if (__instance.HandsController == null || !__instance.HandsController.IsAiming)
+        {
+            _rotateLogCount = 0;
+            return;
+        }
+        if (_rotateLogCount++ >= 1500)
+            return;
+
+        Log.LogInfo(string.Format(System.Globalization.CultureInfo.InvariantCulture,
+            "鼠标输入 帧={0} 时间={1:F4} 增量=({2:F3},{3:F3}) 固定步长={4:F4} 在固定更新里={5}",
+            Time.frameCount, Time.time, deltaRotation.x, deltaRotation.y, Time.fixedDeltaTime, Time.inFixedTimeStep));
     }
 
     private static void PatchFieldOfView(Harmony harmony)
