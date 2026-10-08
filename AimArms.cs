@@ -213,8 +213,13 @@ internal static class AimArms
 
         bool smoothing = NewCameraSwitch.Enabled && MouseSmoothSeconds > 0f
             && player.HandsController != null && player.HandsController.IsAiming;
-        bool moving = _mouseFrame >= Time.frameCount - 1;
-        Vector2 step = smoothing && moving
+        if (smoothing && _mouseFrame < Time.frameCount - 1)
+        {
+            _pendingMouse = Vector2.zero;
+            return;
+        }
+
+        Vector2 step = smoothing
             ? _pendingMouse * (1f - Mathf.Exp(-Time.deltaTime / MouseSmoothSeconds))
             : _pendingMouse;
         if ((_pendingMouse - step).sqrMagnitude < 0.00000001f)
