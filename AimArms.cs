@@ -27,7 +27,6 @@ internal static class AimArms
     private const float GunSmoothSeconds = 0.04f;
     private const float HeadSmoothSeconds = 0.05f;
     private const float ReleaseSeconds = 0.3f;
-    private const float LookSmoothSeconds = 0.05f;
     private const float HeadLockSeconds = 0.2f;
 
     internal static float ForwardDistance;
@@ -622,8 +621,24 @@ internal static class AimArms
 
     private static void VisualPassPostfix(Player __instance)
     {
-        if (NewCameraSwitch.Enabled && __instance.IsYourPlayer)
-            CalmWalkHead(__instance);
+        if (!NewCameraSwitch.Enabled || !__instance.IsYourPlayer)
+            return;
+
+        ApplyHeadLock(__instance);
+        CalmWalkHead(__instance);
+    }
+
+    private static void ApplyHeadLock(Player player)
+    {
+        if (_headLock <= 0f)
+            return;
+
+        Transform? head = player.PlayerBones?.Head?.Original;
+        if (head == null)
+            return;
+
+        float weight = _headLock * _headLock * (3f - 2f * _headLock);
+        head.rotation = Quaternion.Slerp(head.rotation, CameraDirection.Unresolve(_smoothLook * AimTurn()), weight);
     }
 
     internal static void CalmWalkHead(Player player)
@@ -773,10 +788,7 @@ internal static class AimArms
 
         _turnFrame = Time.frameCount;
         Quaternion look = Quaternion.Euler(mouse.y, mouse.x, 0f);
-        if (!_hasCenter)
-            _smoothLook = look;
-        else
-            _smoothLook = Quaternion.Slerp(_smoothLook, look, 1f - Mathf.Exp(-Time.deltaTime / LookSmoothSeconds)).normalized;
+        _smoothLook = look;
 
         if (!_hasCenter || FollowDelay <= 0f)
             _lagLook = _smoothLook;
@@ -833,12 +845,6 @@ internal static class AimArms
         bool aiming = player.HandsController != null && player.HandsController.IsAiming;
         float target = aiming && _smoothedHead.sqrMagnitude <= 0.01f ? 1f : 0f;
         _headLock = Mathf.MoveTowards(_headLock, target, Time.deltaTime / HeadLockSeconds);
-        if (_headLock <= 0f)
-            return;
-
-        float weight = _headLock * _headLock * (3f - 2f * _headLock);
-        Quaternion locked = CameraDirection.Unresolve(_smoothLook * AimTurn());
-        head.rotation = Quaternion.Slerp(head.rotation, locked, weight);
     }
 
     private static void SteadyHead(Player player, Vector3 cameraPosition, Quaternion cameraRotation, out Vector3 position, out Quaternion rotation)
