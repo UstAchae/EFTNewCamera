@@ -68,9 +68,7 @@ internal static class AimArms
     private static Quaternion _armTurnCenter = Quaternion.identity;
     private static Quaternion _gunTurnCenter = Quaternion.identity;
     private static Quaternion _lagLook = Quaternion.identity;
-    private const float FollowSpeedSeconds = 0.1f;
     private static readonly Queue<Vector3> MouseSteps = new();
-    private static Vector2 _mouseStepSum;
     private static Vector3 _gunMoveSmooth;
     private static Quaternion _gunTurnSmooth = Quaternion.identity;
     internal static BepInEx.Logging.ManualLogSource? Log;
@@ -783,28 +781,26 @@ internal static class AimArms
         bool continuous = _turnFrame == Time.frameCount - 1;
         _bodyLook = continuous ? _smoothLook : look;
         if (continuous)
-        {
-            Vector2 step = new Vector2(Mathf.DeltaAngle(_mouseNow.x, mouse.x), mouse.y - _mouseNow.y);
-            MouseSteps.Enqueue(new Vector3(step.x, step.y, Time.time));
-            _mouseStepSum += step;
-        }
+            MouseSteps.Enqueue(new Vector3(Mathf.DeltaAngle(_mouseNow.x, mouse.x), mouse.y - _mouseNow.y, Time.time));
         else
-        {
             MouseSteps.Clear();
-        }
-        while (MouseSteps.Count > 0 && Time.time - MouseSteps.Peek().z >= FollowSpeedSeconds)
-        {
-            Vector3 old = MouseSteps.Dequeue();
-            _mouseStepSum -= new Vector2(old.x, old.y);
-        }
-        if (MouseSteps.Count == 0)
-            _mouseStepSum = Vector2.zero;
+        float window = 2f * FollowDelay;
+        while (MouseSteps.Count > 0 && Time.time - MouseSteps.Peek().z >= window)
+            MouseSteps.Dequeue();
 
         _turnFrame = Time.frameCount;
         _mouseNow = mouse;
         _smoothLook = look;
 
-        Vector2 behind = _hasCenter ? _mouseStepSum * (FollowDelay / FollowSpeedSeconds) : Vector2.zero;
+        Vector2 behind = Vector2.zero;
+        if (_hasCenter)
+        {
+            foreach (Vector3 step in MouseSteps)
+            {
+                float bump = Mathf.Sin(Mathf.PI * (Time.time - step.z) / window);
+                behind += new Vector2(step.x, step.y) * (bump * bump);
+            }
+        }
         if (behind.magnitude > MaxDelayDegrees)
             behind = behind.normalized * MaxDelayDegrees;
         _lagLook = Quaternion.Euler(mouse.y - behind.y, mouse.x - behind.x, 0f);
