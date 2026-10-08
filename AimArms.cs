@@ -753,9 +753,10 @@ internal static class AimArms
 
     private static Quaternion Lean(Quaternion headTurn)
     {
-        Vector4 twist = new Vector4(0f, 0f, headTurn.z, headTurn.w);
-        float length = twist.magnitude;
-        return length < 0.0001f ? Quaternion.identity : new Quaternion(0f, 0f, twist.z / length, twist.w / length);
+        Vector3 up = headTurn * Vector3.up;
+        if (up.x * up.x + up.y * up.y < 0.0001f)
+            return Quaternion.identity;
+        return Quaternion.AngleAxis(Mathf.Atan2(up.x, up.y) * Mathf.Rad2Deg, Vector3.forward);
     }
 
     private static Quaternion AimTurn()
