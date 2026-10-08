@@ -33,47 +33,33 @@ internal static class OpticPicture
         {
             ProceduralWeaponAnimation? animation = player.ProceduralWeaponAnimation;
             OpticCameraManager? manager = CameraManager.Instance?.OpticCameraManager;
+            if (animation == null || manager == null)
+            {
+                ReleaseHeld();
+                return;
+            }
+
             bool aiming = player.HandsController != null && player.HandsController.IsAiming;
-            ProceduralWeaponAnimation.SightNBone? scope = animation?.CurrentScope;
-            if (animation == null || manager == null || !aiming || scope == null)
+            ProceduralWeaponAnimation.SightNBone? scope = animation.CurrentScope;
+            OpticSight? picture = null;
+            if (aiming && scope != null)
+            {
+                OpticSight? sight = Resolve(animation);
+                if (WantsPicture(scope, sight) && sight != null && sight.gameObject.activeInHierarchy)
+                    picture = sight;
+            }
+
+            // 正在看普通放大镜时，画面留给它。否则打开枪上那块自己出画面的屏幕（MP-155 智能瞄具）。
+            OpticSight? screen = picture == null ? FindScreen(animation) : null;
+            OpticSight? show = picture ?? screen;
+            if (show == null)
             {
                 ReleaseHeld();
                 return;
             }
 
-            OpticSight? sight = Resolve(animation);
-            if (!WantsPicture(scope, sight) || sight == null || !sight.gameObject.activeInHierarchy)
-            {
-                ReleaseHeld();
-                return;
-            }
-
-            // 第三人称时游戏不会自己打开瞄具。组件关着时先打开，打开时会把热成像画面接上。
-            if (!sight.enabled)
-                sight.enabled = true;
-            sight.LensFade(false);
-
-            OpticSight? current = manager.CurrentOpticSight;
-            if (current != null && !Same(current, sight))
-            {
-                OpticSight.OpticSightState.Value = new OpticSight.OpticSightStatus
-                {
-                    IsEnabled = false,
-                    OpticSight = current
-                };
-            }
-
-            OpticSight.OpticSightStatus state = OpticSight.OpticSightState.Value;
-            if (!state.IsEnabled || !Same(state.OpticSight, sight))
-            {
-                OpticSight.OpticSightState.Value = new OpticSight.OpticSightStatus
-                {
-                    IsEnabled = true,
-                    OpticSight = sight
-                };
-            }
-
-            _held = sight;
+            QuietOthers(animation, show);
+            Hold(show);
         }
         catch
         {
@@ -135,7 +121,10 @@ internal static class OpticPicture
         if (sight != null && sight.IsThermalSightAvailableAt45Degrees)
             return true;
 
-        if (scope.ScopePrefabCache != null && scope.ScopePrefabCache.HasOptics && scope.BoneRelatesToOptics)
+        if (scope.ScopePrefabCache != null && scope.ScopePrefabCache.CurrentModHasOptics)
+            return true;
+
+        if (scope.Mod != null && !string.IsNullOrEmpty(scope.Mod.CustomAimPlane) && sight != null)
             return true;
 
         return HasScopeFilter(sight);
@@ -170,6 +159,74 @@ internal static class OpticPicture
         object? flag = child.GetType().GetProperty(flagName)?.GetValue(child)
             ?? child.GetType().GetField(flagName)?.GetValue(child);
         return flag is bool on && on;
+    }
+
+    // 第三人称下游戏不会跑第一人称那套开关。智能瞄具的屏幕不占当前瞄准位，也要单独打开。
+    private static OpticSight? FindScreen(ProceduralWeaponAnimation animation)
+    {
+        if (animation.ScopeAimTransforms == null)
+            return null;
+
+        OpticSight? screen = null;
+        foreach (ProceduralWeaponAnimation.SightNBone sat in animation.ScopeAimTransforms)
+        {
+            ScopePrefabCache? cache = sat.ScopePrefabCache;
+            if (cache == null || !cache.CurrentModHasOptics || cache.CurrentModOpticSight == null)
+                continue;
+
+            bool ownScreen = cache.CurrentModIgnoreOpticsForCameraPlane
+                || (sat.Mod != null && !string.IsNullOrEmpty(sat.Mod.CustomAimPlane));
+            if (!ownScreen || !cache.CurrentModOpticSight.gameObject.activeInHierarchy)
+                continue;
+
+            screen = cache.CurrentModOpticSight;
+        }
+
+        return screen;
+    }
+
+    private static void QuietOthers(ProceduralWeaponAnimation animation, OpticSight keep)
+    {
+        if (animation.ScopeAimTransforms == null)
+            return;
+
+        foreach (ProceduralWeaponAnimation.SightNBone sat in animation.ScopeAimTransforms)
+        {
+            OpticSight? sight = sat.ScopePrefabCache != null ? sat.ScopePrefabCache.CurrentModOpticSight : null;
+            if (sight == null || Same(sight, keep) || !sight.enabled)
+                continue;
+
+            sight.enabled = false;
+        }
+    }
+
+    private static void Hold(OpticSight sight)
+    {
+        if (!sight.enabled)
+            sight.enabled = true;
+        sight.LensFade(false);
+
+        OpticSight? current = CameraManager.Instance?.OpticCameraManager?.CurrentOpticSight;
+        if (current != null && !Same(current, sight))
+        {
+            OpticSight.OpticSightState.Value = new OpticSight.OpticSightStatus
+            {
+                IsEnabled = false,
+                OpticSight = current
+            };
+        }
+
+        OpticSight.OpticSightStatus state = OpticSight.OpticSightState.Value;
+        if (!state.IsEnabled || !Same(state.OpticSight, sight))
+        {
+            OpticSight.OpticSightState.Value = new OpticSight.OpticSightStatus
+            {
+                IsEnabled = true,
+                OpticSight = sight
+            };
+        }
+
+        _held = sight;
     }
 
     private static OpticSight? Resolve(ProceduralWeaponAnimation animation)
