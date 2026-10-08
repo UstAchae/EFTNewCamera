@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "新镜头";
-    public const string PluginVersion = "0.1.149";
+    public const string PluginVersion = "0.1.150";
 
     private void Awake()
     {
@@ -25,6 +25,8 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         AimArms.WalkHeadSway = walkHead.Value;
         AimArms.Log = Logger;
         AimArms.Install();
+        BodyVisibility.Install();
+        VisorFilter.Install();
         FirstPersonAudio.Install();
         NewCameraSwitch.Enabled = enabled.Value;
         enabled.SettingChanged += (_, _) => NewCameraSwitch.Enabled = enabled.Value;
@@ -32,6 +34,36 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         BindPosition();
         BindAimDistance();
         BindSway();
+        BindBody();
+    }
+
+    private void BindBody()
+    {
+        ConfigEntry<bool> showHead = Config.Bind("人物", "显示头部", false,
+            "画出自己的头。关掉时头只投阴影，画面里看不见。");
+        ConfigEntry<bool> showHeadwear = Config.Bind("人物", "显示头部装备", true,
+            "画出头盔和帽子。关掉后整个头部装备都不画。打开时，夜视和热成像要等自己的滤镜真正亮起，才把那一台设备藏起来，滤镜关掉就再画出来。");
+        ConfigEntry<bool> showFaceCover = Config.Bind("人物", "显示面部装备", true,
+            "画出面罩和头套。关掉后整个面部装备都不画。上面挂的夜视或热成像，同样等自己的滤镜亮起才藏。");
+        ConfigEntry<bool> showEyewear = Config.Bind("人物", "显示眼部装备", true,
+            "画出眼镜和护目镜。关掉后整个眼部装备都不画。上面挂的夜视或热成像，同样等自己的滤镜亮起才藏。");
+        ConfigEntry<bool> showVisor = Config.Bind("人物", "显示面罩滤镜", true,
+            "画出面罩玻璃上的滤镜。关掉后玻璃还在，滤镜画面没有。");
+        void Refresh()
+        {
+            BodyVisibility.ShowHead = showHead.Value;
+            BodyVisibility.ShowHeadwear = showHeadwear.Value;
+            BodyVisibility.ShowFaceCover = showFaceCover.Value;
+            BodyVisibility.ShowEyewear = showEyewear.Value;
+            VisorFilter.Show = showVisor.Value;
+        }
+
+        showHead.SettingChanged += (_, _) => Refresh();
+        showHeadwear.SettingChanged += (_, _) => Refresh();
+        showFaceCover.SettingChanged += (_, _) => Refresh();
+        showEyewear.SettingChanged += (_, _) => Refresh();
+        showVisor.SettingChanged += (_, _) => Refresh();
+        Refresh();
     }
 
     private void BindDirection()
@@ -200,6 +232,7 @@ internal static class NewCameraSwitch
             {
                 OpticPicture.Release();
                 AimArms.Release(player);
+                BodyVisibility.Restore();
                 if (player.PointOfView != EPointOfView.FirstPerson)
                     player.PointOfView = EPointOfView.FirstPerson;
             }
@@ -213,6 +246,7 @@ internal static class NewCameraSwitch
         if (player.PointOfView != EPointOfView.ThirdPerson)
             player.PointOfView = EPointOfView.ThirdPerson;
         AimArms.Apply(player);
+        BodyVisibility.Apply(player);
         _applied = true;
     }
 
