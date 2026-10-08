@@ -334,7 +334,7 @@ internal static class AimArms
             _turnLogCount = 0;
         }
 
-        if (!aiming && !_blendAiming && _offset.sqrMagnitude < 0.00000001f && _turn == Quaternion.identity && _blend >= 1f)
+        if (!aiming && !_blendAiming && _offset.sqrMagnitude < 0.00000001f && _turn == Quaternion.identity && turn == Quaternion.identity && _blend >= 1f)
         {
             _hasLaserDisplacement = false;
             return;
