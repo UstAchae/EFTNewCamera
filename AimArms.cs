@@ -100,6 +100,8 @@ internal static class AimArms
     private static float _headLock;
     private static bool _hasObserved;
     private static Quaternion _smoothLook = Quaternion.identity;
+    // The body is posed with the previous frame's mouse; MovementContext.Rotation is already the new one.
+    private static Quaternion _bodyLook = Quaternion.identity;
     private static Vector3 _neckPosition;
     private static Vector3 _headPositionNow;
     private static Quaternion _headTurnNow = Quaternion.identity;
@@ -239,12 +241,13 @@ internal static class AimArms
                 float relief = SightRelief(animation, bone);
                 Vector3 aimPoint = new Vector3(0f, 0f, ForwardDistance + relief);
                 SteadyHead(player, cameraPosition, cameraRotation, out Vector3 steadyPosition, out Quaternion steadyRotation);
+                Quaternion bodyRotation = _bodyLook * Quaternion.Inverse(_smoothLook) * steadyRotation;
                 if (bones.Weapon_Root_Third != null && bones.Weapon_Root_Anim != null)
-                    Sway(animation, bones.Weapon_Root_Third, bones.Weapon_Root_Anim, bone, sightId, steadyPosition, steadyRotation, aimPoint, out target, out turn);
+                    Sway(animation, bones.Weapon_Root_Third, bones.Weapon_Root_Anim, bone, sightId, steadyPosition, bodyRotation, aimPoint, out target, out turn);
                 else
-                    target = steadyPosition - bone.position + steadyRotation * aimPoint;
+                    target = steadyPosition - bone.position + bodyRotation * aimPoint;
 
-                Quaternion delay = steadyRotation * (Quaternion.Inverse(_smoothLook) * _lagLook) * Quaternion.Inverse(steadyRotation);
+                Quaternion delay = _lagLook * Quaternion.Inverse(_bodyLook);
                 Vector3 placed = bone.position + target;
                 target = steadyPosition + delay * (placed - steadyPosition) - bone.position;
                 turn = delay * turn;
@@ -431,7 +434,7 @@ internal static class AimArms
         Vector3 sightLocal = toCamera * (sight.Value - cameraPosition) * 100f;
         Quaternion gun = toCamera * weapon.rotation;
         Quaternion armCamera = toCamera * _armRotationNow;
-        Quaternion armHead = Quaternion.Inverse(_smoothLook * _headTurnRaw) * _armRotationNow;
+        Quaternion armHead = Quaternion.Inverse(_bodyLook * _headTurnRaw) * _armRotationNow;
         if (_hasTurnPrev && _turnLogCount < 1500)
         {
             float yaw = Mathf.DeltaAngle(_turnPrevMouse.x, _mouseNow.x);
@@ -772,9 +775,10 @@ internal static class AimArms
             return false;
         }
 
+        Quaternion look = Quaternion.Euler(mouse.y, mouse.x, 0f);
+        _bodyLook = _turnFrame == Time.frameCount - 1 ? _smoothLook : look;
         _turnFrame = Time.frameCount;
         _mouseNow = mouse;
-        Quaternion look = Quaternion.Euler(mouse.y, mouse.x, 0f);
         _smoothLook = look;
 
         if (!_hasCenter || FollowDelay <= 0f)
@@ -787,7 +791,7 @@ internal static class AimArms
 
         UpdateBreathState(player);
 
-        Quaternion rawTurn = Quaternion.Inverse(_smoothLook) * rawCamera;
+        Quaternion rawTurn = Quaternion.Inverse(_bodyLook) * rawCamera;
         _headTurnRaw = rawTurn;
         if (!_hasCenter)
         {
