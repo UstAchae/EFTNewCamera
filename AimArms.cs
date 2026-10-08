@@ -674,6 +674,9 @@ internal static class AimArms
 
     private const float SprintPitchSeconds = 0.2f;
     private static float _sprintPitch;
+    private const float PitchCenterSeconds = 0.5f;
+    private static bool _hasPitchCenter;
+    private static float _pitchCenter;
 
     // Sprint animation holds the head level; third-person RotateHead only adds free look, not mouse pitch.
     private static void SprintHeadPitch(Player player)
@@ -686,13 +689,21 @@ internal static class AimArms
             && player.MovementContext.CurrentState.Name == EPlayerState.Sprint
             && (player.HandsController == null || !player.HandsController.IsAiming);
         _sprintPitch = Mathf.MoveTowards(_sprintPitch, sprinting ? 1f : 0f, Time.deltaTime / SprintPitchSeconds);
-        if (_sprintPitch <= 0f || player.HeadRotation.sqrMagnitude > 0.01f || _smoothedHead.sqrMagnitude > 0.01f)
-            return;
 
         Vector3 forward = CameraDirection.Resolve(head.rotation) * Vector3.forward;
         float headPitch = -Mathf.Asin(Mathf.Clamp(forward.y, -1f, 1f)) * Mathf.Rad2Deg;
+        if (!_hasPitchCenter)
+        {
+            _pitchCenter = headPitch;
+            _hasPitchCenter = true;
+        }
+        else
+            _pitchCenter = Mathf.Lerp(_pitchCenter, headPitch, 1f - Mathf.Exp(-Time.deltaTime / PitchCenterSeconds));
+        if (_sprintPitch <= 0f || player.HeadRotation.sqrMagnitude > 0.01f || _smoothedHead.sqrMagnitude > 0.01f)
+            return;
+
         float weight = _sprintPitch * _sprintPitch * (3f - 2f * _sprintPitch);
-        float missing = Mathf.DeltaAngle(headPitch, player.MovementContext.Pitch) * weight;
+        float missing = Mathf.DeltaAngle(_pitchCenter, player.MovementContext.Pitch) * weight;
         if (Mathf.Abs(missing) < 0.01f)
             return;
 
