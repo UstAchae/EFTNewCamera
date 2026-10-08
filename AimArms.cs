@@ -668,7 +668,40 @@ internal static class AimArms
             return;
 
         ApplyHeadLock(__instance);
+        SprintHeadPitch(__instance);
         CalmWalkHead(__instance);
+    }
+
+    private const float SprintPitchSeconds = 0.2f;
+    private static float _sprintPitch;
+
+    // Sprint animation holds the head level; third-person RotateHead only adds free look, not mouse pitch.
+    private static void SprintHeadPitch(Player player)
+    {
+        Transform? head = player.PlayerBones?.Head?.Original;
+        if (head == null || player.MovementContext == null)
+            return;
+
+        bool sprinting = player.MovementContext.CurrentState != null
+            && player.MovementContext.CurrentState.Name == EPlayerState.Sprint
+            && (player.HandsController == null || !player.HandsController.IsAiming);
+        _sprintPitch = Mathf.MoveTowards(_sprintPitch, sprinting ? 1f : 0f, Time.deltaTime / SprintPitchSeconds);
+        if (_sprintPitch <= 0f || player.HeadRotation.sqrMagnitude > 0.01f || _smoothedHead.sqrMagnitude > 0.01f)
+            return;
+
+        Vector3 forward = CameraDirection.Resolve(head.rotation) * Vector3.forward;
+        float headPitch = -Mathf.Asin(Mathf.Clamp(forward.y, -1f, 1f)) * Mathf.Rad2Deg;
+        float weight = _sprintPitch * _sprintPitch * (3f - 2f * _sprintPitch);
+        float missing = Mathf.DeltaAngle(headPitch, player.MovementContext.Pitch) * weight;
+        if (Mathf.Abs(missing) < 0.01f)
+            return;
+
+        Vector3 axis = Quaternion.Euler(0f, player.MovementContext.Rotation.x, 0f) * Vector3.right;
+        Transform? neck = player.PlayerBones?.Neck;
+        float neckTurn = neck != null ? missing * 0.5f : 0f;
+        if (neck != null)
+            neck.rotation = Quaternion.AngleAxis(neckTurn, axis) * neck.rotation;
+        head.rotation = Quaternion.AngleAxis(missing - neckTurn, axis) * head.rotation;
     }
 
     private static void ApplyHeadLock(Player player)
