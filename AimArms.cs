@@ -128,6 +128,16 @@ internal static class AimArms
     private static bool _hasSteadyRef;
     private static Vector3 _steadySight;
     private static Quaternion _steadyGun = Quaternion.identity;
+    private static Vector2 _mouseNow;
+    private static Quaternion _armRotationNow = Quaternion.identity;
+    private static Vector3 _chaseLagNow;
+    private static bool _hasTurnPrev;
+    private static int _turnLogCount;
+    private static Vector2 _turnPrevMouse;
+    private static Quaternion _turnPrevGun = Quaternion.identity;
+    private static Quaternion _turnPrevArmCamera = Quaternion.identity;
+    private static Quaternion _turnPrevArmHead = Quaternion.identity;
+    private static Vector3 _turnPrevSight;
     private static readonly List<MonoBehaviour> DeferredLasers = new();
     private static int _skinOwnerId;
     private static readonly List<Transform> Upperarms = new();
@@ -245,6 +255,8 @@ internal static class AimArms
         {
             _hasMean = false;
             _hasHeadMean = false;
+            _hasTurnPrev = false;
+            _turnLogCount = 0;
         }
 
         if (!aiming && !_blendAiming && _offset.sqrMagnitude < 0.00000001f && _turn == Quaternion.identity && _blend >= 1f)
@@ -335,6 +347,7 @@ internal static class AimArms
         if (aiming)
         {
             LogSteady(weapon, sightPoint.HasValue ? pivot + displacement : (Vector3?)null, cameraPosition, cameraRotation);
+            LogTurn(weapon, sightPoint.HasValue ? pivot + displacement : (Vector3?)null, cameraPosition, cameraRotation);
             LogLean(player, weapon, sightPoint.HasValue ? pivot + displacement : (Vector3?)null, cameraPosition, cameraRotation);
         }
     }
@@ -407,6 +420,41 @@ internal static class AimArms
             Signed(swing.eulerAngles.x), Signed(swing.eulerAngles.y), Signed(swing.eulerAngles.z),
             Signed(headSway.eulerAngles.x), Signed(headSway.eulerAngles.y), Signed(headSway.eulerAngles.z),
             Signed(breath.eulerAngles.x), Signed(breath.eulerAngles.y), Signed(breath.eulerAngles.z)));
+    }
+
+    private static void LogTurn(Transform weapon, Vector3? sight, Vector3 cameraPosition, Quaternion cameraRotation)
+    {
+        if (Log == null || sight == null)
+            return;
+
+        Quaternion toCamera = Quaternion.Inverse(cameraRotation);
+        Vector3 sightLocal = toCamera * (sight.Value - cameraPosition) * 100f;
+        Quaternion gun = toCamera * weapon.rotation;
+        Quaternion armCamera = toCamera * _armRotationNow;
+        Quaternion armHead = Quaternion.Inverse(_smoothLook * _headTurnRaw) * _armRotationNow;
+        if (_hasTurnPrev && _turnLogCount < 1500)
+        {
+            float yaw = Mathf.DeltaAngle(_turnPrevMouse.x, _mouseNow.x);
+            float pitch = Mathf.DeltaAngle(_turnPrevMouse.y, _mouseNow.y);
+            if (Mathf.Abs(yaw) > 0.001f || Mathf.Abs(pitch) > 0.001f)
+            {
+                _turnLogCount++;
+                Vector3 sightStep = sightLocal - _turnPrevSight;
+                Vector3 headRaw = _headTurnRaw.eulerAngles;
+                Log.LogInfo(string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                    "转动 帧={0} dt={1:F4} 鼠标=({2:F3},{3:F3}) 头原始偏=({4:F2},{5:F2}) 枪相对镜头变={6:F3} 手臂相对镜头变={7:F3} 手臂相对原头变={8:F3} 瞄具步cm=({9:F3},{10:F3},{11:F3}) 追差cm=({12:F2},{13:F2},{14:F2})",
+                    Time.frameCount, Time.deltaTime, yaw, pitch, Signed(headRaw.x), Signed(headRaw.y),
+                    Quaternion.Angle(_turnPrevGun, gun), Quaternion.Angle(_turnPrevArmCamera, armCamera), Quaternion.Angle(_turnPrevArmHead, armHead),
+                    sightStep.x, sightStep.y, sightStep.z, _chaseLagNow.x, _chaseLagNow.y, _chaseLagNow.z));
+            }
+        }
+
+        _turnPrevMouse = _mouseNow;
+        _turnPrevGun = gun;
+        _turnPrevArmCamera = armCamera;
+        _turnPrevArmHead = armHead;
+        _turnPrevSight = sightLocal;
+        _hasTurnPrev = true;
     }
 
     internal static void CarryOptic(Camera camera)
@@ -511,6 +559,8 @@ internal static class AimArms
             _hasChase = true;
         }
         displacement = smoothSight - sight + cameraRotation * _chase;
+        _armRotationNow = third.rotation;
+        _chaseLagNow = (pinned - _chase) * 100f;
 
         if (Log != null && Time.time < _logUntil)
         {
@@ -574,7 +624,7 @@ internal static class AimArms
             return;
 
         float weight = _headLock * _headLock * (3f - 2f * _headLock);
-        head.rotation = Quaternion.Slerp(head.rotation, CameraDirection.Unresolve(_smoothLook * _headTurnSmooth), weight);
+        head.rotation = Quaternion.Slerp(head.rotation, CameraDirection.Unresolve(_smoothLook * AimTurn()), weight);
     }
 
     internal static void CalmWalkHead(Player player)
@@ -723,6 +773,7 @@ internal static class AimArms
         }
 
         _turnFrame = Time.frameCount;
+        _mouseNow = mouse;
         Quaternion look = Quaternion.Euler(mouse.y, mouse.x, 0f);
         _smoothLook = look;
 
