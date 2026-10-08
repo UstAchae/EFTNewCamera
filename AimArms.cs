@@ -72,8 +72,6 @@ internal static class AimArms
     private static Quaternion _gunTurnCenter = Quaternion.identity;
     private static float _sightCatch;
     private static Quaternion _lagLook = Quaternion.identity;
-    private static Quaternion _hipLag = Quaternion.identity;
-    private static bool _hasHipLag;
     private static Vector3 _gunMoveSmooth;
     private static Quaternion _gunTurnSmooth = Quaternion.identity;
     internal static BepInEx.Logging.ManualLogSource? Log;
@@ -311,19 +309,12 @@ internal static class AimArms
             }
             else if (!aiming && FollowDelay > 0f && player.HandsController is Player.FirearmController && bones.Weapon_Root_Anim != null)
             {
-                if (_blendAiming || !_hasHipLag)
-                    _hipLag = cameraRotation;
-                else
-                    _hipLag = Quaternion.Slerp(_hipLag, cameraRotation, 1f - Mathf.Exp(-Time.deltaTime / FollowDelay)).normalized;
-                float hipBehind = Quaternion.Angle(cameraRotation, _hipLag);
-                if (hipBehind > MaxDelayDegrees)
-                    _hipLag = Quaternion.Slerp(cameraRotation, _hipLag, MaxDelayDegrees / hipBehind).normalized;
-                _hasHipLag = true;
+                Quaternion delay = _lagLook * Quaternion.Inverse(_smoothLook);
+                if (Quaternion.Angle(Quaternion.identity, delay) < 0.05f)
+                    delay = Quaternion.identity;
                 sightPoint = cameraPosition;
-                turn = _hipLag * Quaternion.Inverse(cameraRotation);
+                turn = delay;
             }
-            else
-                _hasHipLag = false;
         }
 
         if (!aiming)
