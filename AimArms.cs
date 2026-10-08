@@ -192,7 +192,7 @@ internal static class AimArms
 
     private static void RotatePostfix(Player __instance, Vector2 deltaRotation)
     {
-        if (!NewCameraSwitch.Enabled || Log == null || !__instance.IsYourPlayer || deltaRotation.sqrMagnitude < 0.0000001f)
+        if (Log == null || !__instance.IsYourPlayer || deltaRotation.sqrMagnitude < 0.0000001f)
             return;
         if (__instance.HandsController == null || !__instance.HandsController.IsAiming)
         {
@@ -203,8 +203,9 @@ internal static class AimArms
             return;
 
         Log.LogInfo(string.Format(System.Globalization.CultureInfo.InvariantCulture,
-            "鼠标输入 帧={0} 时间={1:F4} 增量=({2:F3},{3:F3}) 固定步长={4:F4} 在固定更新里={5}",
-            Time.frameCount, Time.time, deltaRotation.x, deltaRotation.y, Time.fixedDeltaTime, Time.inFixedTimeStep));
+            "鼠标输入 帧={0} 时间={1:F4} 增量=({2:F3},{3:F3}) 固定步长={4:F4} 在固定更新里={5} 新镜头={6} 视角={7}",
+            Time.frameCount, Time.time, deltaRotation.x, deltaRotation.y, Time.fixedDeltaTime, Time.inFixedTimeStep,
+            NewCameraSwitch.Enabled, __instance.PointOfView));
     }
 
     private static void PatchFieldOfView(Harmony harmony)
