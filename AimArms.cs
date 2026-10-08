@@ -70,6 +70,10 @@ internal static class AimArms
     private static float _meanStart;
     private static Quaternion _armTurnCenter = Quaternion.identity;
     private static Quaternion _gunTurnCenter = Quaternion.identity;
+    private static Quaternion _sightPose = Quaternion.identity;
+    private static bool _hasSightPose;
+    private static float _sightPoseQuiet;
+    private static float _sightPoseDeadline;
     private static Quaternion _lagLook = Quaternion.identity;
     private static Vector3 _gunMoveSmooth;
     private static Quaternion _gunTurnSmooth = Quaternion.identity;
@@ -557,7 +561,26 @@ internal static class AimArms
         Quaternion armTurn = toCamera * third.rotation;
         Quaternion rawGunTurn = Quaternion.Inverse(third.rotation) * anim.rotation;
 
-        if (!_hasMean || sightId != _meanSightId)
+        Quaternion pose = Quaternion.Inverse(third.root.rotation) * third.rotation * rawGunTurn;
+        bool sightChanged = !_hasMean || sightId != _meanSightId;
+        if (sightChanged)
+        {
+            _sightPoseQuiet = 0f;
+            _sightPoseDeadline = Time.time + 1f;
+            _hasSightPose = false;
+        }
+
+        bool settling = Time.time < _sightPoseDeadline;
+        if (_hasSightPose && settling)
+        {
+            _sightPoseQuiet = Quaternion.Angle(_sightPose, pose) < 0.5f ? _sightPoseQuiet + Time.deltaTime : 0f;
+            if (_sightPoseQuiet >= 0.08f)
+                settling = false;
+        }
+
+        _sightPose = pose;
+        _hasSightPose = true;
+        if (sightChanged || settling)
         {
             _gunMoveSmooth = rawGunMove;
             _gunTurnSmooth = rawGunTurn;
@@ -568,12 +591,17 @@ internal static class AimArms
             _gunTurnMean = rawGunTurn;
             _armTurnCenter = armTurn;
             _gunTurnCenter = rawGunTurn;
-            _hasSteadyRef = false;
             _meanSightId = sightId;
-            _meanStart = Time.time;
             _hasMean = true;
             _hasChase = false;
-            _logUntil = Time.time + 1.5f;
+            if (sightChanged)
+            {
+                _hasSteadyRef = false;
+                _meanStart = Time.time;
+                _logUntil = Time.time + 1.5f;
+            }
+            if (!settling)
+                _sightPoseDeadline = Time.time;
         }
         else
         {
@@ -635,9 +663,12 @@ internal static class AimArms
                 Signed(_smoothLook.eulerAngles.x)));
         }
 
-        float slow = 1f - Mathf.Exp(-Time.deltaTime / BreathCenterSeconds);
-        _armTurnCenter = Quaternion.Slerp(_armTurnCenter, _armTurnMean, slow).normalized;
-        _gunTurnCenter = Quaternion.Slerp(_gunTurnCenter, _gunTurnMean, slow).normalized;
+        if (!sightChanged && !settling)
+        {
+            float slow = 1f - Mathf.Exp(-Time.deltaTime / BreathCenterSeconds);
+            _armTurnCenter = Quaternion.Slerp(_armTurnCenter, _armTurnMean, slow).normalized;
+            _gunTurnCenter = Quaternion.Slerp(_gunTurnCenter, _gunTurnMean, slow).normalized;
+        }
         Quaternion armBase = _armTurnCenter * Scale(Quaternion.Inverse(_armTurnCenter) * _armTurnMean, Now.Breath);
         Quaternion gunBase = _gunTurnCenter * Scale(Quaternion.Inverse(_gunTurnCenter) * _gunTurnMean, Now.Breath);
         Quaternion keptArm = armBase * Scale(Quaternion.Inverse(_armTurnMean) * armTurn, Now.ArmTurn);
