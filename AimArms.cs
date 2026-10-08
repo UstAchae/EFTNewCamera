@@ -74,8 +74,6 @@ internal static class AimArms
     private static Quaternion _lagLook = Quaternion.identity;
     private static Quaternion _hipLag = Quaternion.identity;
     private static bool _hasHipLag;
-    private static bool _planted;
-    private static bool _wasPlanted;
     private static Vector3 _gunMoveSmooth;
     private static Quaternion _gunTurnSmooth = Quaternion.identity;
     internal static BepInEx.Logging.ManualLogSource? Log;
@@ -296,20 +294,6 @@ internal static class AimArms
             if (aiming && bone != null && animation != null)
             {
                 sightId = bone.GetInstanceID();
-                _planted = animation.IsMountedState || (player.MovementContext != null && player.MovementContext.IsInPronePose);
-                if (_planted)
-                {
-                    _hasMean = false;
-                    _hasChase = false;
-                    _sightCatch = 0f;
-                    _offset = Vector3.zero;
-                    _turn = Quaternion.identity;
-                    _blend = 1f;
-                    _hasLaserDisplacement = false;
-                    _wasPlanted = true;
-                    return;
-                }
-
                 float relief = SightRelief(animation, bone);
                 Vector3 aimPoint = new Vector3(0f, 0f, ForwardDistance + relief);
                 SteadyHead(player, cameraPosition, cameraRotation, out Vector3 steadyPosition, out Quaternion steadyRotation);
@@ -344,8 +328,6 @@ internal static class AimArms
 
         if (!aiming)
         {
-            _planted = false;
-            _wasPlanted = false;
             _hasMean = false;
             _hasHeadMean = false;
             _hasTurnPrev = false;
@@ -362,16 +344,6 @@ internal static class AimArms
         {
             _hasLaserDisplacement = false;
             return;
-        }
-
-        if (_wasPlanted)
-        {
-            _blendFrom = Vector3.zero;
-            _turnFrom = Quaternion.identity;
-            _offset = Vector3.zero;
-            _turn = Quaternion.identity;
-            _blend = 0f;
-            _wasPlanted = false;
         }
 
         if (aiming != _blendAiming || sightId != _blendSightId)
