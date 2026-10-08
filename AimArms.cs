@@ -75,6 +75,7 @@ internal static class AimArms
     private static Quaternion _hipLag = Quaternion.identity;
     private static bool _hasHipLag;
     private static bool _planted;
+    private static bool _wasPlanted;
     private static Vector3 _gunMoveSmooth;
     private static Quaternion _gunTurnSmooth = Quaternion.identity;
     internal static BepInEx.Logging.ManualLogSource? Log;
@@ -296,6 +297,19 @@ internal static class AimArms
             {
                 sightId = bone.GetInstanceID();
                 _planted = animation.IsMountedState || (player.MovementContext != null && player.MovementContext.IsInPronePose);
+                if (_planted)
+                {
+                    _hasMean = false;
+                    _hasChase = false;
+                    _sightCatch = 0f;
+                    _offset = Vector3.zero;
+                    _turn = Quaternion.identity;
+                    _blend = 1f;
+                    _hasLaserDisplacement = false;
+                    _wasPlanted = true;
+                    return;
+                }
+
                 float relief = SightRelief(animation, bone);
                 Vector3 aimPoint = new Vector3(0f, 0f, ForwardDistance + relief);
                 SteadyHead(player, cameraPosition, cameraRotation, out Vector3 steadyPosition, out Quaternion steadyRotation);
@@ -331,6 +345,7 @@ internal static class AimArms
         if (!aiming)
         {
             _planted = false;
+            _wasPlanted = false;
             _hasMean = false;
             _hasHeadMean = false;
             _hasTurnPrev = false;
@@ -347,6 +362,16 @@ internal static class AimArms
         {
             _hasLaserDisplacement = false;
             return;
+        }
+
+        if (_wasPlanted)
+        {
+            _blendFrom = Vector3.zero;
+            _turnFrom = Quaternion.identity;
+            _offset = Vector3.zero;
+            _turn = Quaternion.identity;
+            _blend = 0f;
+            _wasPlanted = false;
         }
 
         if (aiming != _blendAiming || sightId != _blendSightId)
@@ -614,16 +639,6 @@ internal static class AimArms
         _gunMoveMean = Vector3.Lerp(_gunMoveMean, gunMove, follow);
         _armTurnMean = Quaternion.Slerp(_armTurnMean, armTurn, follow).normalized;
         _gunTurnMean = Quaternion.Slerp(_gunTurnMean, gunTurn, follow).normalized;
-        if (_planted)
-        {
-            gunMove = rawGunMove;
-            gunTurn = rawGunTurn;
-            _armMoveMean = armMove;
-            _gunMoveMean = rawGunMove;
-            _armTurnMean = armTurn;
-            _gunTurnMean = rawGunTurn;
-            _hasChase = false;
-        }
 
         _leanArm = toCamera * (sightOnThird - cameraPosition) * 100f;
         _leanArmTurn = Quaternion.Angle(_armTurnMean, armTurn);
@@ -681,11 +696,6 @@ internal static class AimArms
             float slow = 1f - Mathf.Exp(-Time.deltaTime / BreathCenterSeconds);
             _armTurnCenter = Quaternion.Slerp(_armTurnCenter, _armTurnMean, slow).normalized;
             _gunTurnCenter = Quaternion.Slerp(_gunTurnCenter, _gunTurnMean, slow).normalized;
-        }
-        if (_planted)
-        {
-            _armTurnCenter = _armTurnMean;
-            _gunTurnCenter = _gunTurnMean;
         }
         Quaternion armBase = _armTurnCenter * Scale(Quaternion.Inverse(_armTurnCenter) * _armTurnMean, Now.Breath);
         Quaternion gunBase = _gunTurnCenter * Scale(Quaternion.Inverse(_gunTurnCenter) * _gunTurnMean, Now.Breath);
@@ -964,7 +974,7 @@ internal static class AimArms
     private static Quaternion AimTurn()
     {
         Quaternion sway = _headTurnSmooth * Quaternion.Inverse(Lean(_headTurnSmooth));
-        return Scale(sway, _planted ? 0f : Now.HeadFollow) * Lean(_headTurnRaw);
+        return Scale(sway, Now.HeadFollow) * Lean(_headTurnRaw);
     }
 
     private static void RotateHeadPostfix(PlayerBones __instance)
