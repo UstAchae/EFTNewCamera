@@ -51,6 +51,7 @@ internal static class AimArms
     internal static float MouseSmoothSeconds = 0.05f;
     internal static float WalkHeadSway;
     private static Vector2 _pendingMouse;
+    private static int _mouseFrame = -1;
     private static bool _releasingMouse;
     private const float MaxDelayDegrees = 15f;
 
@@ -190,6 +191,10 @@ internal static class AimArms
         if (deltaRotation.IsAnyComponentInfinity() || deltaRotation.IsAnyComponentNaN())
             return true;
 
+        if (deltaRotation == Vector2.zero)
+            return true;
+
+        _mouseFrame = Time.frameCount;
         _pendingMouse += deltaRotation;
         return false;
     }
@@ -208,7 +213,8 @@ internal static class AimArms
 
         bool smoothing = NewCameraSwitch.Enabled && MouseSmoothSeconds > 0f
             && player.HandsController != null && player.HandsController.IsAiming;
-        Vector2 step = smoothing
+        bool moving = _mouseFrame >= Time.frameCount - 1;
+        Vector2 step = smoothing && moving
             ? _pendingMouse * (1f - Mathf.Exp(-Time.deltaTime / MouseSmoothSeconds))
             : _pendingMouse;
         if ((_pendingMouse - step).sqrMagnitude < 0.00000001f)

@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "新镜头";
-    public const string PluginVersion = "0.1.132";
+    public const string PluginVersion = "0.1.133";
 
     private void Awake()
     {
@@ -88,7 +88,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
             new ConfigDescription("晃鼠标时枪慢半拍跟上的快慢，数越大越慢。0 是不延迟。站着和走路都一样。",
                 new AcceptableValueRange<float>(0f, 0.3f)));
         ConfigEntry<float> mouseSmooth = Config.Bind("瞄准摆动", "鼠标抹匀（秒）", 0.05f,
-            new ConfigDescription("瞄准时把鼠标每帧给的转动抹匀再交给游戏，和中键扭头去卡顿的办法一样。数越大越顺但越慢，0 是不抹匀。",
+            new ConfigDescription("瞄准时把鼠标每帧的转动抹匀再交给游戏，用来去掉晃鼠标时的颤抖。鼠标停住以后，没交出去的转动在下一帧交完，枪不再往前滑。数越大，鼠标还在动的时候越顺也越晚，0 是不抹匀。",
                 new AcceptableValueRange<float>(0f, 0.15f)));
         ConfigEntry<float> recoilKick = Config.Bind("瞄准摆动", "后坐力上跳", 1f,
             new ConfigDescription("瞄准开枪时枪口上跳的力度，1 是原版第一人称的力度，0 是不跳。子弹跟着枪口走。不受上面摆动滑条影响。",
