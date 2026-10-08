@@ -242,14 +242,15 @@ internal static class AimArms
                 Vector3 aimPoint = new Vector3(0f, 0f, ForwardDistance + relief);
                 SteadyHead(player, cameraPosition, cameraRotation, out Vector3 steadyPosition, out Quaternion steadyRotation);
                 Quaternion bodyRotation = _bodyLook * Quaternion.Inverse(_smoothLook) * steadyRotation;
+                Vector3 bodyPosition = CameraPosition.Resolve(steadyPosition - CameraPosition.Resolve(Vector3.zero, steadyRotation), bodyRotation);
                 if (bones.Weapon_Root_Third != null && bones.Weapon_Root_Anim != null)
-                    Sway(animation, bones.Weapon_Root_Third, bones.Weapon_Root_Anim, bone, sightId, steadyPosition, bodyRotation, aimPoint, out target, out turn);
+                    Sway(animation, bones.Weapon_Root_Third, bones.Weapon_Root_Anim, bone, sightId, bodyPosition, bodyRotation, aimPoint, out target, out turn);
                 else
-                    target = steadyPosition - bone.position + bodyRotation * aimPoint;
+                    target = bodyPosition - bone.position + bodyRotation * aimPoint;
 
                 Quaternion delay = _lagLook * Quaternion.Inverse(_bodyLook);
                 Vector3 placed = bone.position + target;
-                target = steadyPosition + delay * (placed - steadyPosition) - bone.position;
+                target = steadyPosition + delay * (placed - bodyPosition) - bone.position;
                 turn = delay * turn;
             }
         }
