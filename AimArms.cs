@@ -47,7 +47,10 @@ internal static class AimArms
     private static readonly SwayAmounts Now = new() { GunMove = 0.2f, GunTurn = 0.2f, ArmMove = 0.2f, ArmTurn = 0.2f, HeadFollow = 0.2f, Breath = 1f };
     internal static bool Chase = true;
     internal static float FollowDelay;
+    internal static float MouseSmoothSeconds = 0.05f;
     internal static float WalkHeadSway;
+    private static Vector2 _pendingMouse;
+    private static bool _releasingMouse;
     private const float MaxDelayDegrees = 15f;
 
     private static bool _suppress;
@@ -68,7 +71,6 @@ internal static class AimArms
     private static Quaternion _armTurnCenter = Quaternion.identity;
     private static Quaternion _gunTurnCenter = Quaternion.identity;
     private static Quaternion _lagLook = Quaternion.identity;
-    private static readonly Queue<Vector3> MouseSteps = new();
     private static Vector3 _gunMoveSmooth;
     private static Quaternion _gunTurnSmooth = Quaternion.identity;
     internal static BepInEx.Logging.ManualLogSource? Log;
@@ -180,32 +182,58 @@ internal static class AimArms
         if (visualPass != null && visualPassPostfix != null)
             harmony.Patch(visualPass, postfix: new HarmonyMethod(visualPassPostfix) { priority = Priority.Last });
         MethodInfo? rotate = AccessTools.Method(typeof(Player), nameof(Player.Rotate));
-        MethodInfo? rotatePostfix = typeof(AimArms).GetMethod(nameof(RotatePostfix), BindingFlags.NonPublic | BindingFlags.Static);
-        if (rotate != null && rotatePostfix != null)
-            harmony.Patch(rotate, postfix: new HarmonyMethod(rotatePostfix));
+        MethodInfo? rotatePrefix = typeof(AimArms).GetMethod(nameof(RotatePrefix), BindingFlags.NonPublic | BindingFlags.Static);
+        if (rotate != null && rotatePrefix != null)
+            harmony.Patch(rotate, prefix: new HarmonyMethod(rotatePrefix));
         PatchLaser(harmony);
         PatchFieldOfView(harmony);
         _patched = true;
     }
 
-    private static int _rotateLogCount;
-
-    private static void RotatePostfix(Player __instance, Vector2 deltaRotation)
+    private static bool RotatePrefix(Player __instance, Vector2 deltaRotation, bool ignoreClamp)
     {
-        if (Log == null || !__instance.IsYourPlayer || deltaRotation.sqrMagnitude < 0.0000001f)
-            return;
+        if (_releasingMouse || ignoreClamp || !NewCameraSwitch.Enabled || MouseSmoothSeconds <= 0f)
+            return true;
+        if (!ReferenceEquals(__instance, Singleton<GameWorld>.Instance?.MainPlayer))
+            return true;
         if (__instance.HandsController == null || !__instance.HandsController.IsAiming)
+            return true;
+        if (deltaRotation.IsAnyComponentInfinity() || deltaRotation.IsAnyComponentNaN())
+            return true;
+
+        _pendingMouse += deltaRotation;
+        return false;
+    }
+
+    internal static void ReleaseMouse()
+    {
+        if (_pendingMouse == Vector2.zero)
+            return;
+
+        Player? player = Singleton<GameWorld>.Instance?.MainPlayer;
+        if (player == null)
         {
-            _rotateLogCount = 0;
+            _pendingMouse = Vector2.zero;
             return;
         }
-        if (_rotateLogCount++ >= 1500)
-            return;
 
-        Log.LogInfo(string.Format(System.Globalization.CultureInfo.InvariantCulture,
-            "鼠标输入 帧={0} 时间={1:F4} 增量=({2:F3},{3:F3}) 固定步长={4:F4} 在固定更新里={5} 新镜头={6} 视角={7}",
-            Time.frameCount, Time.time, deltaRotation.x, deltaRotation.y, Time.fixedDeltaTime, Time.inFixedTimeStep,
-            NewCameraSwitch.Enabled, __instance.PointOfView));
+        bool smoothing = NewCameraSwitch.Enabled && MouseSmoothSeconds > 0f
+            && player.HandsController != null && player.HandsController.IsAiming;
+        Vector2 step = smoothing
+            ? _pendingMouse * (1f - Mathf.Exp(-Time.deltaTime / MouseSmoothSeconds))
+            : _pendingMouse;
+        if ((_pendingMouse - step).sqrMagnitude < 0.00000001f)
+            step = _pendingMouse;
+        _pendingMouse -= step;
+        _releasingMouse = true;
+        try
+        {
+            player.Rotate(step);
+        }
+        finally
+        {
+            _releasingMouse = false;
+        }
     }
 
     private static void PatchFieldOfView(Harmony harmony)
@@ -804,30 +832,17 @@ internal static class AimArms
         Quaternion look = Quaternion.Euler(mouse.y, mouse.x, 0f);
         bool continuous = _turnFrame == Time.frameCount - 1;
         _bodyLook = continuous ? _smoothLook : look;
-        if (continuous)
-            MouseSteps.Enqueue(new Vector3(Mathf.DeltaAngle(_mouseNow.x, mouse.x), mouse.y - _mouseNow.y, Time.time));
-        else
-            MouseSteps.Clear();
-        float window = 2f * FollowDelay;
-        while (MouseSteps.Count > 0 && Time.time - MouseSteps.Peek().z >= window)
-            MouseSteps.Dequeue();
-
         _turnFrame = Time.frameCount;
         _mouseNow = mouse;
         _smoothLook = look;
 
-        Vector2 behind = Vector2.zero;
-        if (_hasCenter)
-        {
-            foreach (Vector3 step in MouseSteps)
-            {
-                float bump = Mathf.Sin(Mathf.PI * (Time.time - step.z) / window);
-                behind += new Vector2(step.x, step.y) * (bump * bump);
-            }
-        }
-        if (behind.magnitude > MaxDelayDegrees)
-            behind = behind.normalized * MaxDelayDegrees;
-        _lagLook = Quaternion.Euler(mouse.y - behind.y, mouse.x - behind.x, 0f);
+        if (!_hasCenter || FollowDelay <= 0f)
+            _lagLook = _smoothLook;
+        else
+            _lagLook = Quaternion.Slerp(_lagLook, _smoothLook, 1f - Mathf.Exp(-Time.deltaTime / FollowDelay)).normalized;
+        float behind = Quaternion.Angle(_smoothLook, _lagLook);
+        if (behind > MaxDelayDegrees)
+            _lagLook = Quaternion.Slerp(_smoothLook, _lagLook, MaxDelayDegrees / behind).normalized;
 
         UpdateBreathState(player);
 
