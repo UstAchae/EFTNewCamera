@@ -197,8 +197,6 @@ internal static class AimArms
             return true;
         if (!ReferenceEquals(__instance, Singleton<GameWorld>.Instance?.MainPlayer))
             return true;
-        if (__instance.HandsController == null || !__instance.HandsController.IsAiming)
-            return true;
         if (deltaRotation.IsAnyComponentInfinity() || deltaRotation.IsAnyComponentNaN())
             return true;
 
@@ -218,8 +216,7 @@ internal static class AimArms
             return;
         }
 
-        bool smoothing = NewCameraSwitch.Enabled && MouseSmoothSeconds > 0f
-            && player.HandsController != null && player.HandsController.IsAiming;
+        bool smoothing = NewCameraSwitch.Enabled && MouseSmoothSeconds > 0f;
         Vector2 step = smoothing
             ? _pendingMouse * (1f - Mathf.Exp(-Time.deltaTime / MouseSmoothSeconds))
             : _pendingMouse;
