@@ -284,11 +284,8 @@ internal static class AimArms
             }
             else if (!aiming && FollowDelay > 0f && player.HandsController is Player.FirearmController && bones.Weapon_Root_Anim != null)
             {
-                Quaternion delay = _lagLook * Quaternion.Inverse(_smoothLook);
-                if (Quaternion.Angle(Quaternion.identity, delay) < 0.05f)
-                    delay = Quaternion.identity;
                 sightPoint = cameraPosition;
-                turn = delay;
+                turn = _lagLook * Quaternion.Inverse(_smoothLook);
             }
         }
 
@@ -832,6 +829,8 @@ internal static class AimArms
         float behind = Quaternion.Angle(_smoothLook, _lagLook);
         if (behind > MaxDelayDegrees)
             _lagLook = Quaternion.Slerp(_smoothLook, _lagLook, MaxDelayDegrees / behind).normalized;
+        else if (Quaternion.Angle(_bodyLook, _smoothLook) < 0.001f && behind < 0.02f)
+            _lagLook = _smoothLook;
 
         UpdateBreathState(player);
 
