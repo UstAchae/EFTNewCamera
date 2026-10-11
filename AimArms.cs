@@ -159,6 +159,11 @@ internal static class AimArms
         MethodInfo? rotatePrefix = typeof(AimArms).GetMethod(nameof(RotatePrefix), BindingFlags.NonPublic | BindingFlags.Static);
         if (rotate != null && rotatePrefix != null)
             harmony.Patch(rotate, prefix: new HarmonyMethod(rotatePrefix));
+        MethodInfo? look = AccessTools.Method(typeof(Player), nameof(Player.Look));
+        MethodInfo? lookPrefix = typeof(AimArms).GetMethod(nameof(LookPrefix), BindingFlags.NonPublic | BindingFlags.Static);
+        MethodInfo? lookPostfix = typeof(AimArms).GetMethod(nameof(LookPostfix), BindingFlags.NonPublic | BindingFlags.Static);
+        if (look != null && lookPrefix != null && lookPostfix != null)
+            harmony.Patch(look, prefix: new HarmonyMethod(lookPrefix), postfix: new HarmonyMethod(lookPostfix));
         PatchLaser(harmony);
         PatchFieldOfView(harmony);
         _patched = true;
@@ -858,8 +863,47 @@ internal static class AimArms
         return Scale(sway, Now.HeadFollow) * Lean(_headTurnRaw);
     }
 
-    private static void RotateHeadPostfix(PlayerBones __instance)
+    private const float FreeLookYaw = 70f;
+    private static Vector2 _lookLimitSaved;
+    private static bool _lookLimitSwapped;
+
+    private static void LookPrefix(Player __instance)
     {
+        _lookLimitSwapped = false;
+        if (!NewCameraSwitch.Enabled || !__instance.IsYourPlayer)
+            return;
+
+        EFTHardSettings settings = EFTHardSettings.Instance;
+        if (settings == null)
+            return;
+
+        _lookLimitSaved = settings.MOUSE_LOOK_HORIZONTAL_LIMIT;
+        float scale = 1f;
+        if (__instance.HandsController != null && __instance.HandsController.IsAiming)
+            scale = settings.MOUSE_LOOK_LIMIT_IN_AIMING_COEF;
+        if (scale < 0.01f)
+            scale = 1f;
+        float reach = FreeLookYaw / scale;
+        settings.MOUSE_LOOK_HORIZONTAL_LIMIT = new Vector2(-reach, reach);
+        _lookLimitSwapped = true;
+    }
+
+    private static void LookPostfix()
+    {
+        if (!_lookLimitSwapped)
+            return;
+
+        _lookLimitSwapped = false;
+        EFTHardSettings settings = EFTHardSettings.Instance;
+        if (settings != null)
+            settings.MOUSE_LOOK_HORIZONTAL_LIMIT = _lookLimitSaved;
+    }
+
+    private static void RotateHeadPostfix(PlayerBones __instance, Vector3 offset)
+    {
+        if (NewCameraSwitch.Enabled)
+            FillHeadYaw(__instance, offset);
+
         if (!NewCameraSwitch.Enabled || _turnFrame == Time.frameCount)
             return;
 
@@ -947,6 +991,22 @@ internal static class AimArms
         // otherwise starting a look drops the head back to the level sprint pose first.
         ApplySprintPitch(player, missing);
         _pitchUnderLook = true;
+    }
+
+    // The look yaw is split across the neck and the head. Put whatever is missing onto the head bone
+    // so the head model itself reaches the full angle, and the camera follows that bone.
+    private static void FillHeadYaw(PlayerBones bones, Vector3 offset)
+    {
+        Player? player = Singleton<GameWorld>.Instance?.MainPlayer;
+        Transform? head = bones.Head?.Original;
+        if (player == null || head == null || !ReferenceEquals(player.PlayerBones, bones))
+            return;
+
+        float missing = offset.x - offset.x * (bones.NeckChain + bones.HeadChain);
+        if (Mathf.Abs(missing) < 0.5f)
+            return;
+
+        head.localRotation *= Quaternion.Euler(missing, 0f, 0f);
     }
 
     private static Quaternion Scale(Quaternion rotation, float amount)
