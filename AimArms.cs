@@ -543,6 +543,7 @@ internal static class AimArms
     private static Vector3 _freeLookFrom;
     private static float _freeLookWeight;
     private static bool _freeLookReturning;
+    private static bool _pitchUnderLook;
 
     // While the button is held the head follows the free look. After release, that offset
     // shrinks back to the sprint pose; the pose corrections have to grow in step with it,
@@ -607,20 +608,45 @@ internal static class AimArms
         }
 
         float sprintBlend = _sprintPitch * _sprintPitch * (3f - 2f * _sprintPitch);
-        float weight = sprintBlend * (1f - _freeLookWeight);
-        if (weight <= 0f)
+        bool underLook = _pitchUnderLook;
+        _pitchUnderLook = false;
+        if (underLook || sprintBlend <= 0f)
             return;
 
-        float missing = Mathf.DeltaAngle(_pitchCenter, player.MovementContext.Pitch) * weight;
+        float missing = Mathf.DeltaAngle(_pitchCenter, player.MovementContext.Pitch) * sprintBlend;
         if (Mathf.Abs(missing) < 0.01f)
+            return;
+
+        ApplySprintPitch(player, missing);
+    }
+
+    private static bool SprintPitchAngle(Player player, out float missing)
+    {
+        missing = 0f;
+        if (player.MovementContext == null)
+            return false;
+
+        float sprintBlend = _sprintPitch * _sprintPitch * (3f - 2f * _sprintPitch);
+        if (sprintBlend <= 0f)
+            return false;
+
+        missing = Mathf.DeltaAngle(_pitchCenter, player.MovementContext.Pitch) * sprintBlend;
+        return Mathf.Abs(missing) >= 0.01f;
+    }
+
+    private static void ApplySprintPitch(Player player, float missing)
+    {
+        if (player.MovementContext == null)
             return;
 
         Vector3 axis = Quaternion.Euler(0f, player.MovementContext.Rotation.x, 0f) * Vector3.right;
         Transform? neck = player.PlayerBones?.Neck;
+        Transform? head = player.PlayerBones?.Head?.Original;
         float neckTurn = neck != null ? missing * 0.5f : 0f;
         if (neck != null)
             neck.rotation = Quaternion.AngleAxis(neckTurn, axis) * neck.rotation;
-        head.rotation = Quaternion.AngleAxis(missing - neckTurn, axis) * head.rotation;
+        if (head != null)
+            head.rotation = Quaternion.AngleAxis(missing - neckTurn, axis) * head.rotation;
     }
 
     private static void ApplyHeadLock(Player player)
@@ -902,6 +928,15 @@ internal static class AimArms
         }
 
         offset = _smoothedHead;
+        if (player.HeadRotation.sqrMagnitude <= 0.01f && _smoothedHead.sqrMagnitude <= 0.01f)
+            return;
+        if (!SprintPitchAngle(player, out float missing))
+            return;
+
+        // Free look is applied on top of this rotation. Pitch has to be underneath it,
+        // otherwise starting a look drops the head back to the level sprint pose first.
+        ApplySprintPitch(player, missing);
+        _pitchUnderLook = true;
     }
 
     private static Quaternion Scale(Quaternion rotation, float amount)
@@ -1108,6 +1143,7 @@ internal static class AimArms
         _freeLookFrom = Vector3.zero;
         _freeLookWeight = 0f;
         _freeLookReturning = false;
+        _pitchUnderLook = false;
         _headLock = 0f;
         RestoreSkins();
         if (!_suppress)
