@@ -75,6 +75,11 @@ internal static class AimArms
     private static Quaternion _lagLook = Quaternion.identity;
     private static float _lagYaw;
     private static float _lagPitch;
+    private static Quaternion _hipRest = Quaternion.identity;
+    private static bool _hasHipRest;
+    private static float _hipRestHold;
+    private static float _hipRestDriftTime;
+    private static int _hipWeaponId;
     private static Vector3 _gunMoveSmooth;
     private static Quaternion _gunTurnSmooth = Quaternion.identity;
     private static bool _hasChase;
@@ -268,6 +273,7 @@ internal static class AimArms
                 sightPoint = bone.position;
             if (aiming && bone != null && animation != null)
             {
+                ReleaseHipRest();
                 sightId = bone.GetInstanceID();
                 float relief = SightRelief(animation, bone);
                 Vector3 aimPoint = new Vector3(0f, 0f, ForwardDistance + relief);
@@ -287,8 +293,10 @@ internal static class AimArms
             else if (!aiming && FollowDelay > 0f && player.HandsController is Player.FirearmController && bones.Weapon_Root_Anim != null)
             {
                 sightPoint = cameraPosition;
-                turn = Quaternion.FromToRotation(_smoothLook * Vector3.forward, _lagLook * Vector3.forward);
+                turn = HipTurn(cameraRotation, bones.Weapon_Root_Anim);
             }
+            else
+                ReleaseHipRest();
         }
 
         if (!aiming)
@@ -804,6 +812,61 @@ internal static class AimArms
             physical.Stamina.RemoveConsumption(consumption);
     }
 
+    // The view is on the head. The gun's own pose catches up a moment later and would
+    // shove it again in the direction the mouse just moved. Hold the offset the gun
+    // had against the view, and only let the follow-delay rotate it.
+    private static Quaternion HipTurn(Quaternion cameraRotation, Transform weapon)
+    {
+        int weaponId = weapon.GetInstanceID();
+        Quaternion liveRest = Quaternion.Inverse(cameraRotation) * weapon.rotation;
+        if (!_hasHipRest || weaponId != _hipWeaponId)
+        {
+            _hipRest = liveRest;
+            _hasHipRest = true;
+            _hipWeaponId = weaponId;
+            _hipRestHold = 0f;
+        }
+
+        bool followLive = Quaternion.Angle(_lagLook, _smoothLook) < 0.4f
+            && Quaternion.Angle(_bodyLook, _smoothLook) < 0.03f;
+        if (!followLive)
+            _hipRestHold = 0.3f;
+        else if (_hipRestHold > 0f)
+            _hipRestHold = Mathf.Max(0f, _hipRestHold - Time.deltaTime);
+        if (!followLive || _hipRestHold > 0f)
+            _hipRestDriftTime = 0f;
+        else
+        {
+            float drift = Quaternion.Angle(_hipRest, liveRest);
+            if (drift < 2f)
+            {
+                _hipRestDriftTime = 0f;
+                _hipRest = Quaternion.Slerp(_hipRest, liveRest, 1f - Mathf.Exp(-Time.deltaTime / 0.12f)).normalized;
+            }
+            else
+            {
+                _hipRestDriftTime += Time.deltaTime;
+                if (_hipRestDriftTime > 0.45f)
+                {
+                    float step = Mathf.Clamp01(40f * Time.deltaTime / drift);
+                    _hipRest = Quaternion.Slerp(_hipRest, liveRest, step).normalized;
+                }
+            }
+        }
+
+        Quaternion lagTurn = Quaternion.FromToRotation(_smoothLook * Vector3.forward, _lagLook * Vector3.forward);
+        Quaternion desired = lagTurn * cameraRotation * _hipRest;
+        return desired * Quaternion.Inverse(weapon.rotation);
+    }
+
+    private static void ReleaseHipRest()
+    {
+        _hasHipRest = false;
+        _hipRestHold = 0f;
+        _hipRestDriftTime = 0f;
+        _hipWeaponId = 0;
+    }
+
     private static void SetLag(float pitch, float yaw)
     {
         _lagPitch = pitch;
@@ -1239,6 +1302,7 @@ internal static class AimArms
         _freeLookReturning = false;
         _pitchUnderLook = false;
         _headLock = 0f;
+        ReleaseHipRest();
         RestoreSkins();
         if (!_suppress)
             return;
