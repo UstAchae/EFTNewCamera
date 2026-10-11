@@ -692,12 +692,12 @@ internal static class AimArms
             head.rotation = Quaternion.AngleAxis(fix, Vector3.up) * head.rotation;
     }
 
-    internal static void LiftHead(Player player, Transform head)
+    internal static void LiftHead(Transform head)
     {
-        if (Mathf.Abs(HeadModelPitch) < 0.01f || player.MovementContext == null)
+        if (Mathf.Abs(HeadModelPitch) < 0.01f)
             return;
 
-        Vector3 axis = Quaternion.Euler(0f, player.MovementContext.Rotation.x, 0f) * Vector3.right;
+        Vector3 axis = CameraDirection.Resolve(head.rotation) * Vector3.right;
         head.rotation = Quaternion.AngleAxis(-HeadModelPitch, axis) * head.rotation;
     }
 
