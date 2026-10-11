@@ -73,6 +73,8 @@ internal static class AimArms
     private static Quaternion _gunTurnCenter = Quaternion.identity;
     private static float _sightCatch;
     private static Quaternion _lagLook = Quaternion.identity;
+    private static float _lagYaw;
+    private static float _lagPitch;
     private static Vector3 _gunMoveSmooth;
     private static Quaternion _gunTurnSmooth = Quaternion.identity;
     private static bool _hasChase;
@@ -285,7 +287,7 @@ internal static class AimArms
             else if (!aiming && FollowDelay > 0f && player.HandsController is Player.FirearmController && bones.Weapon_Root_Anim != null)
             {
                 sightPoint = cameraPosition;
-                turn = _lagLook * Quaternion.Inverse(_smoothLook);
+                turn = Quaternion.FromToRotation(_smoothLook * Vector3.forward, _lagLook * Vector3.forward);
             }
         }
 
@@ -445,7 +447,7 @@ internal static class AimArms
         {
             _gunMoveSmooth = rawGunMove;
             _gunTurnSmooth = rawGunTurn;
-            _lagLook = _smoothLook;
+            SetLag(_smoothLook);
             _armMoveMean = armMove;
             _gunMoveMean = rawGunMove;
             _armTurnMean = armTurn;
@@ -802,6 +804,19 @@ internal static class AimArms
             physical.Stamina.RemoveConsumption(consumption);
     }
 
+    private static void SetLag(float pitch, float yaw)
+    {
+        _lagPitch = pitch;
+        _lagYaw = yaw;
+        _lagLook = Quaternion.Euler(pitch, yaw, 0f);
+    }
+
+    private static void SetLag(Quaternion look)
+    {
+        Vector3 euler = look.eulerAngles;
+        SetLag(euler.x > 180f ? euler.x - 360f : euler.x, euler.y > 180f ? euler.y - 360f : euler.y);
+    }
+
     private static bool UpdateTurn(Player player, Quaternion rawCamera)
     {
         Vector2 mouse;
@@ -823,14 +838,24 @@ internal static class AimArms
         _smoothLook = look;
 
         if (!_hasCenter || FollowDelay <= 0f)
-            _lagLook = _smoothLook;
+            SetLag(mouse.y, mouse.x);
         else
-            _lagLook = Quaternion.Slerp(_lagLook, _smoothLook, 1f - Mathf.Exp(-Time.deltaTime / FollowDelay)).normalized;
-        float behind = Quaternion.Angle(_smoothLook, _lagLook);
-        if (behind > MaxDelayDegrees)
-            _lagLook = Quaternion.Slerp(_smoothLook, _lagLook, MaxDelayDegrees / behind).normalized;
-        else if (Quaternion.Angle(_bodyLook, _smoothLook) < 0.001f && behind < 0.02f)
-            _lagLook = _smoothLook;
+        {
+            float follow = 1f - Mathf.Exp(-Time.deltaTime / FollowDelay);
+            float yaw = Mathf.LerpAngle(_lagYaw, mouse.x, follow);
+            float pitch = Mathf.LerpAngle(_lagPitch, mouse.y, follow);
+            float yawGap = Mathf.DeltaAngle(mouse.x, yaw);
+            float pitchGap = Mathf.DeltaAngle(mouse.y, pitch);
+            float gap = Mathf.Sqrt(yawGap * yawGap + pitchGap * pitchGap);
+            if (gap > MaxDelayDegrees)
+            {
+                float keep = MaxDelayDegrees / gap;
+                yaw = mouse.x + yawGap * keep;
+                pitch = mouse.y + pitchGap * keep;
+            }
+
+            SetLag(pitch, yaw);
+        }
 
         UpdateBreathState(player);
 
