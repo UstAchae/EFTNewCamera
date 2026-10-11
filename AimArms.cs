@@ -535,8 +535,44 @@ internal static class AimArms
             return;
 
         ApplyHeadLock(__instance);
+        UpdateFreeLookReturn(__instance);
         SprintHeadPitch(__instance);
         CalmWalkHead(__instance);
+    }
+
+    private static Vector3 _freeLookFrom;
+    private static float _freeLookWeight;
+    private static bool _freeLookReturning;
+
+    // While the button is held the head follows the free look. After release, that offset
+    // shrinks back to the sprint pose; the pose corrections have to grow in step with it,
+    // or the head visits the raw animation and then jumps.
+    private static void UpdateFreeLookReturn(Player player)
+    {
+        Vector3 raw = player.HeadRotation;
+        float now = Mathf.Max(_smoothedHead.magnitude, raw.magnitude);
+        bool live = raw.sqrMagnitude > 0.01f || _smoothedHead.sqrMagnitude > 0.01f;
+        if (!live)
+        {
+            _freeLookReturning = false;
+            _freeLookFrom = Vector3.zero;
+            _freeLookWeight = 0f;
+            return;
+        }
+
+        bool holding = !_freeLookReturning && (player.MouseLookControl || !player.IsResettingLook);
+        if (holding)
+        {
+            _freeLookFrom = _smoothedHead.magnitude >= raw.magnitude ? _smoothedHead : raw;
+            _freeLookWeight = 1f;
+            return;
+        }
+
+        _freeLookReturning = true;
+        if (_freeLookFrom.sqrMagnitude < 0.01f)
+            _freeLookFrom = _smoothedHead.magnitude >= raw.magnitude ? _smoothedHead : raw;
+        float span = _freeLookFrom.magnitude;
+        _freeLookWeight = span < 0.01f ? 0f : Mathf.Clamp01(now / span);
     }
 
     private const float SprintPitchSeconds = 0.2f;
@@ -557,19 +593,24 @@ internal static class AimArms
             && (player.HandsController == null || !player.HandsController.IsAiming);
         _sprintPitch = Mathf.MoveTowards(_sprintPitch, sprinting ? 1f : 0f, Time.deltaTime / SprintPitchSeconds);
 
-        Vector3 forward = CameraDirection.Resolve(head.rotation) * Vector3.forward;
-        float headPitch = -Mathf.Asin(Mathf.Clamp(forward.y, -1f, 1f)) * Mathf.Rad2Deg;
-        if (!_hasPitchCenter)
+        if (_freeLookWeight <= 0f)
         {
-            _pitchCenter = headPitch;
-            _hasPitchCenter = true;
+            Vector3 forward = CameraDirection.Resolve(head.rotation) * Vector3.forward;
+            float headPitch = -Mathf.Asin(Mathf.Clamp(forward.y, -1f, 1f)) * Mathf.Rad2Deg;
+            if (!_hasPitchCenter)
+            {
+                _pitchCenter = headPitch;
+                _hasPitchCenter = true;
+            }
+            else
+                _pitchCenter = Mathf.Lerp(_pitchCenter, headPitch, 1f - Mathf.Exp(-Time.deltaTime / PitchCenterSeconds));
         }
-        else
-            _pitchCenter = Mathf.Lerp(_pitchCenter, headPitch, 1f - Mathf.Exp(-Time.deltaTime / PitchCenterSeconds));
-        if (_sprintPitch <= 0f || player.HeadRotation.sqrMagnitude > 0.01f || _smoothedHead.sqrMagnitude > 0.01f)
+
+        float sprintBlend = _sprintPitch * _sprintPitch * (3f - 2f * _sprintPitch);
+        float weight = sprintBlend * (1f - _freeLookWeight);
+        if (weight <= 0f)
             return;
 
-        float weight = _sprintPitch * _sprintPitch * (3f - 2f * _sprintPitch);
         float missing = Mathf.DeltaAngle(_pitchCenter, player.MovementContext.Pitch) * weight;
         if (Mathf.Abs(missing) < 0.01f)
             return;
@@ -598,7 +639,7 @@ internal static class AimArms
     internal static void CalmWalkHead(Player player)
     {
         Transform? head = player.PlayerBones?.Head?.Original;
-        if (head == null || player.MovementContext == null || player.HeadRotation.sqrMagnitude > 0.01f || _smoothedHead.sqrMagnitude > 0.01f)
+        if (head == null || player.MovementContext == null || _freeLookWeight >= 1f)
             return;
 
         Vector3 look = Vector3.ProjectOnPlane(CameraDirection.Resolve(head.rotation) * Vector3.forward, Vector3.up);
@@ -606,17 +647,20 @@ internal static class AimArms
             return;
 
         float yaw = Vector3.SignedAngle(Quaternion.Euler(0f, player.MovementContext.Rotation.x, 0f) * Vector3.forward, look, Vector3.up);
-        if (!_hasYawCenter)
+        if (_freeLookWeight <= 0f)
         {
-            _yawCenter = yaw;
-            _hasYawCenter = true;
+            if (!_hasYawCenter)
+            {
+                _yawCenter = yaw;
+                _hasYawCenter = true;
+            }
+            else
+                _yawCenter = Mathf.Lerp(_yawCenter, yaw, 1f - Mathf.Exp(-Time.deltaTime / 0.5f));
         }
-        else
-            _yawCenter = Mathf.Lerp(_yawCenter, yaw, 1f - Mathf.Exp(-Time.deltaTime / 0.5f));
 
         float moving = Mathf.Clamp01(player.MovementContext.ActualLinearVelocity / 0.6f);
         float keep = Mathf.Lerp(1f, WalkHeadSway, moving);
-        float fix = _yawCenter + (yaw - _yawCenter) * keep - yaw;
+        float fix = (_yawCenter + (yaw - _yawCenter) * keep - yaw) * (1f - _freeLookWeight);
         if (Mathf.Abs(fix) > 0.01f)
             head.rotation = Quaternion.AngleAxis(fix, Vector3.up) * head.rotation;
     }
@@ -1061,6 +1105,9 @@ internal static class AimArms
         _hasChase = false;
         _release = 0f;
         _smoothedHead = Vector3.zero;
+        _freeLookFrom = Vector3.zero;
+        _freeLookWeight = 0f;
+        _freeLookReturning = false;
         _headLock = 0f;
         RestoreSkins();
         if (!_suppress)
