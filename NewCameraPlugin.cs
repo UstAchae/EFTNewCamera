@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "Justachae 的第三人称骨架与镜头";
-    public const string PluginVersion = "0.1.164";
+    public const string PluginVersion = "0.1.165";
 
     private void Awake()
     {
@@ -48,6 +48,9 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
             "画出眼镜和护目镜。关掉后整个眼部装备都不画。上面挂的夜视或热成像，同样等自己的滤镜亮起才藏。");
         ConfigEntry<bool> showVisor = Config.Bind("人物", "显示面罩滤镜", true,
             "画出面罩玻璃上的滤镜。关掉后玻璃还在，滤镜画面没有。");
+        ConfigEntry<float> headPitch = Config.Bind("人物", "头部仰俯", 0f,
+            new ConfigDescription("只转头部模型，镜头保持原位。正值把脸往上抬，单位为度。",
+                new AcceptableValueRange<float>(-45f, 45f)));
         void Refresh()
         {
             BodyVisibility.ShowHead = showHead.Value;
@@ -55,6 +58,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
             BodyVisibility.ShowFaceCover = showFaceCover.Value;
             BodyVisibility.ShowEyewear = showEyewear.Value;
             VisorFilter.Show = showVisor.Value;
+            AimArms.HeadModelPitch = headPitch.Value;
         }
 
         showHead.SettingChanged += (_, _) => Refresh();
@@ -62,6 +66,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         showFaceCover.SettingChanged += (_, _) => Refresh();
         showEyewear.SettingChanged += (_, _) => Refresh();
         showVisor.SettingChanged += (_, _) => Refresh();
+        headPitch.SettingChanged += (_, _) => Refresh();
         Refresh();
     }
 
@@ -281,6 +286,7 @@ internal static class NewCameraSwitch
                 _posePosition = CameraPosition.Resolve(head.position, _poseRotation);
                 AimArms.ObserveHead(player, _posePosition, _poseRotation);
                 AimArms.AlignToCamera(player, _posePosition, _poseRotation);
+                AimArms.LiftHead(player, head);
                 _poseFrame = Time.frameCount;
             }
         }

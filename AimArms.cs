@@ -49,6 +49,7 @@ internal static class AimArms
     internal static float FollowDelay;
     internal static float MouseSmoothSeconds = 0.05f;
     internal static float WalkHeadSway;
+    internal static float HeadModelPitch;
     private static Vector2 _pendingMouse;
     private static bool _releasingMouse;
     private const float MaxDelayDegrees = 15f;
@@ -689,6 +690,15 @@ internal static class AimArms
         float fix = (_yawCenter + (yaw - _yawCenter) * keep - yaw) * (1f - _freeLookWeight);
         if (Mathf.Abs(fix) > 0.01f)
             head.rotation = Quaternion.AngleAxis(fix, Vector3.up) * head.rotation;
+    }
+
+    internal static void LiftHead(Player player, Transform head)
+    {
+        if (Mathf.Abs(HeadModelPitch) < 0.01f || player.MovementContext == null)
+            return;
+
+        Vector3 axis = Quaternion.Euler(0f, player.MovementContext.Rotation.x, 0f) * Vector3.right;
+        head.rotation = Quaternion.AngleAxis(-HeadModelPitch, axis) * head.rotation;
     }
 
     internal static void ObserveHead(Player player, Vector3 cameraPosition, Quaternion cameraRotation)
