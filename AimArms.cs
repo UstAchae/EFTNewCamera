@@ -73,6 +73,12 @@ internal static class AimArms
     private static Quaternion _gunTurnCenter = Quaternion.identity;
     private static float _sightCatch;
     private static Quaternion _lagLook = Quaternion.identity;
+    private static Quaternion _hipShown = Quaternion.identity;
+    private static bool _hasHipShown;
+    private static bool _hipSettling;
+    private static float _hipSpeed;
+    private static float _hipWatch;
+    private static int _hipWeaponId;
     private static Vector3 _gunMoveSmooth;
     private static Quaternion _gunTurnSmooth = Quaternion.identity;
     private static bool _hasChase;
@@ -266,6 +272,7 @@ internal static class AimArms
                 sightPoint = bone.position;
             if (aiming && bone != null && animation != null)
             {
+                ClearHipSettle();
                 sightId = bone.GetInstanceID();
                 float relief = SightRelief(animation, bone);
                 Vector3 aimPoint = new Vector3(0f, 0f, ForwardDistance + relief);
@@ -284,12 +291,11 @@ internal static class AimArms
             }
             else if (!aiming && FollowDelay > 0f && player.HandsController is Player.FirearmController && bones.Weapon_Root_Anim != null)
             {
-                Quaternion delay = _lagLook * Quaternion.Inverse(_smoothLook);
-                if (Quaternion.Angle(Quaternion.identity, delay) < 0.05f)
-                    delay = Quaternion.identity;
                 sightPoint = cameraPosition;
-                turn = delay;
+                turn = HipSettle(bones.Weapon_Root_Anim);
             }
+            else
+                ClearHipSettle();
         }
 
         if (!aiming)
@@ -805,6 +811,82 @@ internal static class AimArms
             physical.Stamina.RemoveConsumption(consumption);
     }
 
+    // Once a flick starts slowing, the gun may only keep slowing until it sits on the
+    // live pose. A later shove in that same moment is taken up by the slowdown,
+    // instead of being played at the speed the flick had before it slowed.
+    private static Quaternion HipSettle(Transform weapon)
+    {
+        int weaponId = weapon.GetInstanceID();
+        if (weaponId != _hipWeaponId)
+        {
+            _hasHipShown = false;
+            _hipSettling = false;
+            _hipSpeed = 0f;
+            _hipWatch = 0f;
+            _hipWeaponId = weaponId;
+        }
+
+        float dt = Mathf.Max(Time.deltaTime, 0.0001f);
+        Quaternion live = weapon.rotation;
+        Quaternion delay = _lagLook * Quaternion.Inverse(_smoothLook);
+        float mouseSpeed = Quaternion.Angle(_bodyLook, _smoothLook) / dt;
+        if (mouseSpeed > 20f)
+            _hipWatch = FollowDelay + 0.25f;
+        else if (_hipWatch > 0f)
+            _hipWatch = Mathf.Max(0f, _hipWatch - dt);
+
+        if (mouseSpeed > 15f)
+            _hipSettling = false;
+
+        float gapNow = _hasHipShown ? Quaternion.Angle(_hipShown, live) : 0f;
+        if (!_hipSettling && _hipWatch > 0f && mouseSpeed < 15f && (_hipSpeed > 10f || gapNow > 0.4f))
+            _hipSettling = true;
+
+        if (!_hasHipShown)
+        {
+            _hipShown = delay * live;
+            _hasHipShown = true;
+            _hipSpeed = 0f;
+            return Quaternion.Angle(Quaternion.identity, delay) < 0.05f ? Quaternion.identity : delay;
+        }
+
+        if (_hipSettling)
+        {
+            float gap = Quaternion.Angle(_hipShown, live);
+            float cap = gap / Mathf.Max(FollowDelay, 0.01f);
+            _hipSpeed = _hipSpeed <= 0.01f ? cap : _hipSpeed * Mathf.Exp(-dt / FollowDelay);
+            if (_hipSpeed > cap)
+                _hipSpeed = cap;
+            float allow = _hipSpeed * dt;
+            if (gap <= allow || gap < 0.05f)
+            {
+                _hipShown = live;
+                _hipSettling = false;
+                _hipSpeed = 0f;
+                return Quaternion.identity;
+            }
+
+            _hipShown = Quaternion.RotateTowards(_hipShown, live, allow);
+            return _hipShown * Quaternion.Inverse(live);
+        }
+
+        Quaternion delayed = delay * live;
+        _hipSpeed = Quaternion.Angle(_hipShown, delayed) / dt;
+        _hipShown = delayed;
+        if (_hipWatch <= 0f && Quaternion.Angle(Quaternion.identity, delay) < 0.05f)
+            return Quaternion.identity;
+        return delay;
+    }
+
+    private static void ClearHipSettle()
+    {
+        _hasHipShown = false;
+        _hipSettling = false;
+        _hipSpeed = 0f;
+        _hipWatch = 0f;
+        _hipWeaponId = 0;
+    }
+
     private static bool UpdateTurn(Player player, Quaternion rawCamera)
     {
         Vector2 mouse;
@@ -1215,6 +1297,7 @@ internal static class AimArms
         _freeLookReturning = false;
         _pitchUnderLook = false;
         _headLock = 0f;
+        ClearHipSettle();
         RestoreSkins();
         if (!_suppress)
             return;
