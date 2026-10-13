@@ -58,6 +58,7 @@ internal static class AimArms
     private static bool _blendAiming;
     private static int _blendSightId;
     private static float _blend = 1f;
+    private static float _mountBlend;
     private static Vector3 _offset;
     private static Vector3 _blendFrom;
     private static Quaternion _turn = Quaternion.identity;
@@ -494,19 +495,26 @@ internal static class AimArms
 
     internal static bool TrackMountedSight(Player player)
     {
-        if (!_mounted || _freeLookWeight > 0f || player.HandsController == null || !player.HandsController.IsAiming)
-            return false;
-
+        bool want = _mounted && _freeLookWeight <= 0f && player.HandsController != null && player.HandsController.IsAiming;
         PlayerBones? bones = player.PlayerBones;
         Transform? head = bones?.Head?.Original;
         if (bones == null || head == null || !SightCamera(player, out Vector3 cameraPosition, out Quaternion cameraRotation))
+        {
+            _mountBlend = 0f;
+            return false;
+        }
+
+        _mountBlend = Mathf.MoveTowards(_mountBlend, want ? 1f : 0f, Time.deltaTime / BlendSeconds);
+        float along = _mountBlend * _mountBlend * (3f - 2f * _mountBlend);
+        if (along <= 0.0001f)
             return false;
 
-        // The camera stays fixed on the head. Move the head so that camera lands on the planted sight.
-        Quaternion headRotation = CameraDirection.Unresolve(cameraRotation);
-        Vector3 headPosition = cameraPosition - CameraPosition.Resolve(Vector3.zero, cameraRotation);
-        Quaternion turn = headRotation * Quaternion.Inverse(head.rotation);
-        Vector3 displacement = headPosition - head.position;
+        // The camera stays fixed on the head. Ease that camera onto the planted sight, and back off it.
+        Quaternion fromCamera = CameraDirection.Resolve(head.rotation);
+        Quaternion partialCamera = Quaternion.Slerp(fromCamera, cameraRotation, along);
+        Vector3 partialCameraPosition = Vector3.Lerp(CameraPosition.Resolve(head.position, fromCamera), cameraPosition, along);
+        Quaternion turn = CameraDirection.Unresolve(partialCamera) * Quaternion.Inverse(head.rotation);
+        Vector3 displacement = partialCameraPosition - CameraPosition.Resolve(Vector3.zero, partialCamera) - head.position;
         Transform moved = FollowRoot(bones, head);
         HeldPose[] planted = PlantedPoses(bones, moved);
         EnsureUpperarms(player);
@@ -1410,6 +1418,7 @@ internal static class AimArms
         _blendAiming = false;
         _blendSightId = 0;
         _blend = 1f;
+        _mountBlend = 0f;
         _offset = Vector3.zero;
         _blendFrom = Vector3.zero;
         _turn = Quaternion.identity;
