@@ -102,6 +102,8 @@ internal static class Probe
             }
             foreach (Camera cam in Camera.allCameras)
                 _sightWriter.WriteLine($"#   camera {cam.name} enabled={cam.enabled} depth={cam.depth} mask={cam.cullingMask:X8} target={(cam.targetTexture != null ? cam.targetTexture.name : "screen")} main={(cam == Camera.main)}");
+            if (Camera.main != null)
+                DumpCamera(Camera.main);
             _sightWriter.WriteLine("frame,time,dt,index,visible,posX,posY,dist,axisX,axisY,fwdX,fwdY,localRotX,localRotY,localRotZ");
             _sightLines += 2;
         }
@@ -160,6 +162,50 @@ internal static class Probe
             };
             _sightWriter.WriteLine($"#     {name} ({sh.GetPropertyType(p)}) = {value}");
         }
+    }
+
+    private static void DumpCamera(Camera cam)
+    {
+        _sightWriter!.WriteLine($"#   main camera {cam.name} hdr={cam.allowHDR} msaa={cam.allowMSAA} depthTextureMode={cam.depthTextureMode} path={cam.actualRenderingPath} "
+            + $"nonJitteredProj={cam.useJitteredProjectionMatrixForTransparentRendering}");
+        foreach (Component comp in cam.GetComponents<Component>())
+        {
+            if (comp == null)
+                continue;
+            System.Type type = comp.GetType();
+            string state = comp is Behaviour b ? (b.enabled ? "on" : "off") : "-";
+            string extra = "";
+            if (type.Name.Contains("PostProcessLayer"))
+                extra = " " + ReadMembers(comp, "antialiasingMode", "temporalAntialiasing");
+            bool hasRenderImage = type.GetMethod("OnRenderImage", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic) != null;
+            _sightWriter.WriteLine($"#     component {type.FullName} [{type.Assembly.GetName().Name}] {state}{(hasRenderImage ? " OnRenderImage" : "")}{extra}");
+        }
+        foreach (UnityEngine.Rendering.CameraEvent e in System.Enum.GetValues(typeof(UnityEngine.Rendering.CameraEvent)))
+        {
+            foreach (UnityEngine.Rendering.CommandBuffer buffer in cam.GetCommandBuffers(e))
+                _sightWriter.WriteLine($"#     commandBuffer {e} \"{buffer.name}\" bytes={buffer.sizeInBytes}");
+        }
+    }
+
+    private static string ReadMembers(object target, params string[] names)
+    {
+        StringBuilder text = new StringBuilder();
+        System.Type type = target.GetType();
+        const System.Reflection.BindingFlags flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic;
+        foreach (string name in names)
+        {
+            object? value = type.GetField(name, flags)?.GetValue(target) ?? type.GetProperty(name, flags)?.GetValue(target);
+            text.Append(name).Append('=').Append(value ?? "null").Append(' ');
+            if (value != null && name == "temporalAntialiasing")
+            {
+                foreach (string sub in new[] { "jitterSpread", "stationaryBlending", "motionBlending", "sharpness" })
+                {
+                    object? subValue = value.GetType().GetField(sub, flags)?.GetValue(value);
+                    text.Append(sub).Append('=').Append(subValue ?? "null").Append(' ');
+                }
+            }
+        }
+        return text.ToString();
     }
 
     private static string TextureText(Material m, string name)
