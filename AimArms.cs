@@ -294,7 +294,7 @@ internal static class AimArms
             else if (!aiming && FollowDelay > 0f && player.HandsController is Player.FirearmController && bones.Weapon_Root_Anim != null)
             {
                 Quaternion delay = _lagLook * Quaternion.Inverse(_smoothLook);
-                if (Quaternion.Angle(Quaternion.identity, delay) < 0.05f)
+                if (Settled(delay))
                     delay = Quaternion.identity;
                 sightPoint = cameraPosition;
                 turn = delay;
@@ -307,7 +307,7 @@ internal static class AimArms
             _hasHeadMean = false;
         }
 
-        if (!aiming && !_blendAiming && _offset.sqrMagnitude < 0.00000001f && _turn == Quaternion.identity && turn == Quaternion.identity && _blend >= 1f)
+        if (!aiming && !_blendAiming && _offset.sqrMagnitude < 0.00000001f && Settled(_turn) && Settled(turn) && _blend >= 1f)
         {
             _hasLaserDisplacement = false;
             return;
@@ -349,7 +349,7 @@ internal static class AimArms
         _laserDisplacement = displacement;
         _laserPivot = pivot;
         _laserTurn = carryTurn;
-        _hasLaserDisplacement = displacement.sqrMagnitude >= 0.00000001f || carryTurn != Quaternion.identity;
+        _hasLaserDisplacement = displacement.sqrMagnitude >= 0.00000001f || !Settled(carryTurn);
         EnsureUpperarms(player);
         for (int i = Upperarms.Count - 1; i >= 0; i--)
         {
@@ -416,6 +416,14 @@ internal static class AimArms
 
         _opticFrame = Time.frameCount;
         Carry(camera.transform, _laserPivot, _laserDisplacement, _laserTurn);
+    }
+
+    // Quaternion.Angle and == treat anything under about 0.16 degrees as no turn at all,
+    // which shows as a visible hop when the last bit of the follow delay is dropped.
+    private static bool Settled(Quaternion turn)
+    {
+        float sine = new Vector3(turn.x, turn.y, turn.z).magnitude;
+        return 2f * Mathf.Atan2(sine, Mathf.Abs(turn.w)) * Mathf.Rad2Deg < 0.005f;
     }
 
     private static void Carry(Transform transform, Vector3 pivot, Vector3 displacement, Quaternion turn)
@@ -1132,7 +1140,7 @@ internal static class AimArms
         if (player == null || !player.IsYourPlayer)
             return true;
         bool aiming = player.HandsController != null && player.HandsController.IsAiming;
-        if (!aiming && _offset.sqrMagnitude < 0.00000001f && _turn == Quaternion.identity)
+        if (!aiming && _offset.sqrMagnitude < 0.00000001f && Settled(_turn))
             return true;
 
         Transform playerRoot = ((Component)player).transform;
