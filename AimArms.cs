@@ -118,6 +118,10 @@ internal static class AimArms
     internal static float RecoilKick = 1f;
     private static bool _mounted;
     private static Quaternion _viewKick = Quaternion.identity;
+    private static bool _hasPlant;
+    private static int _plantSightId;
+    private static Quaternion _plantRot = Quaternion.identity;
+    private static Vector3 _plantSight;
     private static int _shotFrame = -1;
     private static Vector3? _shotFireport;
     private static readonly List<MonoBehaviour> DeferredLasers = new();
@@ -285,10 +289,24 @@ internal static class AimArms
                 Transform? root = bones.Weapon_Root_Anim;
                 if (_mounted && root != null)
                 {
-                    // The bipod already holds the gun. Aiming must not parent it to the head,
-                    // or turning the head swings the gun off the mount.
-                    target = Vector3.zero;
-                    turn = Quaternion.identity;
+                    // Put the sight on the aim direction, and keep that pose. The aim direction
+                    // does not include turning the head, so the gun stays where it was aimed.
+                    SteadyHead(player, cameraPosition, cameraRotation, out Vector3 steadyPosition, out Quaternion steadyRotation);
+                    Quaternion bodyRotation = _bodyLook * Quaternion.Inverse(_smoothLook) * steadyRotation;
+                    Vector3 bodyPosition = CameraPosition.Resolve(steadyPosition - CameraPosition.Resolve(Vector3.zero, steadyRotation), bodyRotation);
+                    if (!_hasPlant || sightId != _plantSightId)
+                    {
+                        Vector3 axis = bone.name == "aim_camera" ? -bone.up : -bone.forward;
+                        Quaternion align = Quaternion.FromToRotation(axis, bodyRotation * Vector3.forward);
+                        _plantRot = Quaternion.Inverse(bodyRotation) * (align * root.rotation);
+                        _plantSight = aimPoint;
+                        _hasPlant = true;
+                        _plantSightId = sightId;
+                    }
+
+                    Quaternion desired = bodyRotation * _plantRot;
+                    turn = desired * Quaternion.Inverse(root.rotation);
+                    target = bodyPosition + bodyRotation * _plantSight - bone.position;
                 }
                 else
                 {
@@ -315,6 +333,9 @@ internal static class AimArms
                 turn = delay;
             }
         }
+
+        if (!aiming || !_mounted)
+            _hasPlant = false;
 
         if (!aiming)
         {
