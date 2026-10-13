@@ -116,6 +116,8 @@ internal static class AimArms
     private static readonly AccessTools.FieldRef<ProceduralWeaponAnimation, float> LineOfSightAngle =
         AccessTools.FieldRefAccess<ProceduralWeaponAnimation, float>("_currentLineOfSightDeltaAngle");
     internal static float RecoilKick = 1f;
+    private static bool _mounted;
+    private static Quaternion _viewKick = Quaternion.identity;
     private static int _shotFrame = -1;
     private static Vector3? _shotFireport;
     private static readonly List<MonoBehaviour> DeferredLasers = new();
@@ -156,6 +158,10 @@ internal static class AimArms
         MethodInfo? visualPassPostfix = typeof(AimArms).GetMethod(nameof(VisualPassPostfix), BindingFlags.NonPublic | BindingFlags.Static);
         if (visualPass != null && visualPassPostfix != null)
             harmony.Patch(visualPass, postfix: new HarmonyMethod(visualPassPostfix) { priority = Priority.Last });
+        MethodInfo? shot = AccessTools.Method(typeof(Player), nameof(Player.OnMakingShot));
+        MethodInfo? shotTranspiler = typeof(AimArms).GetMethod(nameof(SkipMountedBodyRecoil), BindingFlags.NonPublic | BindingFlags.Static);
+        if (shot != null && shotTranspiler != null)
+            harmony.Patch(shot, transpiler: new HarmonyMethod(shotTranspiler));
         MethodInfo? rotate = AccessTools.Method(typeof(Player), nameof(Player.Rotate));
         MethodInfo? rotatePrefix = typeof(AimArms).GetMethod(nameof(RotatePrefix), BindingFlags.NonPublic | BindingFlags.Static);
         if (rotate != null && rotatePrefix != null)
@@ -256,6 +262,7 @@ internal static class AimArms
 
     private static void AlignToCameraCore(Player player, Vector3 cameraPosition, Quaternion cameraRotation)
     {
+        _mounted = player.MovementContext != null && player.MovementContext.IsInMountedState;
         PlayerBones bones = player.PlayerBones;
         bool aiming = player.HandsController != null && player.HandsController.IsAiming;
         int sightId = 0;
@@ -307,12 +314,16 @@ internal static class AimArms
         if (!aiming && !_blendAiming && _offset.sqrMagnitude < 0.00000001f && Settled(_turn) && Settled(turn) && _blend >= 1f)
         {
             _hasLaserDisplacement = false;
+            _viewKick = _mounted && bones?.Weapon_Root_Anim != null
+                ? ShotKick(player.ProceduralWeaponAnimation, bones.Weapon_Root_Anim.rotation)
+                : Quaternion.identity;
             return;
         }
 
         if (bones == null)
         {
             _hasLaserDisplacement = false;
+            _viewKick = Quaternion.identity;
             return;
         }
 
@@ -341,8 +352,12 @@ internal static class AimArms
         Vector3 displacement = _offset;
         Quaternion carryTurn = _turn;
         Vector3 pivot = sightPoint ?? (bones.Weapon_Root_Anim != null ? bones.Weapon_Root_Anim.position : Vector3.zero);
+        Quaternion kick = Quaternion.identity;
         if (aiming)
-            Recoil(player.ProceduralWeaponAnimation, bones.Weapon_Root_Anim, pivot, ref displacement, ref carryTurn);
+            kick = Recoil(player.ProceduralWeaponAnimation, bones.Weapon_Root_Anim, pivot, ref displacement, ref carryTurn);
+        else if (_mounted && bones.Weapon_Root_Anim != null)
+            kick = ShotKick(player.ProceduralWeaponAnimation, bones.Weapon_Root_Anim.rotation);
+        _viewKick = _mounted ? kick : Quaternion.identity;
         _laserDisplacement = displacement;
         _laserPivot = pivot;
         _laserTurn = carryTurn;
@@ -428,23 +443,45 @@ internal static class AimArms
         transform.SetPositionAndRotation(pivot + displacement + turn * (transform.position - pivot), turn * transform.rotation);
     }
 
-    private static void Recoil(ProceduralWeaponAnimation? animation, Transform? weapon, Vector3 pivot, ref Vector3 displacement, ref Quaternion turn)
+    private static Quaternion Recoil(ProceduralWeaponAnimation? animation, Transform? weapon, Vector3 pivot, ref Vector3 displacement, ref Quaternion turn)
     {
-        if (animation == null || weapon == null || animation.Shootingg?.CurrentRecoilEffect == null || animation.HandsContainer == null || RecoilKick <= 0f)
-            return;
+        if (animation == null || weapon == null || animation.HandsContainer == null)
+            return Quaternion.identity;
+
+        Quaternion weaponRotation = turn * weapon.rotation;
+        Quaternion kick = ShotKick(animation, weaponRotation);
+        if (kick == Quaternion.identity)
+            return kick;
+
+        Vector3 weaponPosition = pivot + displacement + turn * (weapon.position - pivot);
+        Vector3 localPivot = animation.HandsContainer.RecoilPivot;
+        if (animation.IsMountedState)
+            localPivot = animation.IsBipodUsed && !animation.IsVerticalMounting
+                ? animation.HandsContainer.MountingRotationCenterBipods
+                : animation.HandsContainer.MountingRotationCenter;
+        Vector3 recoilPivot = weaponPosition + weaponRotation * localPivot;
+        displacement = recoilPivot + kick * (pivot + displacement - recoilPivot) - pivot;
+        turn = kick * turn;
+        return kick;
+    }
+
+    private static Quaternion ShotKick(ProceduralWeaponAnimation? animation, Quaternion space)
+    {
+        if (animation == null || animation.Shootingg?.CurrentRecoilEffect == null || RecoilKick <= 0f)
+            return Quaternion.identity;
 
         Vector3 recoil = animation.Shootingg.CurrentRecoilEffect.GetHandRotationRecoil();
         if (animation.Shootingg.CurrentRecoilEffect.WeaponRecoilEffect != null)
             recoil += animation.Shootingg.CurrentRecoilEffect.WeaponRecoilEffect.GetRotationRecoil();
         if (recoil.sqrMagnitude < 0.00000001f)
-            return;
+            return Quaternion.identity;
 
-        Quaternion weaponRotation = turn * weapon.rotation;
-        Vector3 weaponPosition = pivot + displacement + turn * (weapon.position - pivot);
-        Vector3 recoilPivot = weaponPosition + weaponRotation * animation.HandsContainer.RecoilPivot;
-        Quaternion kick = Quaternion.Euler(weaponRotation * (recoil * RecoilKick));
-        displacement = recoilPivot + kick * (pivot + displacement - recoilPivot) - pivot;
-        turn = kick * turn;
+        return Quaternion.Euler(space * (recoil * RecoilKick));
+    }
+
+    internal static Quaternion KickView(Quaternion view)
+    {
+        return _viewKick * view;
     }
 
     private static void Sway(ProceduralWeaponAnimation animation, Transform third, Transform anim, Transform sightBone, int sightId, Vector3 cameraPosition, Quaternion cameraRotation, Vector3 aimPoint, out Vector3 displacement, out Quaternion turn)
@@ -492,7 +529,12 @@ internal static class AimArms
         _gunTurnMean = Quaternion.Slerp(_gunTurnMean, gunTurn, follow).normalized;
 
         Vector3 smoothSight = sight + cameraRotation * (gunMove - rawGunMove);
-        Vector3 sway = Now.ArmMove * (armMove - _armMoveMean) + Now.GunMove * (gunMove - _gunMoveMean);
+        float armMoveScale = _mounted ? 0f : Now.ArmMove;
+        float gunMoveScale = _mounted ? 0f : Now.GunMove;
+        float armTurnScale = _mounted ? 0f : Now.ArmTurn;
+        float gunTurnScale = _mounted ? 0f : Now.GunTurn;
+        float breathScale = _mounted ? 0f : Now.Breath;
+        Vector3 sway = armMoveScale * (armMove - _armMoveMean) + gunMoveScale * (gunMove - _gunMoveMean);
         Vector3 pinned = toCamera * (cameraPosition + cameraRotation * (aimPoint + sway) - smoothSight);
         if (Chase && _hasChase)
         {
@@ -525,10 +567,10 @@ internal static class AimArms
             _armTurnCenter = Quaternion.Slerp(_armTurnCenter, _armTurnMean, slow).normalized;
             _gunTurnCenter = Quaternion.Slerp(_gunTurnCenter, _gunTurnMean, slow).normalized;
         }
-        Quaternion armBase = _armTurnCenter * Scale(Quaternion.Inverse(_armTurnCenter) * _armTurnMean, Now.Breath);
-        Quaternion gunBase = _gunTurnCenter * Scale(Quaternion.Inverse(_gunTurnCenter) * _gunTurnMean, Now.Breath);
-        Quaternion keptArm = armBase * Scale(Quaternion.Inverse(_armTurnMean) * armTurn, Now.ArmTurn);
-        Quaternion keptGun = gunBase * Scale(Quaternion.Inverse(_gunTurnMean) * gunTurn, Now.GunTurn);
+        Quaternion armBase = _armTurnCenter * Scale(Quaternion.Inverse(_armTurnCenter) * _armTurnMean, breathScale);
+        Quaternion gunBase = _gunTurnCenter * Scale(Quaternion.Inverse(_gunTurnCenter) * _gunTurnMean, breathScale);
+        Quaternion keptArm = armBase * Scale(Quaternion.Inverse(_armTurnMean) * armTurn, armTurnScale);
+        Quaternion keptGun = gunBase * Scale(Quaternion.Inverse(_gunTurnMean) * gunTurn, gunTurnScale);
         turn = cameraRotation * LineOfSight(animation, sightBone, anim, armBase * gunBase) * keptArm * keptGun * Quaternion.Inverse(armTurn * rawGunTurn) * toCamera;
     }
 
@@ -554,6 +596,7 @@ internal static class AimArms
         if (!NewCameraSwitch.Enabled || !__instance.IsYourPlayer)
             return;
 
+        _mounted = __instance.MovementContext != null && __instance.MovementContext.IsInMountedState;
         ApplyHeadLock(__instance);
         UpdateFreeLookReturn(__instance);
         SprintHeadPitch(__instance);
@@ -885,7 +928,7 @@ internal static class AimArms
     private static Quaternion AimTurn()
     {
         Quaternion sway = _headTurnSmooth * Quaternion.Inverse(Lean(_headTurnSmooth));
-        return Scale(sway, Now.HeadFollow) * Lean(_headTurnRaw);
+        return Scale(sway, _mounted ? 0f : Now.HeadFollow) * Lean(_headTurnRaw);
     }
 
     private const float FreeLookYaw = 70f;
@@ -1093,6 +1136,32 @@ internal static class AimArms
     public static Camera? GetDrawCamera()
     {
         return _drawCamera;
+    }
+
+    // First person returns before the body shot reaction. Mounting already shrinks the
+    // hand recoil; the third-person reaction is the full punch and ignores the bipod.
+    private static IEnumerable<CodeInstruction> SkipMountedBodyRecoil(IEnumerable<CodeInstruction> instructions)
+    {
+        MethodInfo? getter = AccessTools.PropertyGetter(typeof(Player), nameof(Player.FirstPersonPointOfView));
+        MethodInfo? skip = typeof(AimArms).GetMethod(nameof(OrMounted), BindingFlags.NonPublic | BindingFlags.Static);
+        int seen = 0;
+        foreach (CodeInstruction instruction in instructions)
+        {
+            yield return instruction;
+            if (getter != null && skip != null && instruction.Calls(getter) && ++seen == 2)
+            {
+                yield return new CodeInstruction(OpCodes.Ldarg_0);
+                yield return new CodeInstruction(OpCodes.Call, skip);
+            }
+        }
+    }
+
+    private static bool OrMounted(bool firstPerson, Player player)
+    {
+        if (firstPerson)
+            return true;
+
+        return NewCameraSwitch.Enabled && player.IsYourPlayer && player.MovementContext != null && player.MovementContext.IsInMountedState;
     }
 
     private static IEnumerable<CodeInstruction> DrawForReplayCamera(IEnumerable<CodeInstruction> instructions)
