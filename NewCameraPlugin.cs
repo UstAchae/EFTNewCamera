@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "Justachae 的第三人称骨架与镜头";
-    public const string PluginVersion = "0.1.189";
+    public const string PluginVersion = "0.1.190";
 
     private void Awake()
     {
@@ -293,7 +293,12 @@ internal static class NewCameraSwitch
                 _posePosition = CameraPosition.Resolve(head.position, _poseRotation);
                 AimArms.ObserveHead(player, _posePosition, _poseRotation);
                 AimArms.AlignToCamera(player, _posePosition, _poseRotation);
-                if (!AimArms.MountedAimView(player, out _posePosition, out _poseRotation))
+                if (AimArms.MountedAimView(player, out Vector3 mountedPosition, out Quaternion mountedRotation))
+                {
+                    _posePosition = mountedPosition;
+                    _poseRotation = mountedRotation;
+                }
+                else
                     _poseRotation = AimArms.KickView(_poseRotation);
                 AimArms.LiftHead(head);
                 _poseFrame = Time.frameCount;
