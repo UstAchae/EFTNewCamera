@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "Justachae 的第三人称骨架与镜头";
-    public const string PluginVersion = "0.1.197";
+    public const string PluginVersion = "0.1.198";
 
     private void Awake()
     {
@@ -30,11 +30,21 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         ReticleAfterTaa.Install();
         NewCameraSwitch.Enabled = enabled.Value;
         enabled.SettingChanged += (_, _) => NewCameraSwitch.Enabled = enabled.Value;
+        BindPoseWatch();
         BindDirection();
         BindPosition();
         BindAimDistance();
         BindSway();
         BindBody();
+    }
+
+    private void BindPoseWatch()
+    {
+        ConfigEntry<float> distance = Config.Bind("观战镜头", "距离", 5f,
+            new ConfigDescription("左下角观战镜头离角色多远，单位为米。只改这个窗口，不带动瞄准镜头。",
+                new AcceptableValueRange<float>(1f, 20f)));
+        distance.SettingChanged += (_, _) => PoseWatch.Distance = distance.Value;
+        PoseWatch.Distance = distance.Value;
     }
 
     private void BindBody()

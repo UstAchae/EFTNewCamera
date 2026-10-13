@@ -6,7 +6,7 @@ namespace EFTNewCamera;
 
 internal static class PoseWatch
 {
-    private const float Distance = 5f;
+    internal static float Distance = 5f;
     private const float FieldOfView = 40f;
 
     private static Camera? _camera;
