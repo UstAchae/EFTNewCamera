@@ -495,7 +495,7 @@ internal static class AimArms
 
     internal static bool TrackMountedSight(Player player)
     {
-        bool want = _mounted && _freeLookWeight <= 0f && player.HandsController != null && player.HandsController.IsAiming;
+        bool want = _mounted && player.HandsController != null && player.HandsController.IsAiming;
         PlayerBones? bones = player.PlayerBones;
         Transform? head = bones?.Head?.Original;
         if (bones == null || head == null || !SightCamera(player, out Vector3 cameraPosition, out Quaternion cameraRotation))
@@ -521,7 +521,25 @@ internal static class AimArms
         Carry(moved, head.position, displacement, turn);
         for (int i = 0; i < planted.Length; i++)
             planted[i].Transform.SetPositionAndRotation(planted[i].Position, planted[i].Rotation);
+        ApplyMountedLook(bones, head);
         return true;
+    }
+
+    // The aim pose is applied after the game turns the head, so it would wipe a free look.
+    // The game look is withheld while mounted aiming, and put back on the aim pose here.
+    private static void ApplyMountedLook(PlayerBones bones, Transform head)
+    {
+        if (_smoothedHead.sqrMagnitude < 0.0001f)
+            return;
+
+        Vector3 offset = _smoothedHead;
+        Transform? neck = bones.Neck;
+        if (neck != null)
+            neck.localRotation *= Quaternion.Euler(offset * bones.NeckChain);
+        head.localRotation *= Quaternion.Euler(offset * bones.HeadChain);
+        float missing = offset.x - offset.x * (bones.NeckChain + bones.HeadChain);
+        if (Mathf.Abs(missing) >= 0.5f)
+            head.localRotation *= Quaternion.Euler(missing, 0f, 0f);
     }
 
     private struct HeldPose
@@ -1173,6 +1191,9 @@ internal static class AimArms
         }
 
         offset = _smoothedHead;
+        if (player.MovementContext != null && player.MovementContext.IsInMountedState
+            && player.HandsController != null && player.HandsController.IsAiming)
+            offset = Vector3.zero;
         if (player.HeadRotation.sqrMagnitude <= 0.01f && _smoothedHead.sqrMagnitude <= 0.01f)
             return;
         if (!SprintPitchAngle(player, out float missing))
