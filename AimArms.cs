@@ -5,6 +5,7 @@ using Comfort.Common;
 using EFT;
 using EFT.Animations;
 using EFT.CameraControl;
+using EFT.Interactive;
 using EFT.Settings;
 using HarmonyLib;
 using UnityEngine;
@@ -633,15 +634,51 @@ internal static class AimArms
         if (forward.sqrMagnitude < 0.0001f)
             return false;
         forward.Normalize();
+        bool ags = GrenadeLauncher(player);
+        if (ags)
+        {
+            // The sight body only yaws. The picture inside the glass follows the barrel, and the eye sits on the sight.
+            Vector3 eye = bone.position;
+            Vector3 flat = Vector3.ProjectOnPlane(forward, Vector3.up);
+            if (flat.sqrMagnitude < 0.0001f)
+                return false;
+            flat.Normalize();
+            try
+            {
+                animation.AdjustOpticsPAG17();
+            }
+            catch
+            {
+            }
+
+            rotation = Quaternion.LookRotation(flat, Vector3.up);
+            position = eye;
+            return true;
+        }
+
         Vector3 up = Vector3.ProjectOnPlane(bone.name == "aim_camera" ? bone.forward : bone.up, forward);
         if (up.sqrMagnitude < 0.0001f)
             up = Vector3.ProjectOnPlane(Vector3.up, forward);
         if (up.sqrMagnitude < 0.0001f)
             return false;
+        if (MachineGun(player))
+            up = -up;
 
         rotation = Quaternion.LookRotation(forward, up);
         position = bone.position - forward * (ForwardDistance + SightRelief(animation, bone));
         return true;
+    }
+
+    private static bool GrenadeLauncher(Player player)
+    {
+        StationaryWeapon? weapon = player.MovementContext?.StationaryWeapon;
+        return weapon != null && weapon.Animation == StationaryWeapon.EStationaryAnimationType.AGS_17;
+    }
+
+    private static bool MachineGun(Player player)
+    {
+        StationaryWeapon? weapon = player.MovementContext?.StationaryWeapon;
+        return weapon != null && weapon.Animation != StationaryWeapon.EStationaryAnimationType.AGS_17;
     }
 
     internal static Quaternion KickView(Quaternion view)
