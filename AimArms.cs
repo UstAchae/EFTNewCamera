@@ -118,10 +118,6 @@ internal static class AimArms
     internal static float RecoilKick = 1f;
     private static bool _mounted;
     private static Quaternion _viewKick = Quaternion.identity;
-    private static bool _hasPlant;
-    private static int _plantSightId;
-    private static Quaternion _plantRot = Quaternion.identity;
-    private static Vector3 _plantSight;
     private static int _shotFrame = -1;
     private static Vector3? _shotFireport;
     private static readonly List<MonoBehaviour> DeferredLasers = new();
@@ -289,22 +285,10 @@ internal static class AimArms
                 Transform? root = bones.Weapon_Root_Anim;
                 if (_mounted && root != null)
                 {
-                    // The mounted gun is already still. Only bring that pose up to the sight,
-                    // then keep the whole gun fixed to the camera. Tracking the live animation
-                    // leaves the sight pointing forward while the gun keeps rolling around it.
-                    if (!_hasPlant || sightId != _plantSightId)
-                    {
-                        Vector3 axis = bone.name == "aim_camera" ? -bone.up : -bone.forward;
-                        Quaternion align = Quaternion.FromToRotation(axis, cameraRotation * Vector3.forward);
-                        _plantRot = Quaternion.Inverse(cameraRotation) * (align * root.rotation);
-                        _plantSight = aimPoint;
-                        _hasPlant = true;
-                        _plantSightId = sightId;
-                    }
-
-                    Quaternion desired = cameraRotation * _plantRot;
-                    turn = desired * Quaternion.Inverse(root.rotation);
-                    target = cameraPosition + cameraRotation * _plantSight - bone.position;
+                    // The bipod already holds the gun. Aiming must not parent it to the head,
+                    // or turning the head swings the gun off the mount.
+                    target = Vector3.zero;
+                    turn = Quaternion.identity;
                 }
                 else
                 {
@@ -331,9 +315,6 @@ internal static class AimArms
                 turn = delay;
             }
         }
-
-        if (!aiming || !_mounted)
-            _hasPlant = false;
 
         if (!aiming)
         {
