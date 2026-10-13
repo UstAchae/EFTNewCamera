@@ -4,8 +4,10 @@ using System.Reflection.Emit;
 using Comfort.Common;
 using EFT;
 using EFT.Animations;
+using EFT.Ballistics;
 using EFT.CameraControl;
 using EFT.Interactive;
+using EFT.InventoryLogic;
 using EFT.Settings;
 using HarmonyLib;
 using UnityEngine;
@@ -713,30 +715,17 @@ internal static class AimArms
         if (animation == null || root == null)
             return;
 
-        if (Mathf.Abs(animation.Pitch - _grenadePanelPitch) > 0.1f)
-        {
-            _grenadePanelPitch = animation.Pitch;
-            try
-            {
-                player.ShowAmmoCountZeroingPanel($"{0f - animation.Pitch:F1} | {animation._agsDeltaHeight:F1}M");
-            }
-            catch
-            {
-            }
-        }
-
-        Vector3 start = firearm.CurrentFireport.position;
         Vector3 direction = firearm.WeaponDirection;
         if (direction.sqrMagnitude < 0.0001f)
             return;
+        direction.Normalize();
+        Vector3 start = firearm.CurrentFireport.position - direction * firearm.WeaponLn / 5f;
 
-        Vector3 prediction;
         try
         {
-            prediction = firearm.Weapon.ZeroLevelPosition(direction, start, start.y - root.position.y + animation._agsDeltaHeight, out float time);
-            if (time <= 0f)
+            if (!GrenadeLanding(player, firearm, start, direction, out Vector3 landing))
                 return;
-            animation.OpticLookAtGlobal(prediction);
+            animation.OpticLookAtGlobal(landing);
         }
         catch
         {
@@ -757,11 +746,71 @@ internal static class AimArms
             optic.transform.SetPositionAndRotation(pivot.position, pivot.rotation);
     }
 
-    private static float _grenadePanelPitch = 1000f;
+    private const float GrenadeStep = 0.01f;
+    private const int GrenadeStepsPerCast = 4;
+    private const float GrenadeFlightSeconds = 13f;
+    private static readonly RaycastHit[] GrenadeHits = new RaycastHit[16];
+
+    // Steps the round the same way the game does (G1 drag plus gravity, 10 ms steps) and returns the first
+    // thing it would hit. The player and the launcher itself are ignored.
+    private static bool GrenadeLanding(Player player, Player.FirearmController firearm, Vector3 start, Vector3 direction, out Vector3 landing)
+    {
+        landing = default;
+        AmmoTemplate? ammo = firearm.Weapon.CurrentAmmoTemplate;
+        if (ammo == null || ammo.BulletMassGram <= 0f || ammo.BulletDiameterMilimeters <= 0f || ammo.BallisticCoeficient <= 0f)
+            return false;
+
+        float massKg = ammo.BulletMassGram / 1000f;
+        float diameterM = ammo.BulletDiameterMilimeters / 1000f;
+        float coefficient = massKg * 0.0014223f / (diameterM * diameterM * ammo.BallisticCoeficient);
+        float slowdown = 1.2f * diameterM * diameterM * Mathf.PI / 4f;
+        Vector3 gravity = Physics.gravity;
+        Vector3 position = start;
+        Vector3 velocity = direction * (ammo.InitialSpeed * firearm.Weapon.SpeedFactor);
+        Transform? launcher = player.MovementContext?.StationaryWeapon != null ? player.MovementContext.StationaryWeapon.transform : null;
+        int mask = BallisticsCalculatorConstants.HitMask;
+
+        Vector3 castFrom = position;
+        int steps = Mathf.CeilToInt(GrenadeFlightSeconds / GrenadeStep);
+        for (int i = 1; i <= steps; i++)
+        {
+            float speed = velocity.magnitude;
+            float drag = EFT.Ballistics.Shot.CalculateG1DragCoefficient(speed) * coefficient;
+            Vector3 acceleration = gravity + slowdown * (0f - drag) * speed * speed / (2f * massKg) * velocity.normalized;
+            position += velocity * GrenadeStep + 5E-05f * acceleration;
+            velocity += acceleration * GrenadeStep;
+            if (i % GrenadeStepsPerCast != 0 && i != steps)
+                continue;
+
+            Vector3 segment = position - castFrom;
+            float length = segment.magnitude;
+            if (length > 0.0001f)
+            {
+                int count = Physics.RaycastNonAlloc(castFrom, segment / length, GrenadeHits, length, mask, QueryTriggerInteraction.Ignore);
+                float best = float.MaxValue;
+                for (int h = 0; h < count; h++)
+                {
+                    RaycastHit hit = GrenadeHits[h];
+                    if (hit.collider == null || hit.distance >= best)
+                        continue;
+                    Transform owner = hit.collider.transform;
+                    if (owner.GetComponentInParent<Player>() == player || (launcher != null && owner.IsChildOf(launcher)))
+                        continue;
+                    best = hit.distance;
+                    landing = hit.point;
+                }
+                if (best < float.MaxValue)
+                    return true;
+            }
+            castFrom = position;
+        }
+
+        return false;
+    }
+
     private static readonly BepInEx.Logging.ManualLogSource GrenadeLog = BepInEx.Logging.Logger.CreateLogSource("EFTNewCamera.AGS");
 
-    // One line per launcher round: where the reticle points, where the game's sight formula aims,
-    // and where the round's own trajectory first meets the world.
+    // One line per launcher round: where the optic's centre looks, and where this round is computed to land.
     private static void LogGrenadeShot(Player.FirearmController firearm, Vector3 start, Vector3 direction)
     {
         Player? player = Singleton<GameWorld>.Instance?.MainPlayer;
@@ -770,30 +819,14 @@ internal static class AimArms
 
         try
         {
-            ProceduralWeaponAnimation? animation = player.ProceduralWeaponAnimation;
-            Transform? root = animation?.HandsContainer?.RootJoint;
-            if (animation == null || root == null || direction.sqrMagnitude < 0.0001f)
+            Transform? root = player.ProceduralWeaponAnimation?.HandsContainer?.RootJoint;
+            if (root == null || direction.sqrMagnitude < 0.0001f)
                 return;
 
-            int mask = LayersMaskController.HighPolyWithTerrainMask;
+            direction.Normalize();
+            start -= direction * firearm.WeaponLn / 5f;
             float feet = root.position.y;
-            Vector3 predicted = firearm.Weapon.ZeroLevelPosition(direction.normalized, start, start.y - feet + animation._agsDeltaHeight, out float time);
-            string landed = "none";
-            var trajectory = firearm.Weapon._opticTrajectoryInfosForAGS;
-            if (trajectory != null)
-            {
-                Vector3 previous = start;
-                for (float t = 0.05f; t <= 12f; t += 0.02f)
-                {
-                    EFT.Ballistics.Shot.PredictedTrajectoryCalculation(out Vector3 point, out _, trajectory, t);
-                    if (Physics.Linecast(previous, point, out RaycastHit ground, mask))
-                    {
-                        landed = Describe(ground.point, start, feet);
-                        break;
-                    }
-                    previous = point;
-                }
-            }
+            bool lands = GrenadeLanding(player, firearm, start, direction, out Vector3 landing);
 
             string reticle = "none";
             float offAxis = -1f;
@@ -801,13 +834,13 @@ internal static class AimArms
             if (optic != null)
             {
                 Transform eye = optic.transform;
-                offAxis = Vector3.Angle(eye.forward, predicted - eye.position);
-                if (Physics.Raycast(eye.position, eye.forward, out RaycastHit seen, 3000f, mask))
+                if (lands)
+                    offAxis = Vector3.Angle(eye.forward, landing - eye.position);
+                if (Physics.Raycast(eye.position, eye.forward, out RaycastHit seen, 3000f, BallisticsCalculatorConstants.HitMask, QueryTriggerInteraction.Ignore))
                     reticle = Describe(seen.point, start, feet);
             }
 
-            GrenadeLog.LogInfo($"pitch={0f - animation.Pitch:F1} height={animation._agsDeltaHeight:F1} speedFactor={firearm.Weapon.SpeedFactor:F2} " +
-                $"formula={Describe(predicted, start, feet)} t={time:F2} reticleVsFormula={offAxis:F2}deg reticle={reticle} landed={landed}");
+            GrenadeLog.LogInfo($"landing={(lands ? Describe(landing, start, feet) : "none")} reticle={reticle} reticleOff={offAxis:F2}deg");
         }
         catch (System.Exception error)
         {
