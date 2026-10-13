@@ -118,6 +118,10 @@ internal static class AimArms
     internal static float RecoilKick = 1f;
     private static bool _mounted;
     private static Quaternion _viewKick = Quaternion.identity;
+    private static bool _hasPlant;
+    private static int _plantSightId;
+    private static Quaternion _plantRot = Quaternion.identity;
+    private static Vector3 _plantSight;
     private static int _shotFrame = -1;
     private static Vector3? _shotFireport;
     private static readonly List<MonoBehaviour> DeferredLasers = new();
@@ -282,18 +286,41 @@ internal static class AimArms
                 sightId = bone.GetInstanceID();
                 float relief = SightRelief(animation, bone);
                 Vector3 aimPoint = new Vector3(0f, 0f, ForwardDistance + relief);
-                SteadyHead(player, cameraPosition, cameraRotation, out Vector3 steadyPosition, out Quaternion steadyRotation);
-                Quaternion bodyRotation = _bodyLook * Quaternion.Inverse(_smoothLook) * steadyRotation;
-                Vector3 bodyPosition = CameraPosition.Resolve(steadyPosition - CameraPosition.Resolve(Vector3.zero, steadyRotation), bodyRotation);
-                if (bones.Weapon_Root_Third != null && bones.Weapon_Root_Anim != null)
-                    Sway(animation, bones.Weapon_Root_Third, bones.Weapon_Root_Anim, bone, sightId, bodyPosition, bodyRotation, aimPoint, out target, out turn);
-                else
-                    target = bodyPosition - bone.position + bodyRotation * aimPoint;
+                Transform? root = bones.Weapon_Root_Anim;
+                if (_mounted && root != null)
+                {
+                    // The mounted gun is already still. Only bring that pose up to the sight,
+                    // then keep the whole gun fixed to the camera. Tracking the live animation
+                    // leaves the sight pointing forward while the gun keeps rolling around it.
+                    if (!_hasPlant || sightId != _plantSightId)
+                    {
+                        Vector3 axis = bone.name == "aim_camera" ? -bone.up : -bone.forward;
+                        Quaternion align = Quaternion.FromToRotation(axis, cameraRotation * Vector3.forward);
+                        _plantRot = Quaternion.Inverse(cameraRotation) * (align * root.rotation);
+                        _plantSight = aimPoint;
+                        _hasPlant = true;
+                        _plantSightId = sightId;
+                    }
 
-                Quaternion delay = _lagLook * Quaternion.Inverse(_bodyLook);
-                Vector3 placed = bone.position + target;
-                target = steadyPosition + delay * (placed - bodyPosition) - bone.position;
-                turn = delay * turn;
+                    Quaternion desired = cameraRotation * _plantRot;
+                    turn = desired * Quaternion.Inverse(root.rotation);
+                    target = cameraPosition + cameraRotation * _plantSight - bone.position;
+                }
+                else
+                {
+                    SteadyHead(player, cameraPosition, cameraRotation, out Vector3 steadyPosition, out Quaternion steadyRotation);
+                    Quaternion bodyRotation = _bodyLook * Quaternion.Inverse(_smoothLook) * steadyRotation;
+                    Vector3 bodyPosition = CameraPosition.Resolve(steadyPosition - CameraPosition.Resolve(Vector3.zero, steadyRotation), bodyRotation);
+                    if (bones.Weapon_Root_Third != null && root != null)
+                        Sway(animation, bones.Weapon_Root_Third, root, bone, sightId, bodyPosition, bodyRotation, aimPoint, out target, out turn);
+                    else
+                        target = bodyPosition - bone.position + bodyRotation * aimPoint;
+
+                    Quaternion delay = _lagLook * Quaternion.Inverse(_bodyLook);
+                    Vector3 placed = bone.position + target;
+                    target = steadyPosition + delay * (placed - bodyPosition) - bone.position;
+                    turn = delay * turn;
+                }
             }
             else if (!aiming && FollowDelay > 0f && player.HandsController is Player.FirearmController && bones.Weapon_Root_Anim != null)
             {
@@ -304,6 +331,9 @@ internal static class AimArms
                 turn = delay;
             }
         }
+
+        if (!aiming || !_mounted)
+            _hasPlant = false;
 
         if (!aiming)
         {
