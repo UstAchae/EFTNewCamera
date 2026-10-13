@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "Justachae 的第三人称骨架与镜头";
-    public const string PluginVersion = "0.1.181";
+    public const string PluginVersion = "0.1.182";
 
     private void Awake()
     {
@@ -113,7 +113,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         distance.SettingChanged += (_, _) => AimArms.ForwardDistance = distance.Value;
         AimArms.ForwardDistance = distance.Value;
         ConfigEntry<bool> reticle = Config.Bind("瞄准", "红点躲开TAA", true,
-            "游戏抗锯齿用 TAA 时，瞄准中把全息和红点瞄具里的准星放到抗锯齿之后再画，准星随呼吸小幅晃动时不再留虚影。没开 TAA 时不起作用。");
+            "瞄准中把全息和红点瞄具里的准星放到 TAA 或 DLSS 混合完再画，准星随呼吸小幅晃动时不再留虚影。这两个都没开时不起作用。");
         reticle.SettingChanged += (_, _) => ReticleAfterTaa.Enabled = reticle.Value;
         ReticleAfterTaa.Enabled = reticle.Value;
     }

@@ -4,14 +4,15 @@ using Comfort.Common;
 using EFT;
 using HarmonyLib;
 using UnityEngine;
+using UnityEngine.Rendering;
 using UnityEngine.Rendering.PostProcessing;
 
 namespace EFTNewCamera;
 
-// TAA blends about 99% of the previous frames into every pixel. The collimator reticle is transparent and
-// writes no motion vectors, so a reticle that moves a pixel or two inside its housing leaves a copy behind.
-// While aiming, the current sight's reticle is kept out of the main camera's normal pass and drawn into the
-// TAA output instead, before bloom and tone mapping.
+// TAA and DLSS both blend previous frames into every pixel. The collimator reticle is transparent and writes
+// no motion vectors, so a reticle that moves a pixel or two inside its housing leaves a copy behind.
+// While aiming, the current sight's reticle is kept out of the main camera's normal pass and drawn after
+// whichever of the two did the blending, before bloom and tone mapping.
 internal static class ReticleAfterTaa
 {
     internal static bool Enabled = true;
@@ -39,6 +40,11 @@ internal static class ReticleAfterTaa
         MethodInfo? after = typeof(ReticleAfterTaa).GetMethod(nameof(RenderPostfix), BindingFlags.NonPublic | BindingFlags.Static);
         if (render != null && after != null)
             harmony.Patch(render, postfix: new HarmonyMethod(after));
+
+        MethodInfo? upscale = AccessTools.Method(typeof(SSAAPropagator), "FillCommandBuffer");
+        MethodInfo? afterUpscale = typeof(ReticleAfterTaa).GetMethod(nameof(UpscalePostfix), BindingFlags.NonPublic | BindingFlags.Static);
+        if (upscale != null && afterUpscale != null)
+            harmony.Patch(upscale, postfix: new HarmonyMethod(afterUpscale));
 
         _installed = true;
     }
@@ -71,16 +77,37 @@ internal static class ReticleAfterTaa
     private static void RenderPostfix(PostProcessRenderContext context)
     {
         Camera camera = context.camera;
-        if (camera == null || !camera.CompareTag("MainCamera") || Hidden.Count == 0 || !Active(camera))
+        // DLSS turns this pass off and blends the frame itself. Drawing here would miss that blend.
+        if (camera == null || !camera.CompareTag("MainCamera") || Hidden.Count == 0 || !Active(camera) || ResolveDisabled(camera))
             return;
 
-        // The camera is still on the jittered matrix here. The housing is resolved by TAA, so the reticle has to
-        // use the stable matrix or it sits a pixel off the housing. Put the jittered matrix back afterwards so
-        // the rest of this buffer (bloom, color) keeps the matrices it expects.
-        Matrix4x4 view = camera.worldToCameraMatrix;
-        Matrix4x4 jittered = camera.projectionMatrix;
-        context.command.SetViewProjectionMatrices(view, camera.nonJitteredProjectionMatrix);
-        context.command.SetRenderTarget(context.destination, UnityEngine.Rendering.BuiltinRenderTextureType.Depth);
+        DrawReticle(context.command, camera, context.destination);
+    }
+
+    private static void UpscalePostfix(SSAAPropagator __instance, CommandBuffer externalCommandBuffer)
+    {
+        if (externalCommandBuffer == null || Hidden.Count == 0)
+            return;
+
+        Camera camera = __instance.GetComponent<Camera>();
+        if (camera == null || !camera.CompareTag("MainCamera") || !Active(camera) || !ResolveDisabled(camera))
+            return;
+
+        if (!__instance.GetSourceDestination(out RenderTexture source, out _) || source == null)
+            return;
+
+        DrawReticle(externalCommandBuffer, camera, source);
+    }
+
+    private static void DrawReticle(CommandBuffer command, Camera camera, RenderTargetIdentifier color)
+    {
+        // Same matrices the game uses when it redraws a collimator after an upscale, so the dot stays on the
+        // housing instead of a pixel off to one side.
+        command.EnableShaderKeyword("TAA");
+        command.EnableShaderKeyword("NON_JITTERED");
+        command.SetGlobalMatrix(Shader.PropertyToID("NonJitteredProj"), GL.GetGPUProjectionMatrix(camera.nonJitteredProjectionMatrix, true));
+        command.SetViewProjectionMatrices(camera.worldToCameraMatrix, camera.nonJitteredProjectionMatrix);
+        command.SetRenderTarget(color);
         foreach ((GameObject target, int _) in Hidden)
         {
             if (target == null)
@@ -89,9 +116,11 @@ internal static class ReticleAfterTaa
             MeshFilter filter = target.GetComponent<MeshFilter>();
             if (renderer == null || renderer.sharedMaterial == null || filter == null || filter.sharedMesh == null)
                 continue;
-            context.command.DrawMesh(filter.sharedMesh, target.transform.localToWorldMatrix, renderer.sharedMaterial, 0, 0);
+            command.DrawMesh(filter.sharedMesh, target.transform.localToWorldMatrix, renderer.sharedMaterial, 0, 0);
         }
-        context.command.SetViewProjectionMatrices(view, jittered);
+        command.SetViewProjectionMatrices(camera.worldToCameraMatrix, camera.projectionMatrix);
+        command.DisableShaderKeyword("NON_JITTERED");
+        command.DisableShaderKeyword("TAA");
     }
 
     private static void HideCurrentReticle()
@@ -117,7 +146,7 @@ internal static class ReticleAfterTaa
         if (!_logged && Hidden.Count > 0)
         {
             _logged = true;
-            Debug.Log("[EFTNewCamera] collimator reticle is drawn after TAA while aiming");
+            Debug.Log("[EFTNewCamera] collimator reticle is drawn after TAA or DLSS while aiming");
         }
     }
 
@@ -126,12 +155,20 @@ internal static class ReticleAfterTaa
         if (!Enabled)
             return false;
 
+        // DLSS leaves the mode on TemporalAntialiasing and then disables Unity's own blend, so the mode check
+        // covers both. The disabled blend is handled by drawing after the upscale instead.
         PostProcessLayer? layer = camera.GetComponent<PostProcessLayer>();
-        if (layer == null || layer.antialiasingMode != PostProcessLayer.Antialiasing.TemporalAntialiasing || ResolveDisabledField?.GetValue(layer) is true)
+        if (layer == null || layer.antialiasingMode != PostProcessLayer.Antialiasing.TemporalAntialiasing)
             return false;
 
         Player? player = Singleton<GameWorld>.Instance?.MainPlayer;
         return player != null && player.IsYourPlayer && player.HandsController != null && player.HandsController.IsAiming;
+    }
+
+    private static bool ResolveDisabled(Camera camera)
+    {
+        PostProcessLayer? layer = camera.GetComponent<PostProcessLayer>();
+        return layer != null && ResolveDisabledField?.GetValue(layer) is true;
     }
 
     private static void Restore()
