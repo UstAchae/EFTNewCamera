@@ -10,7 +10,7 @@ namespace EFTNewCamera;
 
 // TAA blends about 99% of the previous frames into every pixel. The collimator reticle is transparent and
 // writes no motion vectors, so a reticle that moves a pixel or two inside its housing leaves a copy behind.
-// While aiming, the held weapon's reticles are kept out of the main camera's normal pass and drawn into the
+// While aiming, the current sight's reticle is kept out of the main camera's normal pass and drawn into the
 // TAA output instead, before bloom and tone mapping.
 internal static class ReticleAfterTaa
 {
@@ -20,7 +20,6 @@ internal static class ReticleAfterTaa
     private const int HiddenLayer = 19;
 
     private static readonly FieldInfo? ResolveDisabledField = AccessTools.Field(typeof(PostProcessLayer), "_isTAAResolveDisabled");
-    private static readonly List<CollimatorSight> Sights = new List<CollimatorSight>();
     private static readonly List<(GameObject Target, int Layer)> Hidden = new List<(GameObject, int)>();
     private static bool _installed;
     private static bool _logged;
@@ -31,35 +30,48 @@ internal static class ReticleAfterTaa
             return;
 
         Harmony harmony = new Harmony(NewCameraPlugin.PluginGuid + ".reticle");
+        MethodInfo? preCull = AccessTools.Method(typeof(PostProcessLayer), "OnPreCull");
+        MethodInfo? before = typeof(ReticleAfterTaa).GetMethod(nameof(BeforePostProcess), BindingFlags.NonPublic | BindingFlags.Static);
+        if (preCull != null && before != null)
+            harmony.Patch(preCull, prefix: new HarmonyMethod(before));
+
         MethodInfo? render = AccessTools.Method(typeof(TemporalAntialiasing), "Render");
-        MethodInfo? postfix = typeof(ReticleAfterTaa).GetMethod(nameof(RenderPostfix), BindingFlags.NonPublic | BindingFlags.Static);
-        if (render != null && postfix != null)
-            harmony.Patch(render, postfix: new HarmonyMethod(postfix));
+        MethodInfo? after = typeof(ReticleAfterTaa).GetMethod(nameof(RenderPostfix), BindingFlags.NonPublic | BindingFlags.Static);
+        if (render != null && after != null)
+            harmony.Patch(render, postfix: new HarmonyMethod(after));
 
         _installed = true;
     }
 
-    internal static void LateUpdate()
-    {
-        // Hide before any camera culls. Restoring here covers a frame where the main camera never finished.
-        Restore();
-        HideHeldReticles();
-    }
-
     internal static void OnCameraPostRender(Camera camera)
     {
+        // The main camera has already culled and the reticle draw is already in its command buffer.
         if (camera != null && camera.CompareTag("MainCamera"))
             Restore();
+    }
+
+    // Runs before this camera builds its post-processing, which is still before it culls.
+    private static void BeforePostProcess(PostProcessLayer __instance)
+    {
+        Camera camera = __instance.GetComponent<Camera>();
+        if (camera == null || !camera.CompareTag("MainCamera"))
+            return;
+
+        if (!Active(camera))
+        {
+            Restore();
+            return;
+        }
+
+        // Putting the gun in its final pose first means the reticle mesh recorded below matches the housing.
+        NewCameraSwitch.OnCameraPreCull(camera);
+        HideCurrentReticle();
     }
 
     private static void RenderPostfix(PostProcessRenderContext context)
     {
         Camera camera = context.camera;
-        if (!Enabled || camera == null || !camera.CompareTag("MainCamera") || Hidden.Count == 0)
-            return;
-
-        PostProcessLayer layer = camera.GetComponent<PostProcessLayer>();
-        if (layer == null || ResolveDisabledField?.GetValue(layer) is true)
+        if (camera == null || !camera.CompareTag("MainCamera") || Hidden.Count == 0 || !Active(camera))
             return;
 
         // The camera is still on the jittered matrix here. The housing is resolved by TAA, so the reticle has to
@@ -74,52 +86,52 @@ internal static class ReticleAfterTaa
             if (target == null)
                 continue;
             MeshRenderer renderer = target.GetComponent<MeshRenderer>();
-            if (renderer == null || renderer.sharedMaterial == null)
+            MeshFilter filter = target.GetComponent<MeshFilter>();
+            if (renderer == null || renderer.sharedMaterial == null || filter == null || filter.sharedMesh == null)
                 continue;
-            // The transform is read when the buffer runs, after the gun has been aligned to the camera.
-            context.command.DrawRenderer(renderer, renderer.sharedMaterial, 0, 0);
+            context.command.DrawMesh(filter.sharedMesh, target.transform.localToWorldMatrix, renderer.sharedMaterial, 0, 0);
         }
         context.command.SetViewProjectionMatrices(view, jittered);
     }
 
-    private static void HideHeldReticles()
+    private static void HideCurrentReticle()
     {
-        if (!Enabled)
-            return;
-
-        Camera? camera = Camera.main;
-        PostProcessLayer? layer = camera != null ? camera.GetComponent<PostProcessLayer>() : null;
-        if (layer == null || layer.antialiasingMode != PostProcessLayer.Antialiasing.TemporalAntialiasing || ResolveDisabledField?.GetValue(layer) is true)
-            return;
-
         Player? player = Singleton<GameWorld>.Instance?.MainPlayer;
-        if (player == null || !player.IsYourPlayer || player.HandsController == null || !player.HandsController.IsAiming)
+        ScopePrefabCache? cache = player?.ProceduralWeaponAnimation?.CurrentScope?.ScopePrefabCache;
+        if (player == null || cache == null || !cache.HasCollimators)
             return;
 
-        Transform? muzzle = (player.HandsController as Player.FirearmController)?.CurrentFireport?.Original;
-        if (muzzle == null)
-            return;
-
-        muzzle.root.GetComponentsInChildren(false, Sights);
-        foreach (CollimatorSight sight in Sights)
+        Restore();
+        for (int i = 0; i < cache.ModesCount; i++)
         {
-            MeshRenderer renderer = sight.CollimatorMeshRenderer;
-            if (!sight.isActiveAndEnabled || renderer == null || !renderer.enabled || renderer.sharedMaterial == null)
+            CollimatorSight? sight = cache.GetScopeModeInfo(i).CollimatorSight;
+            MeshRenderer? renderer = sight != null ? sight.CollimatorMeshRenderer : null;
+            if (sight == null || !sight.isActiveAndEnabled || renderer == null || !renderer.enabled || renderer.sharedMaterial == null)
                 continue;
 
             GameObject target = renderer.gameObject;
-            if (target.layer == HiddenLayer)
-                continue;
-
             Hidden.Add((target, target.layer));
             target.layer = HiddenLayer;
         }
-        Sights.Clear();
+
         if (!_logged && Hidden.Count > 0)
         {
             _logged = true;
-            Debug.Log("[EFTNewCamera] collimator reticles are drawn after TAA while aiming");
+            Debug.Log("[EFTNewCamera] collimator reticle is drawn after TAA while aiming");
         }
+    }
+
+    private static bool Active(Camera camera)
+    {
+        if (!Enabled)
+            return false;
+
+        PostProcessLayer? layer = camera.GetComponent<PostProcessLayer>();
+        if (layer == null || layer.antialiasingMode != PostProcessLayer.Antialiasing.TemporalAntialiasing || ResolveDisabledField?.GetValue(layer) is true)
+            return false;
+
+        Player? player = Singleton<GameWorld>.Instance?.MainPlayer;
+        return player != null && player.IsYourPlayer && player.HandsController != null && player.HandsController.IsAiming;
     }
 
     private static void Restore()

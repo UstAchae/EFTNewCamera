@@ -250,15 +250,7 @@ internal static class AimArms
 
     internal static void AlignToCamera(Player player, Vector3 cameraPosition, Quaternion cameraRotation)
     {
-        Transform? muzzle = (player.HandsController as Player.FirearmController)?.CurrentFireport?.Original;
-        Vector3 rawMuzzle = muzzle != null ? muzzle.position : Vector3.zero;
-        Transform? sight = player.ProceduralWeaponAnimation?.CurrentScope?.Bone;
-        Quaternion rawSight = sight != null ? sight.rotation : Quaternion.identity;
         AlignToCameraCore(player, cameraPosition, cameraRotation);
-        if (muzzle != null)
-            Probe.Record(player, cameraPosition, cameraRotation, rawMuzzle, muzzle.position, _smoothLook, _bodyLook, _lagLook, FollowDelay,
-                rawSight, sight != null ? sight.rotation : Quaternion.identity, _turn);
-        Probe.RecordCollimators(player, cameraPosition, cameraRotation);
     }
 
     private static void AlignToCameraCore(Player player, Vector3 cameraPosition, Quaternion cameraRotation)

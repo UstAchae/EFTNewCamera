@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "Justachae 的第三人称骨架与镜头";
-    public const string PluginVersion = "0.1.180";
+    public const string PluginVersion = "0.1.181";
 
     private void Awake()
     {
@@ -222,7 +222,6 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
     private void LateUpdate()
     {
         NewCameraSwitch.LateUpdate();
-        ReticleAfterTaa.LateUpdate();
     }
 }
 
