@@ -518,7 +518,10 @@ internal static class AimArms
         _mountBlend = Mathf.MoveTowards(_mountBlend, want ? 1f : 0f, Time.deltaTime / BlendSeconds);
         float along = _mountBlend * _mountBlend * (3f - 2f * _mountBlend);
         if (along <= 0.0001f)
+        {
+            AimGrenadePicture(player);
             return false;
+        }
 
         // The camera stays fixed on the head. Ease that camera onto the planted sight, and back off it.
         Quaternion fromCamera = CameraDirection.Resolve(head.rotation);
@@ -543,6 +546,7 @@ internal static class AimArms
         for (int i = 0; i < planted.Length; i++)
             planted[i].Transform.SetPositionAndRotation(planted[i].Position, planted[i].Rotation);
         ApplyMountedLook(bones, head);
+        AimGrenadePicture(player);
         return true;
     }
 
@@ -655,14 +659,6 @@ internal static class AimArms
             if (flat.sqrMagnitude < 0.0001f)
                 return false;
             flat.Normalize();
-            try
-            {
-                animation.AdjustOpticsPAG17();
-            }
-            catch
-            {
-            }
-
             rotation = Quaternion.LookRotation(flat, Vector3.up);
             position = eye;
             return true;
@@ -683,14 +679,68 @@ internal static class AimArms
 
     private static bool GrenadeLauncher(Player player)
     {
-        StationaryWeapon? weapon = player.MovementContext?.StationaryWeapon;
-        return weapon != null && weapon.Animation == StationaryWeapon.EStationaryAnimationType.AGS_17;
+        return StationaryHeld(player, out StationaryWeapon? weapon)
+            && weapon!.Animation == StationaryWeapon.EStationaryAnimationType.AGS_17;
     }
 
     private static bool MachineGun(Player player)
     {
-        StationaryWeapon? weapon = player.MovementContext?.StationaryWeapon;
-        return weapon != null && weapon.Animation != StationaryWeapon.EStationaryAnimationType.AGS_17;
+        return StationaryHeld(player, out StationaryWeapon? weapon)
+            && weapon!.Animation != StationaryWeapon.EStationaryAnimationType.AGS_17;
+    }
+
+    private static bool StationaryHeld(Player player, out StationaryWeapon? weapon)
+    {
+        weapon = null;
+        if (player.HandsController == null || player.MovementContext == null || !player.MovementContext.IsStationaryWeaponInHands)
+            return false;
+        weapon = player.MovementContext.StationaryWeapon;
+        return weapon != null;
+    }
+
+    // The launcher sight stays level. The picture inside it has to look at the same point the round will reach,
+    // using the barrel pose after the body has been moved. The optic camera already copied its pivot earlier this frame.
+    private static void AimGrenadePicture(Player player)
+    {
+        if (!GrenadeLauncher(player) || player.HandsController is not Player.FirearmController firearm || !firearm.IsAiming)
+            return;
+        if (firearm.Weapon == null || firearm.CurrentFireport?.Original == null)
+            return;
+        ProceduralWeaponAnimation? animation = player.ProceduralWeaponAnimation;
+        Transform? root = animation?.HandsContainer?.RootJoint;
+        if (animation == null || root == null)
+            return;
+
+        Vector3 start = firearm.CurrentFireport.position;
+        Vector3 direction = firearm.WeaponDirection;
+        if (direction.sqrMagnitude < 0.0001f)
+            return;
+
+        Vector3 prediction;
+        try
+        {
+            prediction = firearm.Weapon.ZeroLevelPosition(direction, start, start.y - root.position.y + animation._agsDeltaHeight, out float time);
+            if (time <= 0f)
+                return;
+            animation.OpticLookAtGlobal(prediction);
+        }
+        catch
+        {
+            return;
+        }
+
+        OpticSight? sight = animation.CurrentScope?.ScopePrefabCache?.CurrentModOpticSight;
+        Transform? pivot = sight?.ScopeData != null ? sight.ScopeData.transform : null;
+        Camera? optic = null;
+        try
+        {
+            optic = CameraManager.Instance?.OpticCameraManager?.Camera;
+        }
+        catch
+        {
+        }
+        if (pivot != null && optic != null)
+            optic.transform.SetPositionAndRotation(pivot.position, pivot.rotation);
     }
 
     internal static Quaternion KickView(Quaternion view)
