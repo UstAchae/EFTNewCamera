@@ -118,10 +118,6 @@ internal static class AimArms
     internal static float RecoilKick = 1f;
     private static bool _mounted;
     private static Quaternion _viewKick = Quaternion.identity;
-    private static bool _hasPlant;
-    private static int _plantSightId;
-    private static Quaternion _plantRot = Quaternion.identity;
-    private static Vector3 _plantSight;
     private static int _shotFrame = -1;
     private static Vector3? _shotFireport;
     private static readonly List<MonoBehaviour> DeferredLasers = new();
@@ -281,48 +277,28 @@ internal static class AimArms
                 : null;
             if (bone != null)
                 sightPoint = bone.position;
-            if (aiming && bone != null && animation != null)
+            if (aiming && _mounted)
+            {
+                // The mounted hip pose is already the aim pose. Leave the gun there.
+            }
+            else if (aiming && bone != null && animation != null)
             {
                 sightId = bone.GetInstanceID();
                 float relief = SightRelief(animation, bone);
                 Vector3 aimPoint = new Vector3(0f, 0f, ForwardDistance + relief);
                 Transform? root = bones.Weapon_Root_Anim;
-                if (_mounted && root != null)
-                {
-                    // Put the sight on the aim direction, and keep that pose. The aim direction
-                    // does not include turning the head, so the gun stays where it was aimed.
-                    SteadyHead(player, cameraPosition, cameraRotation, out Vector3 steadyPosition, out Quaternion steadyRotation);
-                    Quaternion bodyRotation = _bodyLook * Quaternion.Inverse(_smoothLook) * steadyRotation;
-                    Vector3 bodyPosition = CameraPosition.Resolve(steadyPosition - CameraPosition.Resolve(Vector3.zero, steadyRotation), bodyRotation);
-                    if (!_hasPlant || sightId != _plantSightId)
-                    {
-                        Vector3 axis = bone.name == "aim_camera" ? -bone.up : -bone.forward;
-                        Quaternion align = Quaternion.FromToRotation(axis, bodyRotation * Vector3.forward);
-                        _plantRot = Quaternion.Inverse(bodyRotation) * (align * root.rotation);
-                        _plantSight = aimPoint;
-                        _hasPlant = true;
-                        _plantSightId = sightId;
-                    }
-
-                    Quaternion desired = bodyRotation * _plantRot;
-                    turn = desired * Quaternion.Inverse(root.rotation);
-                    target = bodyPosition + bodyRotation * _plantSight - bone.position;
-                }
+                SteadyHead(player, cameraPosition, cameraRotation, out Vector3 steadyPosition, out Quaternion steadyRotation);
+                Quaternion bodyRotation = _bodyLook * Quaternion.Inverse(_smoothLook) * steadyRotation;
+                Vector3 bodyPosition = CameraPosition.Resolve(steadyPosition - CameraPosition.Resolve(Vector3.zero, steadyRotation), bodyRotation);
+                if (bones.Weapon_Root_Third != null && root != null)
+                    Sway(animation, bones.Weapon_Root_Third, root, bone, sightId, bodyPosition, bodyRotation, aimPoint, out target, out turn);
                 else
-                {
-                    SteadyHead(player, cameraPosition, cameraRotation, out Vector3 steadyPosition, out Quaternion steadyRotation);
-                    Quaternion bodyRotation = _bodyLook * Quaternion.Inverse(_smoothLook) * steadyRotation;
-                    Vector3 bodyPosition = CameraPosition.Resolve(steadyPosition - CameraPosition.Resolve(Vector3.zero, steadyRotation), bodyRotation);
-                    if (bones.Weapon_Root_Third != null && root != null)
-                        Sway(animation, bones.Weapon_Root_Third, root, bone, sightId, bodyPosition, bodyRotation, aimPoint, out target, out turn);
-                    else
-                        target = bodyPosition - bone.position + bodyRotation * aimPoint;
+                    target = bodyPosition - bone.position + bodyRotation * aimPoint;
 
-                    Quaternion delay = _lagLook * Quaternion.Inverse(_bodyLook);
-                    Vector3 placed = bone.position + target;
-                    target = steadyPosition + delay * (placed - bodyPosition) - bone.position;
-                    turn = delay * turn;
-                }
+                Quaternion delay = _lagLook * Quaternion.Inverse(_bodyLook);
+                Vector3 placed = bone.position + target;
+                target = steadyPosition + delay * (placed - bodyPosition) - bone.position;
+                turn = delay * turn;
             }
             else if (!aiming && FollowDelay > 0f && player.HandsController is Player.FirearmController && bones.Weapon_Root_Anim != null)
             {
@@ -333,9 +309,6 @@ internal static class AimArms
                 turn = delay;
             }
         }
-
-        if (!aiming || !_mounted)
-            _hasPlant = false;
 
         if (!aiming)
         {
@@ -385,11 +358,11 @@ internal static class AimArms
         Quaternion carryTurn = _turn;
         Vector3 pivot = sightPoint ?? (bones.Weapon_Root_Anim != null ? bones.Weapon_Root_Anim.position : Vector3.zero);
         Quaternion kick = Quaternion.identity;
-        if (aiming)
+        if (aiming && !_mounted)
             kick = Recoil(player.ProceduralWeaponAnimation, bones.Weapon_Root_Anim, pivot, ref displacement, ref carryTurn);
-        else if (_mounted && bones.Weapon_Root_Anim != null)
+        else if (!aiming && _mounted && bones.Weapon_Root_Anim != null)
             kick = ShotKick(player.ProceduralWeaponAnimation, bones.Weapon_Root_Anim.rotation);
-        _viewKick = _mounted ? kick : Quaternion.identity;
+        _viewKick = !aiming && _mounted ? kick : Quaternion.identity;
         _laserDisplacement = displacement;
         _laserPivot = pivot;
         _laserTurn = carryTurn;
@@ -509,6 +482,35 @@ internal static class AimArms
             return Quaternion.identity;
 
         return Quaternion.Euler(space * (recoil * RecoilKick));
+    }
+
+    internal static bool MountedAimView(Player player, out Vector3 position, out Quaternion rotation)
+    {
+        position = default;
+        rotation = Quaternion.identity;
+        if (!_mounted || _freeLookWeight > 0f || player.HandsController == null || !player.HandsController.IsAiming)
+            return false;
+
+        ProceduralWeaponAnimation? animation = player.ProceduralWeaponAnimation;
+        Transform? bone = animation != null && animation.ScopeAimTransforms != null && animation.ScopeAimTransforms.Count > 0
+            ? animation.CurrentScope?.Bone
+            : null;
+        if (animation == null || bone == null)
+            return false;
+
+        Vector3 forward = bone.name == "aim_camera" ? -bone.up : -bone.forward;
+        if (forward.sqrMagnitude < 0.0001f)
+            return false;
+        forward.Normalize();
+        Vector3 up = Vector3.ProjectOnPlane(bone.name == "aim_camera" ? bone.forward : bone.up, forward);
+        if (up.sqrMagnitude < 0.0001f)
+            up = Vector3.ProjectOnPlane(Vector3.up, forward);
+        if (up.sqrMagnitude < 0.0001f)
+            return false;
+
+        rotation = Quaternion.LookRotation(forward, up);
+        position = CameraPosition.Resolve(bone.position - forward * (ForwardDistance + SightRelief(animation, bone)), rotation);
+        return true;
     }
 
     internal static Quaternion KickView(Quaternion view)
