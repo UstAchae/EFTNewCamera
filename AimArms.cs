@@ -616,6 +616,18 @@ internal static class AimArms
     {
         if (transform == null || transform == moved || !transform.IsChildOf(moved))
             return;
+
+        // A child kept beside its parent gets a world pose while the parent is still moving,
+        // which changes the grip. The parent's saved pose already brings the gun back with the hand.
+        for (int i = held.Count - 1; i >= 0; i--)
+        {
+            Transform kept = held[i].Transform;
+            if (transform == kept || transform.IsChildOf(kept))
+                return;
+            if (kept.IsChildOf(transform))
+                held.RemoveAt(i);
+        }
+
         held.Add(new HeldPose { Transform = transform, Position = transform.position, Rotation = transform.rotation });
     }
 
