@@ -89,6 +89,7 @@ internal static class AimArms
     private static Quaternion _headTurnRaw = Quaternion.identity;
     private static bool _hasYawCenter;
     private static float _yawCenter;
+    private static bool _steepLook;
     private static Quaternion _headTurnSmooth = Quaternion.identity;
     private static float _headLock;
     private static bool _hasObserved;
@@ -687,28 +688,36 @@ internal static class AimArms
         if (head == null || player.MovementContext == null || _freeLookWeight >= 1f)
             return;
 
-        Vector3 look = Vector3.ProjectOnPlane(CameraDirection.Resolve(head.rotation) * Vector3.forward, Vector3.up);
-        // Near straight up or down this flat direction shrinks away. A small twist from the run
-        // animation then reads as a large left-right turn, and correcting it swings the head.
-        float trust = Mathf.InverseLerp(0.05f, 0.2f, look.magnitude);
-        if (trust <= 0f)
+        Quaternion cam = CameraDirection.Resolve(head.rotation);
+        Vector3 forwardFlat = Vector3.ProjectOnPlane(cam * Vector3.forward, Vector3.up);
+        Vector3 upFlat = Vector3.ProjectOnPlane(cam * Vector3.up, Vector3.up);
+        // Near straight down the flat part of the view direction shrinks away, and the run
+        // animation's tilt becomes a left-right turn. The camera's up lies flat in that pose.
+        bool wasSteep = _steepLook;
+        if (_steepLook)
+            _steepLook = upFlat.sqrMagnitude > forwardFlat.sqrMagnitude * 0.7f;
+        else
+            _steepLook = upFlat.sqrMagnitude > forwardFlat.sqrMagnitude * 1.4f;
+
+        Vector3 flat = _steepLook ? upFlat : forwardFlat;
+        if (flat.sqrMagnitude < 0.0001f)
             return;
 
-        float yaw = Vector3.SignedAngle(Quaternion.Euler(0f, player.MovementContext.Rotation.x, 0f) * Vector3.forward, look, Vector3.up);
-        if (_freeLookWeight <= 0f && trust >= 1f)
+        float yaw = Vector3.SignedAngle(Quaternion.Euler(0f, player.MovementContext.Rotation.x, 0f) * Vector3.forward, flat, Vector3.up);
+        if (_freeLookWeight <= 0f)
         {
-            if (!_hasYawCenter)
+            if (!_hasYawCenter || wasSteep != _steepLook)
             {
                 _yawCenter = yaw;
                 _hasYawCenter = true;
             }
             else
-                _yawCenter = Mathf.Lerp(_yawCenter, yaw, 1f - Mathf.Exp(-Time.deltaTime / 0.5f));
+                _yawCenter = Mathf.LerpAngle(_yawCenter, yaw, 1f - Mathf.Exp(-Time.deltaTime / 0.5f));
         }
 
         float moving = Mathf.Clamp01(player.MovementContext.ActualLinearVelocity / 0.6f);
         float keep = Mathf.Lerp(1f, WalkHeadSway, moving);
-        float fix = (_yawCenter + (yaw - _yawCenter) * keep - yaw) * (1f - _freeLookWeight) * trust;
+        float fix = Mathf.DeltaAngle(yaw, _yawCenter) * (1f - keep) * (1f - _freeLookWeight);
         if (Mathf.Abs(fix) > 0.01f)
             head.rotation = Quaternion.AngleAxis(fix, Vector3.up) * head.rotation;
     }
