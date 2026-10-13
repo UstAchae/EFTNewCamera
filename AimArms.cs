@@ -73,12 +73,6 @@ internal static class AimArms
     private static Quaternion _gunTurnCenter = Quaternion.identity;
     private static float _sightCatch;
     private static Quaternion _lagLook = Quaternion.identity;
-    private static Quaternion _hipShown = Quaternion.identity;
-    private static bool _hasHipShown;
-    private static bool _hipSettling;
-    private static float _hipWatch;
-    private static float _hipTail;
-    private static int _hipWeaponId;
     private static Vector3 _gunMoveSmooth;
     private static Quaternion _gunTurnSmooth = Quaternion.identity;
     private static bool _hasChase;
@@ -272,7 +266,6 @@ internal static class AimArms
                 sightPoint = bone.position;
             if (aiming && bone != null && animation != null)
             {
-                ClearHipSettle();
                 sightId = bone.GetInstanceID();
                 float relief = SightRelief(animation, bone);
                 Vector3 aimPoint = new Vector3(0f, 0f, ForwardDistance + relief);
@@ -291,11 +284,12 @@ internal static class AimArms
             }
             else if (!aiming && FollowDelay > 0f && player.HandsController is Player.FirearmController && bones.Weapon_Root_Anim != null)
             {
+                Quaternion delay = _lagLook * Quaternion.Inverse(_smoothLook);
+                if (Quaternion.Angle(Quaternion.identity, delay) < 0.05f)
+                    delay = Quaternion.identity;
                 sightPoint = cameraPosition;
-                turn = HipSettle(bones.Weapon_Root_Anim);
+                turn = delay;
             }
-            else
-                ClearHipSettle();
         }
 
         if (!aiming)
@@ -811,77 +805,6 @@ internal static class AimArms
             physical.Stamina.RemoveConsumption(consumption);
     }
 
-    // After a flick, the gun eases onto its live pose instead of onto the mouse, so a
-    // late shove of the pose is eased in the same slowdown. The lag is written back so
-    // a new flick picks up from where the gun is shown.
-    private static Quaternion HipSettle(Transform weapon)
-    {
-        int weaponId = weapon.GetInstanceID();
-        if (weaponId != _hipWeaponId)
-        {
-            ClearHipSettle();
-            _hipWeaponId = weaponId;
-        }
-
-        float dt = Mathf.Max(Time.deltaTime, 0.0001f);
-        Quaternion live = weapon.rotation;
-        Quaternion delay = _lagLook * Quaternion.Inverse(_smoothLook);
-        float mouseSpeed = Quaternion.Angle(_bodyLook, _smoothLook) / dt;
-        if (mouseSpeed > 20f)
-        {
-            _hipWatch = FollowDelay + 0.25f;
-            _hipTail = 0.2f;
-        }
-        else if (_hipWatch > 0f)
-            _hipWatch = Mathf.Max(0f, _hipWatch - dt);
-
-        if (!_hasHipShown || mouseSpeed >= 15f || (!_hipSettling && _hipWatch <= 0f))
-        {
-            _hipShown = delay * live;
-            _hasHipShown = true;
-            _hipSettling = false;
-            if (_hipWatch <= 0f && Quaternion.Angle(Quaternion.identity, delay) < 0.05f)
-                return Quaternion.identity;
-            return delay;
-        }
-
-        _hipSettling = true;
-        float follow = FollowDelay;
-        if (_hipWatch <= 0f)
-        {
-            _hipTail = Mathf.Max(0f, _hipTail - dt);
-            follow *= _hipTail / 0.2f;
-        }
-        if (follow <= 0.001f || Quaternion.Angle(_hipShown, live) < 0.05f)
-        {
-            _hipShown = live;
-            _hipSettling = false;
-            SetLagTurn(Quaternion.identity);
-            return Quaternion.identity;
-        }
-
-        _hipShown = Quaternion.Slerp(_hipShown, live, 1f - Mathf.Exp(-dt / follow)).normalized;
-        if (Quaternion.Angle(_hipShown, live) > MaxDelayDegrees)
-            _hipShown = Quaternion.RotateTowards(live, _hipShown, MaxDelayDegrees);
-        Quaternion turn = _hipShown * Quaternion.Inverse(live);
-        SetLagTurn(turn);
-        return turn;
-    }
-
-    private static void SetLagTurn(Quaternion turn)
-    {
-        _lagLook = (turn * _smoothLook).normalized;
-    }
-
-    private static void ClearHipSettle()
-    {
-        _hasHipShown = false;
-        _hipSettling = false;
-        _hipWatch = 0f;
-        _hipTail = 0f;
-        _hipWeaponId = 0;
-    }
-
     private static bool UpdateTurn(Player player, Quaternion rawCamera)
     {
         Vector2 mouse;
@@ -1292,7 +1215,6 @@ internal static class AimArms
         _freeLookReturning = false;
         _pitchUnderLook = false;
         _headLock = 0f;
-        ClearHipSettle();
         RestoreSkins();
         if (!_suppress)
             return;
