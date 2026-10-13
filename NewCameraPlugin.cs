@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "Justachae 的第三人称骨架与镜头";
-    public const string PluginVersion = "0.1.198";
+    public const string PluginVersion = "0.1.199";
 
     private void Awake()
     {
@@ -30,21 +30,11 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         ReticleAfterTaa.Install();
         NewCameraSwitch.Enabled = enabled.Value;
         enabled.SettingChanged += (_, _) => NewCameraSwitch.Enabled = enabled.Value;
-        BindPoseWatch();
         BindDirection();
         BindPosition();
         BindAimDistance();
         BindSway();
         BindBody();
-    }
-
-    private void BindPoseWatch()
-    {
-        ConfigEntry<float> distance = Config.Bind("观战镜头", "距离", 5f,
-            new ConfigDescription("左下角观战镜头离角色多远，单位为米。只改这个窗口，不带动瞄准镜头。",
-                new AcceptableValueRange<float>(1f, 20f)));
-        distance.SettingChanged += (_, _) => PoseWatch.Distance = distance.Value;
-        PoseWatch.Distance = distance.Value;
     }
 
     private void BindBody()
@@ -222,12 +212,6 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         Camera.onPreCull -= NewCameraSwitch.OnCameraPreCull;
         Camera.onPreRender -= NewCameraSwitch.OnCameraPreRender;
         Camera.onPostRender -= ReticleAfterTaa.OnCameraPostRender;
-        PoseWatch.Release();
-    }
-
-    private void OnGUI()
-    {
-        PoseWatch.Draw();
     }
 
     private void Update()
@@ -238,7 +222,6 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
     private void LateUpdate()
     {
         NewCameraSwitch.LateUpdate();
-        PoseWatch.LateUpdate();
     }
 }
 
@@ -285,8 +268,7 @@ internal static class NewCameraSwitch
 
         bool main = camera.CompareTag("MainCamera");
         bool optic = OpticPicture.IsCamera(camera);
-        bool watch = PoseWatch.IsCamera(camera);
-        if (!main && !optic && !watch)
+        if (!main && !optic)
             return;
 
         if (main)
@@ -295,8 +277,7 @@ internal static class NewCameraSwitch
         Player? player = Singleton<GameWorld>.Instance?.MainPlayer;
         if (player == null || !player.IsYourPlayer)
         {
-            if (!watch)
-                AimArms.ReplayLasers(camera);
+            AimArms.ReplayLasers(camera);
             return;
         }
 
@@ -325,15 +306,11 @@ internal static class NewCameraSwitch
         }
 
         if (main && _poseFrame == Time.frameCount)
-        {
             camera.transform.SetPositionAndRotation(_posePosition, _poseRotation);
-            PoseWatch.LateUpdate();
-        }
         if (optic && _poseFrame == Time.frameCount)
             AimArms.CarryOptic(camera);
 
-        if (!watch)
-            AimArms.ReplayLasers(camera);
+        AimArms.ReplayLasers(camera);
     }
 
     internal static void OnCameraPreRender(Camera camera)

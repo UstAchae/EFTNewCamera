@@ -278,7 +278,7 @@ internal static class AimArms
                 : null;
             if (bone != null)
                 sightPoint = bone.position;
-            if (aiming && _mounted)
+            if (PlantedAim(player))
             {
                 // The mounted hip pose is already the aim pose. Leave the gun there.
                 _offset = Vector3.zero;
@@ -493,9 +493,19 @@ internal static class AimArms
         return Quaternion.Euler(space * (recoil * RecoilKick));
     }
 
+    // A bipod and a scene gun (the mounted machine gun or grenade launcher) both stay where they are.
+    // Aiming moves the head onto that sight instead of moving the gun.
+    private static bool PlantedAim(Player player)
+    {
+        if (player.HandsController == null || !player.HandsController.IsAiming || player.MovementContext == null)
+            return false;
+
+        return player.MovementContext.IsInMountedState || player.MovementContext.IsStationaryWeaponInHands;
+    }
+
     internal static bool TrackMountedSight(Player player)
     {
-        bool want = _mounted && player.HandsController != null && player.HandsController.IsAiming;
+        bool want = PlantedAim(player);
         PlayerBones? bones = player.PlayerBones;
         Transform? head = bones?.Head?.Original;
         if (bones == null || head == null || !SightCamera(player, out Vector3 cameraPosition, out Quaternion cameraRotation))
@@ -1205,8 +1215,7 @@ internal static class AimArms
         }
 
         offset = _smoothedHead;
-        if (player.MovementContext != null && player.MovementContext.IsInMountedState
-            && player.HandsController != null && player.HandsController.IsAiming)
+        if (PlantedAim(player))
             offset = Vector3.zero;
         if (player.HeadRotation.sqrMagnitude <= 0.01f && _smoothedHead.sqrMagnitude <= 0.01f)
             return;
