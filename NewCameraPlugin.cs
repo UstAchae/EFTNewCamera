@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "Justachae 的第三人称骨架与镜头";
-    public const string PluginVersion = "0.1.195";
+    public const string PluginVersion = "0.1.196";
 
     private void Awake()
     {
@@ -212,6 +212,12 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         Camera.onPreCull -= NewCameraSwitch.OnCameraPreCull;
         Camera.onPreRender -= NewCameraSwitch.OnCameraPreRender;
         Camera.onPostRender -= ReticleAfterTaa.OnCameraPostRender;
+        PoseWatch.Release();
+    }
+
+    private void OnGUI()
+    {
+        PoseWatch.Draw();
     }
 
     private void Update()
@@ -222,6 +228,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
     private void LateUpdate()
     {
         NewCameraSwitch.LateUpdate();
+        PoseWatch.LateUpdate();
     }
 }
 
@@ -306,7 +313,10 @@ internal static class NewCameraSwitch
         }
 
         if (main && _poseFrame == Time.frameCount)
+        {
             camera.transform.SetPositionAndRotation(_posePosition, _poseRotation);
+            PoseWatch.LateUpdate();
+        }
         if (optic && _poseFrame == Time.frameCount)
             AimArms.CarryOptic(camera);
 
