@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "Justachae 的第三人称骨架与镜头";
-    public const string PluginVersion = "0.1.190";
+    public const string PluginVersion = "0.1.191";
 
     private void Awake()
     {
@@ -254,6 +254,20 @@ internal static class NewCameraSwitch
         if (player == null || !player.IsYourPlayer)
             return;
 
+        if (InHideout())
+        {
+            if (_applied)
+            {
+                OpticPicture.Release();
+                AimArms.Release(player);
+                BodyVisibility.Restore();
+                if (player.PointOfView != EPointOfView.FirstPerson)
+                    player.PointOfView = EPointOfView.FirstPerson;
+            }
+            _applied = false;
+            return;
+        }
+
         if (player.PointOfView != EPointOfView.ThirdPerson)
             player.PointOfView = EPointOfView.ThirdPerson;
         AimArms.Apply(player);
@@ -263,7 +277,7 @@ internal static class NewCameraSwitch
 
     internal static void OnCameraPreCull(Camera camera)
     {
-        if (!Enabled || camera == null)
+        if (!Enabled || camera == null || InHideout())
             return;
 
         bool main = camera.CompareTag("MainCamera");
@@ -293,10 +307,10 @@ internal static class NewCameraSwitch
                 _posePosition = CameraPosition.Resolve(head.position, _poseRotation);
                 AimArms.ObserveHead(player, _posePosition, _poseRotation);
                 AimArms.AlignToCamera(player, _posePosition, _poseRotation);
-                if (AimArms.MountedAimView(player, out Vector3 mountedPosition, out Quaternion mountedRotation))
+                if (AimArms.TrackMountedSight(player))
                 {
-                    _posePosition = mountedPosition;
-                    _poseRotation = mountedRotation;
+                    _poseRotation = CameraDirection.Resolve(head.rotation);
+                    _posePosition = CameraPosition.Resolve(head.position, _poseRotation);
                 }
                 else
                     _poseRotation = AimArms.KickView(_poseRotation);
@@ -319,6 +333,12 @@ internal static class NewCameraSwitch
             return;
 
         HoldFieldOfView(camera);
+    }
+
+    private static bool InHideout()
+    {
+        GameWorld? world = Singleton<GameWorld>.Instance;
+        return world != null && world.LocationId == "hideout";
     }
 
     private static void HoldFieldOfView(Camera camera)

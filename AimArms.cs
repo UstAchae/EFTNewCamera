@@ -280,8 +280,16 @@ internal static class AimArms
             if (aiming && _mounted)
             {
                 // The mounted hip pose is already the aim pose. Leave the gun there.
+                _offset = Vector3.zero;
+                _turn = Quaternion.identity;
+                _blend = 1f;
+                _blendAiming = true;
+                _blendSightId = 0;
+                _hasLaserDisplacement = false;
+                _viewKick = Quaternion.identity;
+                return;
             }
-            else if (aiming && bone != null && animation != null)
+            if (aiming && bone != null && animation != null)
             {
                 sightId = bone.GetInstanceID();
                 float relief = SightRelief(animation, bone);
@@ -484,13 +492,86 @@ internal static class AimArms
         return Quaternion.Euler(space * (recoil * RecoilKick));
     }
 
-    internal static bool MountedAimView(Player player, out Vector3 position, out Quaternion rotation)
+    internal static bool TrackMountedSight(Player player)
     {
-        position = default;
-        rotation = Quaternion.identity;
         if (!_mounted || _freeLookWeight > 0f || player.HandsController == null || !player.HandsController.IsAiming)
             return false;
 
+        PlayerBones? bones = player.PlayerBones;
+        Transform? head = bones?.Head?.Original;
+        if (bones == null || head == null || !SightCamera(player, out Vector3 cameraPosition, out Quaternion cameraRotation))
+            return false;
+
+        // The camera stays fixed on the head. Move the head so that camera lands on the planted sight.
+        Quaternion headRotation = CameraDirection.Unresolve(cameraRotation);
+        Vector3 headPosition = cameraPosition - CameraPosition.Resolve(Vector3.zero, cameraRotation);
+        Quaternion turn = headRotation * Quaternion.Inverse(head.rotation);
+        Vector3 displacement = headPosition - head.position;
+        Transform moved = FollowRoot(bones, head);
+        HeldPose[] planted = PlantedPoses(bones, moved);
+        EnsureUpperarms(player);
+        Carry(moved, head.position, displacement, turn);
+        for (int i = 0; i < planted.Length; i++)
+            planted[i].Transform.SetPositionAndRotation(planted[i].Position, planted[i].Rotation);
+        return true;
+    }
+
+    private struct HeldPose
+    {
+        internal Transform Transform;
+        internal Vector3 Position;
+        internal Quaternion Rotation;
+    }
+
+    // The torso follows the head. Stop at the waist so the legs stay, and keep the hands and gun
+    // where the bipod already planted them.
+    private static Transform FollowRoot(PlayerBones bones, Transform head)
+    {
+        Transform? pelvis = bones.Pelvis?.Original;
+        Transform? root = bones.RootJoint;
+        Transform best = head;
+        Transform? cursor = head.parent;
+        while (cursor != null && cursor != pelvis && cursor != root)
+        {
+            best = cursor;
+            if (cursor == bones.Spine1)
+                break;
+            cursor = cursor.parent;
+        }
+        return best;
+    }
+
+    private static HeldPose[] PlantedPoses(PlayerBones bones, Transform moved)
+    {
+        List<HeldPose> held = new();
+        Hold(held, bones.Weapon_Root_Anim, moved);
+        Hold(held, bones.Weapon_Root_Third, moved);
+        HoldAll(held, bones.Upperarms, moved);
+        HoldAll(held, bones.Forearms, moved);
+        Hold(held, bones.LeftPalm, moved);
+        Hold(held, bones.RightPalm, moved);
+        return held.ToArray();
+    }
+
+    private static void HoldAll(List<HeldPose> held, Transform[]? transforms, Transform moved)
+    {
+        if (transforms == null)
+            return;
+        foreach (Transform transform in transforms)
+            Hold(held, transform, moved);
+    }
+
+    private static void Hold(List<HeldPose> held, Transform? transform, Transform moved)
+    {
+        if (transform == null || transform == moved || !transform.IsChildOf(moved))
+            return;
+        held.Add(new HeldPose { Transform = transform, Position = transform.position, Rotation = transform.rotation });
+    }
+
+    private static bool SightCamera(Player player, out Vector3 position, out Quaternion rotation)
+    {
+        position = default;
+        rotation = Quaternion.identity;
         ProceduralWeaponAnimation? animation = player.ProceduralWeaponAnimation;
         Transform? bone = animation != null && animation.ScopeAimTransforms != null && animation.ScopeAimTransforms.Count > 0
             ? animation.CurrentScope?.Bone
@@ -509,7 +590,7 @@ internal static class AimArms
             return false;
 
         rotation = Quaternion.LookRotation(forward, up);
-        position = CameraPosition.Resolve(bone.position - forward * (ForwardDistance + SightRelief(animation, bone)), rotation);
+        position = bone.position - forward * (ForwardDistance + SightRelief(animation, bone));
         return true;
     }
 
