@@ -12,6 +12,11 @@ internal static class PoseWatch
     private static Camera? _camera;
     private static RenderTexture? _texture;
 
+    internal static bool IsCamera(Camera camera)
+    {
+        return _camera != null && camera == _camera;
+    }
+
     internal static void LateUpdate()
     {
         if (!NewCameraSwitch.Enabled)

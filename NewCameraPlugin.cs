@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "Justachae 的第三人称骨架与镜头";
-    public const string PluginVersion = "0.1.196";
+    public const string PluginVersion = "0.1.197";
 
     private void Awake()
     {
@@ -275,7 +275,8 @@ internal static class NewCameraSwitch
 
         bool main = camera.CompareTag("MainCamera");
         bool optic = OpticPicture.IsCamera(camera);
-        if (!main && !optic)
+        bool watch = PoseWatch.IsCamera(camera);
+        if (!main && !optic && !watch)
             return;
 
         if (main)
@@ -284,7 +285,8 @@ internal static class NewCameraSwitch
         Player? player = Singleton<GameWorld>.Instance?.MainPlayer;
         if (player == null || !player.IsYourPlayer)
         {
-            AimArms.ReplayLasers(camera);
+            if (!watch)
+                AimArms.ReplayLasers(camera);
             return;
         }
 
@@ -320,7 +322,8 @@ internal static class NewCameraSwitch
         if (optic && _poseFrame == Time.frameCount)
             AimArms.CarryOptic(camera);
 
-        AimArms.ReplayLasers(camera);
+        if (!watch)
+            AimArms.ReplayLasers(camera);
     }
 
     internal static void OnCameraPreRender(Camera camera)
