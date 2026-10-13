@@ -518,7 +518,17 @@ internal static class AimArms
         Transform moved = FollowRoot(bones, head);
         HeldPose[] planted = PlantedPoses(bones, moved);
         EnsureUpperarms(player);
+        EnsureBodySkins(player);
         Carry(moved, head.position, displacement, turn);
+        CarryLoose(bones.Ribcage?.Original, moved, head.position, displacement, turn);
+        CarryLoose(bones.Spine3?.Original, moved, head.position, displacement, turn);
+        if (bones.Shoulders != null)
+        {
+            foreach (Transform shoulder in bones.Shoulders)
+                CarryLoose(shoulder, moved, head.position, displacement, turn);
+        }
+        CarryLoose(bones.LeftShoulder?.Original, moved, head.position, displacement, turn);
+        CarryLoose(bones.RightShoulder?.Original, moved, head.position, displacement, turn);
         for (int i = 0; i < planted.Length; i++)
             planted[i].Transform.SetPositionAndRotation(planted[i].Position, planted[i].Rotation);
         ApplyMountedLook(bones, head);
@@ -549,8 +559,8 @@ internal static class AimArms
         internal Quaternion Rotation;
     }
 
-    // The torso follows the head. Stop at the waist so the legs stay, and keep the hands and gun
-    // where the bipod already planted them.
+    // The torso follows the head, from the waist up. Legs stay. A bone that is not under that
+    // chain still has to take the same step, or the chest and shoulders stay in the hip pose.
     private static Transform FollowRoot(PlayerBones bones, Transform head)
     {
         Transform? pelvis = bones.Pelvis?.Original;
@@ -560,11 +570,16 @@ internal static class AimArms
         while (cursor != null && cursor != pelvis && cursor != root)
         {
             best = cursor;
-            if (cursor == bones.Spine1)
-                break;
             cursor = cursor.parent;
         }
         return best;
+    }
+
+    private static void CarryLoose(Transform? bone, Transform moved, Vector3 pivot, Vector3 displacement, Quaternion turn)
+    {
+        if (bone == null || bone == moved || bone.IsChildOf(moved) || moved.IsChildOf(bone))
+            return;
+        Carry(bone, pivot, displacement, turn);
     }
 
     private static HeldPose[] PlantedPoses(PlayerBones bones, Transform moved)
@@ -572,7 +587,6 @@ internal static class AimArms
         List<HeldPose> held = new();
         Hold(held, bones.Weapon_Root_Anim, moved);
         Hold(held, bones.Weapon_Root_Third, moved);
-        HoldAll(held, bones.Upperarms, moved);
         HoldAll(held, bones.Forearms, moved);
         Hold(held, bones.LeftPalm, moved);
         Hold(held, bones.RightPalm, moved);
@@ -1400,17 +1414,47 @@ internal static class AimArms
             }
 
             if (!carriesArm)
-                continue;
-
-            Skins.Add(new SkinState
             {
-                Renderer = renderer,
-                ForceMatrix = renderer.forceMatrixRecalculationPerRender,
-                UpdateWhenOffscreen = renderer.updateWhenOffscreen
-            });
-            renderer.forceMatrixRecalculationPerRender = true;
-            renderer.updateWhenOffscreen = true;
+                RememberSkin(renderer);
+                continue;
+            }
+
+            RememberSkin(renderer);
         }
+    }
+
+    private static int _bodySkinOwner = int.MinValue;
+
+    private static void EnsureBodySkins(Player player)
+    {
+        int ownerId = player.GetInstanceID();
+        if (_bodySkinOwner == ownerId)
+            return;
+
+        _bodySkinOwner = ownerId;
+        foreach (SkinnedMeshRenderer renderer in player.GetComponentsInChildren<SkinnedMeshRenderer>(true))
+        {
+            if (renderer != null)
+                RememberSkin(renderer);
+        }
+    }
+
+    private static void RememberSkin(SkinnedMeshRenderer renderer)
+    {
+        foreach (SkinState skin in Skins)
+        {
+            if (skin.Renderer == renderer)
+                return;
+        }
+
+        Skins.Add(new SkinState
+        {
+            Renderer = renderer,
+            ForceMatrix = renderer.forceMatrixRecalculationPerRender,
+            UpdateWhenOffscreen = renderer.updateWhenOffscreen
+        });
+        renderer.forceMatrixRecalculationPerRender = true;
+        renderer.updateWhenOffscreen = true;
     }
 
     private static bool IsUpperarm(string name)
@@ -1432,6 +1476,7 @@ internal static class AimArms
         Skins.Clear();
         Upperarms.Clear();
         _skinOwnerId = 0;
+        _bodySkinOwner = int.MinValue;
     }
 
     internal static void Release(Player? player)
