@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "Justachae 的第三人称骨架与镜头";
-    public const string PluginVersion = "0.1.191";
+    public const string PluginVersion = "0.1.192";
 
     private void Awake()
     {
@@ -254,20 +254,6 @@ internal static class NewCameraSwitch
         if (player == null || !player.IsYourPlayer)
             return;
 
-        if (InHideout())
-        {
-            if (_applied)
-            {
-                OpticPicture.Release();
-                AimArms.Release(player);
-                BodyVisibility.Restore();
-                if (player.PointOfView != EPointOfView.FirstPerson)
-                    player.PointOfView = EPointOfView.FirstPerson;
-            }
-            _applied = false;
-            return;
-        }
-
         if (player.PointOfView != EPointOfView.ThirdPerson)
             player.PointOfView = EPointOfView.ThirdPerson;
         AimArms.Apply(player);
@@ -277,7 +263,7 @@ internal static class NewCameraSwitch
 
     internal static void OnCameraPreCull(Camera camera)
     {
-        if (!Enabled || camera == null || InHideout())
+        if (!Enabled || camera == null)
             return;
 
         bool main = camera.CompareTag("MainCamera");
@@ -333,12 +319,6 @@ internal static class NewCameraSwitch
             return;
 
         HoldFieldOfView(camera);
-    }
-
-    private static bool InHideout()
-    {
-        GameWorld? world = Singleton<GameWorld>.Instance;
-        return world != null && world.LocationId == "hideout";
     }
 
     private static void HoldFieldOfView(Camera camera)
