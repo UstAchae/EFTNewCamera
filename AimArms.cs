@@ -424,6 +424,8 @@ internal static class AimArms
 
     private static void AdjustShotPrefix(Player.FirearmController __instance, ref Vector3 position, ref Vector3 direction)
     {
+        if (NewCameraSwitch.Enabled)
+            LogGrenadeShot(__instance, position, direction);
         if (!NewCameraSwitch.Enabled || !_hasLaserDisplacement || Time.frameCount - _shotFrame > 2)
             return;
         Player? player = Singleton<GameWorld>.Instance?.MainPlayer;
@@ -711,6 +713,18 @@ internal static class AimArms
         if (animation == null || root == null)
             return;
 
+        if (Mathf.Abs(animation.Pitch - _grenadePanelPitch) > 0.1f)
+        {
+            _grenadePanelPitch = animation.Pitch;
+            try
+            {
+                player.ShowAmmoCountZeroingPanel($"{0f - animation.Pitch:F1} | {animation._agsDeltaHeight:F1}M");
+            }
+            catch
+            {
+            }
+        }
+
         Vector3 start = firearm.CurrentFireport.position;
         Vector3 direction = firearm.WeaponDirection;
         if (direction.sqrMagnitude < 0.0001f)
@@ -741,6 +755,71 @@ internal static class AimArms
         }
         if (pivot != null && optic != null)
             optic.transform.SetPositionAndRotation(pivot.position, pivot.rotation);
+    }
+
+    private static float _grenadePanelPitch = 1000f;
+    private static readonly BepInEx.Logging.ManualLogSource GrenadeLog = BepInEx.Logging.Logger.CreateLogSource("EFTNewCamera.AGS");
+
+    // One line per launcher round: where the reticle points, where the game's sight formula aims,
+    // and where the round's own trajectory first meets the world.
+    private static void LogGrenadeShot(Player.FirearmController firearm, Vector3 start, Vector3 direction)
+    {
+        Player? player = Singleton<GameWorld>.Instance?.MainPlayer;
+        if (player == null || !ReferenceEquals(player.HandsController, firearm) || !GrenadeLauncher(player) || firearm.Weapon == null)
+            return;
+
+        try
+        {
+            ProceduralWeaponAnimation? animation = player.ProceduralWeaponAnimation;
+            Transform? root = animation?.HandsContainer?.RootJoint;
+            if (animation == null || root == null || direction.sqrMagnitude < 0.0001f)
+                return;
+
+            int mask = LayersMaskController.HighPolyWithTerrainMask;
+            float feet = root.position.y;
+            Vector3 predicted = firearm.Weapon.ZeroLevelPosition(direction.normalized, start, start.y - feet + animation._agsDeltaHeight, out float time);
+            string landed = "none";
+            var trajectory = firearm.Weapon._opticTrajectoryInfosForAGS;
+            if (trajectory != null)
+            {
+                Vector3 previous = start;
+                for (float t = 0.05f; t <= 12f; t += 0.02f)
+                {
+                    EFT.Ballistics.Shot.PredictedTrajectoryCalculation(out Vector3 point, out _, trajectory, t);
+                    if (Physics.Linecast(previous, point, out RaycastHit ground, mask))
+                    {
+                        landed = Describe(ground.point, start, feet);
+                        break;
+                    }
+                    previous = point;
+                }
+            }
+
+            string reticle = "none";
+            float offAxis = -1f;
+            Camera? optic = CameraManager.Instance?.OpticCameraManager?.Camera;
+            if (optic != null)
+            {
+                Transform eye = optic.transform;
+                offAxis = Vector3.Angle(eye.forward, predicted - eye.position);
+                if (Physics.Raycast(eye.position, eye.forward, out RaycastHit seen, 3000f, mask))
+                    reticle = Describe(seen.point, start, feet);
+            }
+
+            GrenadeLog.LogInfo($"pitch={0f - animation.Pitch:F1} height={animation._agsDeltaHeight:F1} speedFactor={firearm.Weapon.SpeedFactor:F2} " +
+                $"formula={Describe(predicted, start, feet)} t={time:F2} reticleVsFormula={offAxis:F2}deg reticle={reticle} landed={landed}");
+        }
+        catch (System.Exception error)
+        {
+            GrenadeLog.LogWarning(error.Message);
+        }
+    }
+
+    private static string Describe(Vector3 point, Vector3 start, float feet)
+    {
+        Vector3 flat = point - start;
+        flat.y = 0f;
+        return $"(range {flat.magnitude:F0}m, {point.y - feet:+0.0;-0.0}m from feet)";
     }
 
     internal static Quaternion KickView(Quaternion view)
