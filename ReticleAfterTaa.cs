@@ -23,6 +23,7 @@ internal static class ReticleAfterTaa
     private static readonly List<CollimatorSight> Sights = new List<CollimatorSight>();
     private static readonly List<(GameObject Target, int Layer)> Hidden = new List<(GameObject, int)>();
     private static bool _installed;
+    private static bool _logged;
 
     internal static void Install()
     {
@@ -38,20 +39,57 @@ internal static class ReticleAfterTaa
         _installed = true;
     }
 
+    internal static void LateUpdate()
+    {
+        // Hide before any camera culls. Restoring here covers a frame where the main camera never finished.
+        Restore();
+        HideHeldReticles();
+    }
+
     internal static void OnCameraPostRender(Camera camera)
     {
-        Restore();
+        if (camera != null && camera.CompareTag("MainCamera"))
+            Restore();
     }
 
     private static void RenderPostfix(PostProcessRenderContext context)
     {
-        Restore();
         Camera camera = context.camera;
-        if (!Enabled || camera == null || !camera.CompareTag("MainCamera"))
+        if (!Enabled || camera == null || !camera.CompareTag("MainCamera") || Hidden.Count == 0)
             return;
 
         PostProcessLayer layer = camera.GetComponent<PostProcessLayer>();
         if (layer == null || ResolveDisabledField?.GetValue(layer) is true)
+            return;
+
+        // The camera is still on the jittered matrix here. The housing is resolved by TAA, so the reticle has to
+        // use the stable matrix or it sits a pixel off the housing. Put the jittered matrix back afterwards so
+        // the rest of this buffer (bloom, color) keeps the matrices it expects.
+        Matrix4x4 view = camera.worldToCameraMatrix;
+        Matrix4x4 jittered = camera.projectionMatrix;
+        context.command.SetViewProjectionMatrices(view, camera.nonJitteredProjectionMatrix);
+        context.command.SetRenderTarget(context.destination, UnityEngine.Rendering.BuiltinRenderTextureType.Depth);
+        foreach ((GameObject target, int _) in Hidden)
+        {
+            if (target == null)
+                continue;
+            MeshRenderer renderer = target.GetComponent<MeshRenderer>();
+            if (renderer == null || renderer.sharedMaterial == null)
+                continue;
+            // The transform is read when the buffer runs, after the gun has been aligned to the camera.
+            context.command.DrawRenderer(renderer, renderer.sharedMaterial, 0, 0);
+        }
+        context.command.SetViewProjectionMatrices(view, jittered);
+    }
+
+    private static void HideHeldReticles()
+    {
+        if (!Enabled)
+            return;
+
+        Camera? camera = Camera.main;
+        PostProcessLayer? layer = camera != null ? camera.GetComponent<PostProcessLayer>() : null;
+        if (layer == null || layer.antialiasingMode != PostProcessLayer.Antialiasing.TemporalAntialiasing || ResolveDisabledField?.GetValue(layer) is true)
             return;
 
         Player? player = Singleton<GameWorld>.Instance?.MainPlayer;
@@ -63,7 +101,6 @@ internal static class ReticleAfterTaa
             return;
 
         muzzle.root.GetComponentsInChildren(false, Sights);
-        bool any = false;
         foreach (CollimatorSight sight in Sights)
         {
             MeshRenderer renderer = sight.CollimatorMeshRenderer;
@@ -74,16 +111,15 @@ internal static class ReticleAfterTaa
             if (target.layer == HiddenLayer)
                 continue;
 
-            if (!any)
-            {
-                context.command.SetRenderTarget(context.destination);
-                any = true;
-            }
             Hidden.Add((target, target.layer));
             target.layer = HiddenLayer;
-            context.command.DrawRenderer(renderer, renderer.sharedMaterial, 0, 0);
         }
         Sights.Clear();
+        if (!_logged && Hidden.Count > 0)
+        {
+            _logged = true;
+            Debug.Log("[EFTNewCamera] collimator reticles are drawn after TAA while aiming");
+        }
     }
 
     private static void Restore()
