@@ -66,6 +66,117 @@ internal static class Probe
         _lines++;
     }
 
+    private static StreamWriter? _sightWriter;
+    private static int _sightLines;
+    private static bool _wasAiming;
+    private static CollimatorSight[] _sights = new CollimatorSight[0];
+
+    internal static void RecordCollimators(Player player, Vector3 cameraPosition, Quaternion cameraRotation)
+    {
+        bool aiming = player.HandsController != null && player.HandsController.IsAiming;
+        bool started = aiming && !_wasAiming;
+        _wasAiming = aiming;
+        if (!aiming || _sightLines >= MaxLines)
+            return;
+
+        if (_sightWriter == null)
+        {
+            string path = Path.Combine(BepInEx.Paths.BepInExRootPath, "EFTNewCamera_collimator.txt");
+            _sightWriter = new StreamWriter(path, false, Encoding.UTF8) { AutoFlush = true };
+        }
+
+        CultureInfo c = CultureInfo.InvariantCulture;
+        if (started)
+        {
+            _sights = Object.FindObjectsOfType<CollimatorSight>(true);
+            _sightWriter.WriteLine($"# aim start frame {Time.frameCount}, CollimatorSight count {_sights.Length}");
+            foreach (CollimatorSight s in _sights)
+                DumpSight(s, c);
+            foreach (MeshRenderer r in Object.FindObjectsOfType<MeshRenderer>())
+            {
+                foreach (Material m in r.sharedMaterials)
+                {
+                    if (m != null && m.shader != null && m.shader.name.Contains("Collimator"))
+                        _sightWriter.WriteLine($"#   renderer with collimator shader: {PathOf(r.transform)} enabled={r.enabled} active={r.gameObject.activeInHierarchy} layer={r.gameObject.layer} mat={m.name}#{m.GetInstanceID()}");
+                }
+            }
+            foreach (Camera cam in Camera.allCameras)
+                _sightWriter.WriteLine($"#   camera {cam.name} enabled={cam.enabled} depth={cam.depth} mask={cam.cullingMask:X8} target={(cam.targetTexture != null ? cam.targetTexture.name : "screen")} main={(cam == Camera.main)}");
+            _sightWriter.WriteLine("frame,time,dt,index,visible,posX,posY,dist,axisX,axisY,fwdX,fwdY,localRotX,localRotY,localRotZ");
+            _sightLines += 2;
+        }
+
+        Quaternion toCamera = Quaternion.Inverse(cameraRotation);
+        for (int i = 0; i < _sights.Length; i++)
+        {
+            CollimatorSight s = _sights[i];
+            if (s == null || !s.isActiveAndEnabled || s.CollimatorMeshRenderer == null || !s.CollimatorMeshRenderer.enabled)
+                continue;
+            Transform t = s.transform;
+            Vector3 offset = toCamera * (t.position - cameraPosition);
+            ScreenAngles(offset, out float posX, out float posY);
+            ScreenAngles(toCamera * -t.up, out float axisX, out float axisY);
+            ScreenAngles(toCamera * t.forward, out float fwdX, out float fwdY);
+            Vector3 local = t.localRotation.eulerAngles;
+            _sightWriter.WriteLine(string.Join(",",
+                Time.frameCount.ToString(c),
+                Time.time.ToString("F4", c),
+                Time.deltaTime.ToString("F4", c),
+                i.ToString(c),
+                s.CollimatorMeshRenderer.isVisible ? "1" : "0",
+                posX.ToString("F4", c), posY.ToString("F4", c),
+                offset.magnitude.ToString("F4", c),
+                axisX.ToString("F4", c), axisY.ToString("F4", c),
+                fwdX.ToString("F4", c), fwdY.ToString("F4", c),
+                Wrap(local.x).ToString("F4", c), Wrap(local.y).ToString("F4", c), Wrap(local.z).ToString("F4", c)));
+            _sightLines++;
+        }
+    }
+
+    private static void DumpSight(CollimatorSight s, CultureInfo c)
+    {
+        MeshRenderer r = s.CollimatorMeshRenderer;
+        MeshFilter f = s.GetComponent<MeshFilter>();
+        Material? shared = r != null ? r.sharedMaterial : null;
+        Material? m = s.CollimatorMaterial;
+        _sightWriter!.WriteLine($"#   sight {PathOf(s.transform)} active={s.isActiveAndEnabled} rendererEnabled={(r != null && r.enabled)} layer={s.gameObject.layer} "
+            + $"mesh={(f != null && f.sharedMesh != null ? f.sharedMesh.name + " verts=" + f.sharedMesh.vertexCount : "none")} "
+            + $"materials={(r != null ? r.sharedMaterials.Length : 0)} sharedMat={(shared != null ? shared.name + "#" + shared.GetInstanceID() : "none")} "
+            + $"collimatorMat={(m != null ? m.name + "#" + m.GetInstanceID() : "none")} lossyScale={s.transform.lossyScale.ToString("F4")}");
+        if (m == null || m.shader == null)
+            return;
+        Shader sh = m.shader;
+        _sightWriter.WriteLine($"#     shader {sh.name} passes={m.passCount} queue={m.renderQueue} keywords=[{string.Join(" ", m.shaderKeywords)}]");
+        for (int p = 0; p < sh.GetPropertyCount(); p++)
+        {
+            string name = sh.GetPropertyName(p);
+            string value = sh.GetPropertyType(p) switch
+            {
+                UnityEngine.Rendering.ShaderPropertyType.Color => m.GetColor(name).ToString("F4"),
+                UnityEngine.Rendering.ShaderPropertyType.Vector => m.GetVector(name).ToString("F4"),
+                UnityEngine.Rendering.ShaderPropertyType.Float or UnityEngine.Rendering.ShaderPropertyType.Range => m.GetFloat(name).ToString("F4", c),
+                UnityEngine.Rendering.ShaderPropertyType.Texture => TextureText(m, name),
+                _ => "?",
+            };
+            _sightWriter.WriteLine($"#     {name} ({sh.GetPropertyType(p)}) = {value}");
+        }
+    }
+
+    private static string TextureText(Material m, string name)
+    {
+        Texture t = m.GetTexture(name);
+        string text = t != null ? $"{t.name} {t.width}x{t.height} filter={t.filterMode} wrap={t.wrapMode} mips={t.mipmapCount}" : "none";
+        return text + $" scale={m.GetTextureScale(name).ToString("F4")} offset={m.GetTextureOffset(name).ToString("F4")}";
+    }
+
+    private static string PathOf(Transform t)
+    {
+        string path = t.name;
+        for (Transform p = t.parent; p != null; p = p.parent)
+            path = p.name + "/" + path;
+        return path;
+    }
+
     private static void ScreenAngles(Vector3 local, out float x, out float y)
     {
         x = Mathf.Atan2(local.x, local.z) * Mathf.Rad2Deg;

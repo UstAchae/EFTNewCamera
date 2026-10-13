@@ -258,6 +258,7 @@ internal static class AimArms
         if (muzzle != null)
             Probe.Record(player, cameraPosition, cameraRotation, rawMuzzle, muzzle.position, _smoothLook, _bodyLook, _lagLook, FollowDelay,
                 rawSight, sight != null ? sight.rotation : Quaternion.identity, _turn);
+        Probe.RecordCollimators(player, cameraPosition, cameraRotation);
     }
 
     private static void AlignToCameraCore(Player player, Vector3 cameraPosition, Quaternion cameraRotation)
