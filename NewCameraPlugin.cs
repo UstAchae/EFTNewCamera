@@ -12,13 +12,13 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "Justachae 的第三人称骨架与镜头";
-    public const string PluginVersion = "0.1.220";
+    public const string PluginVersion = "0.1.221";
 
     private void Awake()
     {
         ConfigEntry<bool> enabled = Config.Bind("新镜头", "总开关", false,
             "打开后使用第三人称骨架，并把游戏镜头挂在人物头部。");
-        ConfigEntry<float> walkHead = Config.Bind("新镜头", "走路摇头", 0f,
+        ConfigEntry<float> walkHead = Config.Bind("新镜头", "走路摇头", 0.2f,
             new ConfigDescription("走路和跑步时，把头的左右转动收到平均朝向上。镜头仍按原来的固定位置挂在头上，和头一起转。0 是不摇头，1 是游戏原样。站着不动和中键扭头不受影响。",
                 new AcceptableValueRange<float>(0f, 1f)));
         walkHead.SettingChanged += (_, _) => AimArms.WalkHeadSway = walkHead.Value;
@@ -43,33 +43,29 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
             "画出自己的头。关掉时头只投阴影，画面里看不见。");
         ConfigEntry<bool> showHeadwear = Config.Bind("人物", "显示头部装备", true,
             "画出头盔和帽子。关掉后整个头部装备都不画。打开时，夜视和热成像要等自己的滤镜真正亮起，才把那一台设备藏起来，滤镜关掉就再画出来。");
-        ConfigEntry<bool> showFaceCover = Config.Bind("人物", "显示面部装备", true,
+        ConfigEntry<bool> showFaceCover = Config.Bind("人物", "显示面部装备", false,
             "画出面罩和头套。关掉后整个面部装备都不画。上面挂的夜视或热成像，同样等自己的滤镜亮起才藏。");
-        ConfigEntry<bool> showEyewear = Config.Bind("人物", "显示眼部装备", true,
+        ConfigEntry<bool> showEyewear = Config.Bind("人物", "显示眼部装备", false,
             "画出眼镜和护目镜。关掉后整个眼部装备都不画。上面挂的夜视或热成像，同样等自己的滤镜亮起才藏。");
-        ConfigEntry<bool> showVisor = Config.Bind("人物", "显示面罩滤镜", true,
+        ConfigEntry<bool> showVisor = Config.Bind("人物", "显示面罩滤镜", false,
             "画出面罩玻璃上的滤镜。关掉后玻璃还在，滤镜画面没有。");
-        ConfigEntry<float> headPitch = Config.Bind("人物", "头部仰俯", 0f,
+        ConfigEntry<float> headPitch = Config.Bind("人物", "头部仰俯", 28f,
             new ConfigDescription("只转头部模型，镜头保持原位。正值把脸往上抬，单位为度。",
                 new AcceptableValueRange<float>(-45f, 45f)));
-        ConfigEntry<float> freeLookYaw = Config.Bind("人物", "中键扭头角度", 70f,
+        ConfigEntry<float> freeLookYaw = Config.Bind("人物", "中键扭头角度", 80f,
             new ConfigDescription("按住鼠标中键自由看时，头最多往左或往右转多少度。",
                 new AcceptableValueRange<float>(30f, 150f)));
-        ConfigEntry<float> freeLookDown = Config.Bind("人物", "中键低头额外角度", 0f,
+        ConfigEntry<float> freeLookDown = Config.Bind("人物", "中键低头额外角度", 20f,
             new ConfigDescription("按住鼠标中键自由看时，在原版能低头的角度上再多低多少度。0 是原版的范围。",
                 new AcceptableValueRange<float>(0f, 60f)));
-        ConfigEntry<float> axisForward = Config.Bind("人物", "中键扭头轴前后倾斜", 0f,
+        ConfigEntry<float> axisForward = Config.Bind("人物", "中键扭头轴前后倾斜", 5f,
             new ConfigDescription("中键左右扭头时绕的那根轴，0 是竖直。正值让轴的上端往前倒，负值往后倒，单位为度。",
-                new AcceptableValueRange<float>(-60f, 60f)));
-        ConfigEntry<float> axisSide = Config.Bind("人物", "中键扭头轴左右倾斜", 0f,
-            new ConfigDescription("中键左右扭头时绕的那根轴，0 是竖直。正值让轴的上端往右倒，负值往左倒，单位为度。",
                 new AcceptableValueRange<float>(-60f, 60f)));
         void Refresh()
         {
             AimArms.FreeLookYaw = freeLookYaw.Value;
             AimArms.FreeLookDownExtra = freeLookDown.Value;
             AimArms.LookAxisForward = axisForward.Value;
-            AimArms.LookAxisSide = axisSide.Value;
             BodyVisibility.ShowHead = showHead.Value;
             BodyVisibility.ShowHeadwear = showHeadwear.Value;
             BodyVisibility.ShowFaceCover = showFaceCover.Value;
@@ -87,7 +83,6 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         freeLookYaw.SettingChanged += (_, _) => Refresh();
         freeLookDown.SettingChanged += (_, _) => Refresh();
         axisForward.SettingChanged += (_, _) => Refresh();
-        axisSide.SettingChanged += (_, _) => Refresh();
         Refresh();
     }
 
@@ -112,8 +107,8 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
     private void BindPosition()
     {
         ConfigEntry<float> horizontal = BindMeters("镜头位置", "水平", 0f, "沿镜头右方向移动，单位为米。");
-        ConfigEntry<float> vertical = BindMeters("镜头位置", "垂直", 0f, "沿镜头上方向移动，单位为米。");
-        ConfigEntry<float> forward = BindMeters("镜头位置", "前后", 0f, "沿镜头前方向移动，单位为米。");
+        ConfigEntry<float> vertical = BindMeters("镜头位置", "垂直", 0.08f, "沿镜头上方向移动，单位为米。");
+        ConfigEntry<float> forward = BindMeters("镜头位置", "前后", 0.08f, "沿镜头前方向移动，单位为米。");
         void Refresh()
         {
             CameraPosition.Horizontal = horizontal.Value;
@@ -129,13 +124,36 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 
     private void BindAimDistance()
     {
-        ConfigEntry<float> distance = BindMeters("瞄准", "前后距离", 0f, "瞄准后沿镜头前方向移动枪，单位为米。正值让枪离镜头更远。");
-        distance.SettingChanged += (_, _) => AimArms.ForwardDistance = distance.Value;
-        AimArms.ForwardDistance = distance.Value;
-        ConfigEntry<bool> reticle = Config.Bind("瞄准", "红点躲开TAA", true,
-            "瞄准中把全息和红点瞄具里的准星放到 TAA 或 DLSS 混合完再画，准星随呼吸小幅晃动时不再留虚影。这两个都没开时不起作用。");
-        reticle.SettingChanged += (_, _) => ReticleAfterTaa.Enabled = reticle.Value;
-        ReticleAfterTaa.Enabled = reticle.Value;
+        _aimDistance = Config.Bind("瞄准", "前后距离", 0f,
+            new ConfigDescription("瞄准后沿镜头前方向移动枪，单位为米。负值让枪离镜头更近。",
+                new AcceptableValueRange<float>(AimDistanceMin, AimDistanceMax)));
+        _aimDistanceFarther = Config.Bind("瞄准", "前后距离调远快捷键", new KeyboardShortcut(KeyCode.PageUp),
+            "按住时瞄准的前后距离慢慢变大，枪离镜头更远。");
+        _aimDistanceCloser = Config.Bind("瞄准", "前后距离调近快捷键", new KeyboardShortcut(KeyCode.PageDown),
+            "按住时瞄准的前后距离慢慢变小，枪离镜头更近。");
+        _aimDistance.SettingChanged += (_, _) => AimArms.ForwardDistance = _aimDistance.Value;
+        AimArms.ForwardDistance = _aimDistance.Value;
+        ReticleAfterTaa.Enabled = true;
+    }
+
+    private const float AimDistanceMin = -0.10f;
+    private const float AimDistanceMax = 0f;
+    private const float AimDistanceSpeed = 0.05f;
+    private ConfigEntry<float>? _aimDistance;
+    private ConfigEntry<KeyboardShortcut>? _aimDistanceFarther;
+    private ConfigEntry<KeyboardShortcut>? _aimDistanceCloser;
+
+    private void AdjustAimDistance()
+    {
+        if (_aimDistance == null || _aimDistanceFarther == null || _aimDistanceCloser == null)
+            return;
+        float step = 0f;
+        if (_aimDistanceFarther.Value.IsPressed())
+            step += AimDistanceSpeed * Time.deltaTime;
+        if (_aimDistanceCloser.Value.IsPressed())
+            step -= AimDistanceSpeed * Time.deltaTime;
+        if (step != 0f)
+            _aimDistance.Value = Mathf.Clamp(_aimDistance.Value + step, AimDistanceMin, AimDistanceMax);
     }
 
     private void BindSway()
@@ -143,9 +161,8 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         BindSwaySet("瞄准摆动-平时", "平时（不屏息、手臂有体力）", AimArms.Normal, 0.2f, 1f);
         BindSwaySet("瞄准摆动-屏息", "按住左 Alt 屏息时", AimArms.Holding, 0f, 0f);
         BindSwaySet("瞄准摆动-没体力", "手臂没体力时（优先于屏息）", AimArms.Exhausted, 1f, 1f);
-        ConfigEntry<bool> chase = Config.Bind("瞄准摆动", "照原版慢半拍跟上", true,
-            "打开时瞄具的位置不再每帧钉死在眼前，而是像原版第一人称那样慢半拍追过去，呼吸、手臂摆动和拉栓这类动作会先把枪带走再回来。枪的转动只在拉栓、切换或查看开火模式时慢半拍，其他时候照常钉死。关掉就是全部每帧钉死。");
-        ConfigEntry<float> followDelay = Config.Bind("瞄准摆动", "跟手延迟（秒）", 0f,
+        AimArms.Chase = true;
+        ConfigEntry<float> followDelay = Config.Bind("瞄准摆动", "跟手延迟（秒）", 0.1f,
             new ConfigDescription("晃鼠标时枪落后画面的快慢，数越大越慢。开镜和退瞄后的腰射都用这个数。0 是不延迟。子弹跟着枪口。",
                 new AcceptableValueRange<float>(0f, 0.3f)));
         ConfigEntry<float> mouseSmooth = Config.Bind("瞄准摆动", "鼠标抹匀（秒）", 0.05f,
@@ -167,7 +184,6 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
             AimArms.RecoilHead = recoilHead.Value;
             AimArms.MouseSmoothSeconds = mouseSmooth.Value;
             AimArms.FollowDelay = followDelay.Value;
-            AimArms.Chase = chase.Value;
         }
 
         recoilKick.SettingChanged += (_, _) => Refresh();
@@ -175,38 +191,28 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         recoilHead.SettingChanged += (_, _) => Refresh();
         followDelay.SettingChanged += (_, _) => Refresh();
         mouseSmooth.SettingChanged += (_, _) => Refresh();
-        chase.SettingChanged += (_, _) => Refresh();
         Refresh();
     }
 
     private void BindSwaySet(string section, string when, AimArms.SwayAmounts target, float sway, float breathDefault)
     {
-        ConfigEntry<float> gunMove = BindAmount(section, "枪的平移", sway,
-            when + "：枪自己的晃（转视角时的甩动、后坐力等）带来的平移。0 是瞄具钉在眼前不动，1 是游戏原样。");
-        ConfigEntry<float> gunTurn = BindAmount(section, "枪的旋转", sway,
-            when + "：枪自己的晃（转视角时的甩动、后坐力等）带来的转动。0 是不转，1 是游戏原样。");
-        ConfigEntry<float> armMove = BindAmount(section, "手臂的平移", sway,
-            when + "：人物动画带着枪走的平移（呼吸、走路、手上动作等）。0 是瞄具钉在眼前不动，1 是游戏原样。");
-        ConfigEntry<float> armTurn = BindAmount(section, "手臂的旋转", sway,
-            when + "：人物动画带着枪走的转动（呼吸、走路、手上动作等）。0 是不转，1 是游戏原样。");
+        ConfigEntry<float> swayAmount = BindAmount(section, "摆动", sway,
+            when + "：枪和手臂快的晃动（转视角时的甩动、走路、手上动作等）带来的平移和转动。0 是瞄具钉在眼前不动，1 是游戏原样。");
         ConfigEntry<float> headFollow = BindAmount(section, "跟随头部", sway,
             when + "：瞄准方向跟着头的晃动（呼吸、走路颠簸、姿势带来的偏角）走多少，镜头和枪一起跟。0 是只认鼠标方向（探头的歪斜照样保留），1 是完全跟着头。");
         ConfigEntry<float> breath = BindAmount(section, "呼吸", breathDefault,
-            when + "：手臂和枪跟着慢晃（多半是呼吸）转多少。四个摆动滑条只管快的晃动，这个管更慢的那部分。0 是不跟着转，1 是游戏原样。");
+            when + "：手臂和枪跟着慢晃（多半是呼吸）转多少。摆动滑条只管快的晃动，这个管更慢的那部分。0 是不跟着转，1 是游戏原样。");
         void Refresh()
         {
-            target.GunMove = gunMove.Value;
-            target.GunTurn = gunTurn.Value;
-            target.ArmMove = armMove.Value;
-            target.ArmTurn = armTurn.Value;
+            target.GunMove = swayAmount.Value;
+            target.GunTurn = swayAmount.Value;
+            target.ArmMove = swayAmount.Value;
+            target.ArmTurn = swayAmount.Value;
             target.HeadFollow = headFollow.Value;
             target.Breath = breath.Value;
         }
 
-        gunMove.SettingChanged += (_, _) => Refresh();
-        gunTurn.SettingChanged += (_, _) => Refresh();
-        armMove.SettingChanged += (_, _) => Refresh();
-        armTurn.SettingChanged += (_, _) => Refresh();
+        swayAmount.SettingChanged += (_, _) => Refresh();
         headFollow.SettingChanged += (_, _) => Refresh();
         breath.SettingChanged += (_, _) => Refresh();
         Refresh();
@@ -247,6 +253,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
     private void Update()
     {
         AimArms.ReleaseMouse();
+        AdjustAimDistance();
     }
 
     private void LateUpdate()
