@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "Justachae 的第三人称骨架与镜头";
-    public const string PluginVersion = "0.1.215";
+    public const string PluginVersion = "0.1.216";
 
     private void Awake()
     {
@@ -259,6 +259,19 @@ internal static class NewCameraSwitch
         if (player == null || !player.IsYourPlayer)
             return;
 
+        // The hideout overview (before walking in) and the gym use the game's free camera.
+        if (player.PointOfView == EPointOfView.FreeCamera)
+        {
+            if (_applied)
+            {
+                OpticPicture.Release();
+                AimArms.Release(player);
+                BodyVisibility.Restore();
+            }
+            _applied = false;
+            return;
+        }
+
         if (player.PointOfView != EPointOfView.ThirdPerson)
             player.PointOfView = EPointOfView.ThirdPerson;
         AimArms.Apply(player);
@@ -276,10 +289,13 @@ internal static class NewCameraSwitch
         if (!main && !optic)
             return;
 
+        Player? player = Singleton<GameWorld>.Instance?.MainPlayer;
+        if (player != null && player.IsYourPlayer && player.PointOfView == EPointOfView.FreeCamera)
+            return;
+
         if (main)
             HoldFieldOfView(camera);
 
-        Player? player = Singleton<GameWorld>.Instance?.MainPlayer;
         if (player == null || !player.IsYourPlayer)
         {
             AimArms.ReplayLasers(camera);
@@ -321,6 +337,10 @@ internal static class NewCameraSwitch
     internal static void OnCameraPreRender(Camera camera)
     {
         if (!Enabled || camera == null || !camera.CompareTag("MainCamera"))
+            return;
+
+        Player? player = Singleton<GameWorld>.Instance?.MainPlayer;
+        if (player != null && player.IsYourPlayer && player.PointOfView == EPointOfView.FreeCamera)
             return;
 
         HoldFieldOfView(camera);
