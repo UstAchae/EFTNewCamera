@@ -1020,6 +1020,8 @@ internal static class AimArms
 
     private static readonly BepInEx.Logging.ManualLogSource SprintLog = BepInEx.Logging.Logger.CreateLogSource("EFTNewCamera.Sprint");
     private static string _sprintReport = "";
+    private static Quaternion _sprintWeaponPose = Quaternion.identity;
+    private static float _sprintSampleTime;
 
     private static void LogSprintPose(Player player)
     {
@@ -1032,18 +1034,27 @@ internal static class AimArms
             bool physical = player.Physical != null && player.Physical.Sprinting;
             bool state = context.CurrentState != null && context.CurrentState.Name == EPlayerState.Sprint;
             bool body = context.PlayerAnimator?.Animator?.GetBool(PlayerAnimator.SPRINT_PARAM_HASH) ?? false;
-            IAnimator? arms = (player.HandsController as Player.FirearmController)?.FirearmsAnimator?.Animator;
+            IAnimator? arms = player.ArmsAnimatorCommon;
             bool armsSprint = arms != null && arms.GetBool(AnimationControllerParametersTable.BOOL_SPRINT);
             int armsState = arms != null ? arms.GetCurrentAnimatorStateInfo(0).shortNameHash : 0;
             if (!physical && !state && !body && !armsSprint && _sprintReport.Length == 0)
                 return;
 
             string report = $"state={(context.CurrentState != null ? context.CurrentState.Name.ToString() : "none")} physical={physical} body={body} arms={armsSprint} armsState={armsState}";
-            if (report == _sprintReport)
+            Transform? weapon = player.PlayerBones?.Weapon_Root_Anim;
+            Quaternion pose = weapon != null ? Quaternion.Inverse(player.Transform.rotation) * weapon.rotation : Quaternion.identity;
+            float jump = Quaternion.Angle(pose, _sprintWeaponPose);
+            _sprintWeaponPose = pose;
+            bool sample = state && Time.time - _sprintSampleTime >= 0.1f;
+            if (report == _sprintReport && !sample && (jump < 10f || !state))
                 return;
 
+            if (sample)
+                _sprintSampleTime = Time.time;
             _sprintReport = !physical && !state && !body && !armsSprint ? "" : report;
-            SprintLog.LogInfo($"{report} pitch={context.Pitch:F1} frame={Time.frameCount}");
+            float aimAngle = arms != null ? arms.GetFloat(AnimationControllerParametersTable.FLOAT_AIM_ANGLE) : 0f;
+            Vector3 euler = pose.eulerAngles;
+            SprintLog.LogInfo($"{report} pitch={context.Pitch:F1} armsAimAngle={aimAngle:F1} weapon=({euler.x:F0},{euler.y:F0},{euler.z:F0}) jump={jump:F0} carry={Quaternion.Angle(Quaternion.identity, _turn):F1} frame={Time.frameCount}");
         }
         catch (System.Exception error)
         {
