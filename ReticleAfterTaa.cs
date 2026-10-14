@@ -23,8 +23,6 @@ internal static class ReticleAfterTaa
     private static readonly FieldInfo? ResolveDisabledField = AccessTools.Field(typeof(PostProcessLayer), "_isTAAResolveDisabled");
     private static readonly List<(GameObject Target, int Layer)> Hidden = new List<(GameObject, int)>();
     private static bool _installed;
-    private static bool _logged;
-
     internal static void Install()
     {
         if (_installed)
@@ -141,12 +139,6 @@ internal static class ReticleAfterTaa
             GameObject target = renderer.gameObject;
             Hidden.Add((target, target.layer));
             target.layer = HiddenLayer;
-        }
-
-        if (!_logged && Hidden.Count > 0)
-        {
-            _logged = true;
-            Debug.Log("[EFTNewCamera] collimator reticle is drawn after TAA or DLSS while aiming");
         }
     }
 

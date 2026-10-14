@@ -503,8 +503,6 @@ internal static class AimArms
 
     private static void AdjustShotPrefix(Player.FirearmController __instance, ref Vector3 position, ref Vector3 direction)
     {
-        if (NewCameraSwitch.Enabled)
-            LogGrenadeShot(__instance, position, direction);
         if (NewCameraSwitch.Enabled && __instance.Item is Weapon { BoltAction: true }
             && ReferenceEquals(Singleton<GameWorld>.Instance?.MainPlayer?.HandsController, __instance))
             StartHandAction(BoltMinSeconds);
@@ -845,81 +843,43 @@ internal static class AimArms
     {
         if (!GrenadeLauncher(player) || player.HandsController is not Player.FirearmController firearm || !firearm.IsAiming)
             return;
-        bool report = Time.unscaledTime - _grenadeReportTime >= 1f;
-        if (report)
-            _grenadeReportTime = Time.unscaledTime;
-        string stage = "start";
         try
         {
             ProceduralWeaponAnimation? animation = player.ProceduralWeaponAnimation;
             if (animation == null || firearm.Weapon == null || firearm.CurrentFireport?.Original == null)
-            {
-                stage = "no weapon";
                 return;
-            }
 
             Vector3 direction = firearm.WeaponDirection;
             if (direction.sqrMagnitude < 0.0001f)
-            {
-                stage = "no direction";
                 return;
-            }
             direction.Normalize();
             Vector3 start = firearm.CurrentFireport.position - direction * firearm.WeaponLn / 5f;
             if (!GrenadeLanding(player, firearm, start, direction, out Vector3 landing))
-            {
-                stage = "no landing";
                 return;
-            }
 
             OpticSight? sight = animation.CurrentScope?.ScopePrefabCache?.CurrentModOpticSight;
             Transform? pivot = sight?.ScopeData != null ? sight.ScopeData.transform : null;
             Camera? optic = CameraManager.Instance?.OpticCameraManager?.Camera;
             if (sight == null || pivot == null)
-            {
-                stage = "no optic sight";
                 return;
-            }
 
-            float drift = optic != null ? Vector3.Angle(optic.transform.forward, pivot.forward) : -1f;
-            stage = "look";
             try
             {
                 animation.OpticLookAtGlobal(landing);
             }
-            catch (System.Exception error)
+            catch (System.Exception)
             {
-                stage = "look failed (" + error.GetType().Name + ": " + error.Message + "), direct";
             }
 
-            Vector3 toLanding = landing - pivot.position;
-            if (Vector3.Angle(pivot.forward, toLanding) > 0.05f)
-            {
+            if (Vector3.Angle(pivot.forward, landing - pivot.position) > 0.05f)
                 sight.LookAt(landing, firearm.CurrentFireport.Original.forward);
-                stage += " +direct";
-            }
-
-            if (optic == null)
-            {
-                stage += ", no optic camera";
-                return;
-            }
-            optic.transform.SetPositionAndRotation(pivot.position, pivot.rotation);
-            if (report)
-                stage += $", range {Vector3.ProjectOnPlane(toLanding, Vector3.up).magnitude:F0}m, sight off {Vector3.Angle(pivot.forward, toLanding):F2}deg, camera had drifted {drift:F2}deg";
+            if (optic != null)
+                optic.transform.SetPositionAndRotation(pivot.position, pivot.rotation);
         }
-        catch (System.Exception error)
+        catch (System.Exception)
         {
-            stage += " threw " + error.GetType().Name + ": " + error.Message;
-        }
-        finally
-        {
-            if (report)
-                GrenadeLog.LogInfo("picture: " + stage);
         }
     }
-
-    private static float _grenadeReportTime = -10f;
 
     private const float GrenadeStep = 0.01f;
     private const int GrenadeStepsPerCast = 4;
@@ -981,53 +941,6 @@ internal static class AimArms
         }
 
         return false;
-    }
-
-    private static readonly BepInEx.Logging.ManualLogSource GrenadeLog = BepInEx.Logging.Logger.CreateLogSource("EFTNewCamera.AGS");
-
-    // One line per launcher round: where the optic's centre looks, and where this round is computed to land.
-    private static void LogGrenadeShot(Player.FirearmController firearm, Vector3 start, Vector3 direction)
-    {
-        Player? player = Singleton<GameWorld>.Instance?.MainPlayer;
-        if (player == null || !ReferenceEquals(player.HandsController, firearm) || !GrenadeLauncher(player) || firearm.Weapon == null)
-            return;
-
-        try
-        {
-            Transform? root = player.ProceduralWeaponAnimation?.HandsContainer?.RootJoint;
-            if (root == null || direction.sqrMagnitude < 0.0001f)
-                return;
-
-            direction.Normalize();
-            start -= direction * firearm.WeaponLn / 5f;
-            float feet = root.position.y;
-            bool lands = GrenadeLanding(player, firearm, start, direction, out Vector3 landing);
-
-            string reticle = "none";
-            float offAxis = -1f;
-            Camera? optic = CameraManager.Instance?.OpticCameraManager?.Camera;
-            if (optic != null)
-            {
-                Transform eye = optic.transform;
-                if (lands)
-                    offAxis = Vector3.Angle(eye.forward, landing - eye.position);
-                if (Physics.Raycast(eye.position, eye.forward, out RaycastHit seen, 3000f, BallisticsCalculatorConstants.HitMask, QueryTriggerInteraction.Ignore))
-                    reticle = Describe(seen.point, start, feet);
-            }
-
-            GrenadeLog.LogInfo($"landing={(lands ? Describe(landing, start, feet) : "none")} reticle={reticle} reticleOff={offAxis:F2}deg");
-        }
-        catch (System.Exception error)
-        {
-            GrenadeLog.LogWarning(error.Message);
-        }
-    }
-
-    private static string Describe(Vector3 point, Vector3 start, float feet)
-    {
-        Vector3 flat = point - start;
-        flat.y = 0f;
-        return $"(range {flat.magnitude:F0}m, {point.y - feet:+0.0;-0.0}m from feet)";
     }
 
     internal static Quaternion KickView(Quaternion view)
@@ -1639,7 +1552,6 @@ internal static class AimArms
     }
 
     internal static float LookAxisForward;
-    internal static float LookAxisSide;
     private static Vector3 _look;
     private static float _lookYawSign = 1f;
 
@@ -1672,7 +1584,7 @@ internal static class AimArms
         if (Mathf.Abs(up) > 0.3f)
             _lookYawSign = Mathf.Sign(up);
         Quaternion body = Quaternion.Euler(0f, player.MovementContext.Rotation.x, 0f);
-        Vector3 axis = body * (Quaternion.Euler(LookAxisForward, 0f, -LookAxisSide) * Vector3.up);
+        Vector3 axis = body * (Quaternion.Euler(LookAxisForward, 0f, 0f) * Vector3.up);
         Quaternion turn = Quaternion.AngleAxis(yaw * _lookYawSign, axis) * Quaternion.AngleAxis(down, body * Vector3.right);
         pivot.rotation = turn * pivot.rotation;
     }
