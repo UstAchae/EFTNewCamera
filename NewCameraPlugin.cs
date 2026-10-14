@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "Justachae 的第三人称骨架与镜头";
-    public const string PluginVersion = "0.1.221";
+    public const string PluginVersion = "0.1.222";
 
     private void Awake()
     {
@@ -124,7 +124,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 
     private void BindAimDistance()
     {
-        _aimDistance = Config.Bind("瞄准", "前后距离", 0f,
+        _aimDistance = Config.Bind("瞄准", "前后距离", -0.05f,
             new ConfigDescription("瞄准后沿镜头前方向移动枪，单位为米。负值让枪离镜头更近。",
                 new AcceptableValueRange<float>(AimDistanceMin, AimDistanceMax)));
         _aimDistanceFarther = Config.Bind("瞄准", "前后距离调远快捷键", new KeyboardShortcut(KeyCode.PageUp),
