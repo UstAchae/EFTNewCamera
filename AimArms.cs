@@ -80,6 +80,7 @@ internal static class AimArms
     private static Vector3 _gunMoveSmooth;
     private static Quaternion _gunTurnSmooth = Quaternion.identity;
     private static bool _hasChase;
+    private static Quaternion _chaseTurn = Quaternion.identity;
     private static Vector3 _chase;
     private static bool _hasHeadMean;
     private static bool _hasCenter;
@@ -961,12 +962,13 @@ internal static class AimArms
         float breathScale = _mounted ? 0f : Now.Breath;
         Vector3 sway = armMoveScale * (armMove - _armMoveMean) + gunMoveScale * (gunMove - _gunMoveMean);
         Vector3 pinned = toCamera * (cameraPosition + cameraRotation * (aimPoint + sway) - smoothSight);
+        float side = 1f;
         if (Chase && _hasChase)
         {
             float speed = animation.AimingSpeed * animation.CameraSmoothBlender.Value;
             if (speed <= 0f)
                 speed = 16f;
-            float side = 1f - Mathf.Exp(-speed * Time.deltaTime);
+            side = 1f - Mathf.Exp(-speed * Time.deltaTime);
             float depth = 1f - Mathf.Exp(-animation.CameraSmoothTime * Time.deltaTime);
             _chase.x += (pinned.x - _chase.x) * side;
             _chase.y += (pinned.y - _chase.y) * side;
@@ -975,7 +977,6 @@ internal static class AimArms
         else
         {
             _chase = pinned;
-            _hasChase = true;
         }
         displacement = smoothSight - sight + cameraRotation * _chase;
 
@@ -996,7 +997,15 @@ internal static class AimArms
         Quaternion gunBase = _gunTurnCenter * Scale(Quaternion.Inverse(_gunTurnCenter) * _gunTurnMean, breathScale);
         Quaternion keptArm = armBase * Scale(Quaternion.Inverse(_armTurnMean) * armTurn, armTurnScale);
         Quaternion keptGun = gunBase * Scale(Quaternion.Inverse(_gunTurnMean) * gunTurn, gunTurnScale);
-        turn = cameraRotation * LineOfSight(animation, sightBone, anim, armBase * gunBase) * keptArm * keptGun * Quaternion.Inverse(armTurn * rawGunTurn) * toCamera;
+        // Like the position above, the turn that undoes a hand animation (bolt, fire mode switch) is chased,
+        // so the animation shows first and the sight comes back after it.
+        Quaternion pinnedTurn = LineOfSight(animation, sightBone, anim, armBase * gunBase) * keptArm * keptGun * Quaternion.Inverse(armTurn * rawGunTurn);
+        if (Chase && _hasChase)
+            _chaseTurn = Quaternion.Slerp(_chaseTurn, pinnedTurn, side).normalized;
+        else
+            _chaseTurn = pinnedTurn;
+        _hasChase = true;
+        turn = cameraRotation * _chaseTurn * toCamera;
     }
 
     private static Quaternion LineOfSight(ProceduralWeaponAnimation animation, Transform sightBone, Transform anim, Quaternion weaponInCamera)
