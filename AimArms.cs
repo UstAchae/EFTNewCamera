@@ -177,7 +177,19 @@ internal static class AimArms
             harmony.Patch(look, prefix: new HarmonyMethod(lookPrefix), postfix: new HarmonyMethod(lookPostfix));
         PatchLaser(harmony);
         PatchFieldOfView(harmony);
+        MethodInfo? visible = AccessTools.PropertyGetter(typeof(Player), nameof(Player.IsVisible));
+        MethodInfo? visiblePostfix = typeof(AimArms).GetMethod(nameof(VisiblePostfix), BindingFlags.NonPublic | BindingFlags.Static);
+        if (visible != null && visiblePostfix != null)
+            harmony.Patch(visible, postfix: new HarmonyMethod(visiblePostfix));
         _patched = true;
+    }
+
+    // Third-person VisualPass only places the weapon (sprint pose included) while the body
+    // mesh is on screen. Looking up from the head camera takes the body out of view.
+    private static void VisiblePostfix(Player __instance, ref bool __result)
+    {
+        if (!__result && NewCameraSwitch.Enabled && __instance.IsYourPlayer)
+            __result = true;
     }
 
     private static bool RotatePrefix(Player __instance, Vector2 deltaRotation, bool ignoreClamp)
