@@ -574,13 +574,13 @@ internal static class AimArms
             return;
 
         Vector3 offset = _smoothedHead;
+        float yaw = offset.x;
+        offset.x = 0f;
         Transform? neck = bones.Neck;
         if (neck != null)
             neck.localRotation *= Quaternion.Euler(offset * bones.NeckChain);
         head.localRotation *= Quaternion.Euler(offset * bones.HeadChain);
-        float missing = offset.x - offset.x * (bones.NeckChain + bones.HeadChain);
-        if (Mathf.Abs(missing) >= 0.5f)
-            head.localRotation *= Quaternion.Euler(missing, 0f, 0f);
+        ApplyLookYaw(bones, yaw);
     }
 
     private struct HeldPose
@@ -1393,7 +1393,7 @@ internal static class AimArms
     private static void RotateHeadPostfix(PlayerBones __instance, Vector3 offset)
     {
         if (NewCameraSwitch.Enabled)
-            FillHeadYaw(__instance, offset);
+            TurnLookYaw(__instance);
 
         if (!NewCameraSwitch.Enabled || _turnFrame == Time.frameCount)
             return;
@@ -1475,6 +1475,8 @@ internal static class AimArms
         offset = _smoothedHead;
         if (PlantedAim(player))
             offset = Vector3.zero;
+        _lookYaw = offset.x;
+        offset.x = 0f;
         if (player.HeadRotation.sqrMagnitude <= 0.01f && _smoothedHead.sqrMagnitude <= 0.01f)
             return;
         if (!SprintPitchAngle(player, out float missing))
@@ -1486,20 +1488,35 @@ internal static class AimArms
         _pitchUnderLook = true;
     }
 
-    // The look yaw is split across the neck and the head. Put whatever is missing onto the head bone
-    // so the head model itself reaches the full angle, and the camera follows that bone.
-    private static void FillHeadYaw(PlayerBones bones, Vector3 offset)
+    private static float _lookYaw;
+    private static float _lookYawSign = 1f;
+
+    // The game turns the look yaw about the neck and head bones' own long axis, which leans
+    // forward with the neck. The whole yaw is turned about the vertical at the neck instead.
+    private static void TurnLookYaw(PlayerBones bones)
     {
         Player? player = Singleton<GameWorld>.Instance?.MainPlayer;
-        Transform? head = bones.Head?.Original;
-        if (player == null || head == null || !ReferenceEquals(player.PlayerBones, bones))
+        if (player == null || !ReferenceEquals(player.PlayerBones, bones))
             return;
 
-        float missing = offset.x - offset.x * (bones.NeckChain + bones.HeadChain);
-        if (Mathf.Abs(missing) < 0.5f)
+        float yaw = _lookYaw;
+        _lookYaw = 0f;
+        ApplyLookYaw(bones, yaw);
+    }
+
+    private static void ApplyLookYaw(PlayerBones bones, float yaw)
+    {
+        if (Mathf.Abs(yaw) < 0.01f)
             return;
 
-        head.localRotation *= Quaternion.Euler(missing, 0f, 0f);
+        Transform? pivot = bones.Neck != null ? bones.Neck : bones.Head?.Original;
+        if (pivot == null)
+            return;
+
+        float up = Vector3.Dot(pivot.rotation * Vector3.right, Vector3.up);
+        if (Mathf.Abs(up) > 0.3f)
+            _lookYawSign = Mathf.Sign(up);
+        pivot.rotation = Quaternion.AngleAxis(yaw * _lookYawSign, Vector3.up) * pivot.rotation;
     }
 
     private static Quaternion Scale(Quaternion rotation, float amount)
