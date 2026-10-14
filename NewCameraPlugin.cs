@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "justachae.thirdpersoncamera";
     public const string PluginName = "Justachae's Third-Person Skeleton and Camera";
-    public const string PluginVersion = "0.1.225";
+    public const string PluginVersion = "0.1.226";
 
     private void Awake()
     {
@@ -152,9 +152,21 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
             step += AimDistanceSpeed * Time.deltaTime;
         if (_aimDistanceCloser.Value.IsPressed())
             step -= AimDistanceSpeed * Time.deltaTime;
+
+        // Setting the config value saves the whole file, so it is written once when the key is let go.
         if (step != 0f)
-            _aimDistance.Value = Mathf.Clamp(_aimDistance.Value + step, AimDistanceMin, AimDistanceMax);
+        {
+            AimArms.ForwardDistance = Mathf.Clamp(AimArms.ForwardDistance + step, AimDistanceMin, AimDistanceMax);
+            _aimDistanceHeld = true;
+        }
+        else if (_aimDistanceHeld)
+        {
+            _aimDistanceHeld = false;
+            _aimDistance.Value = AimArms.ForwardDistance;
+        }
     }
+
+    private bool _aimDistanceHeld;
 
     private void BindSway()
     {
