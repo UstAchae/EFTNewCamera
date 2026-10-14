@@ -708,43 +708,81 @@ internal static class AimArms
     {
         if (!GrenadeLauncher(player) || player.HandsController is not Player.FirearmController firearm || !firearm.IsAiming)
             return;
-        if (firearm.Weapon == null || firearm.CurrentFireport?.Original == null)
-            return;
-        ProceduralWeaponAnimation? animation = player.ProceduralWeaponAnimation;
-        Transform? root = animation?.HandsContainer?.RootJoint;
-        if (animation == null || root == null)
-            return;
-
-        Vector3 direction = firearm.WeaponDirection;
-        if (direction.sqrMagnitude < 0.0001f)
-            return;
-        direction.Normalize();
-        Vector3 start = firearm.CurrentFireport.position - direction * firearm.WeaponLn / 5f;
-
+        bool report = Time.unscaledTime - _grenadeReportTime >= 1f;
+        if (report)
+            _grenadeReportTime = Time.unscaledTime;
+        string stage = "start";
         try
         {
-            if (!GrenadeLanding(player, firearm, start, direction, out Vector3 landing))
+            ProceduralWeaponAnimation? animation = player.ProceduralWeaponAnimation;
+            if (animation == null || firearm.Weapon == null || firearm.CurrentFireport?.Original == null)
+            {
+                stage = "no weapon";
                 return;
-            animation.OpticLookAtGlobal(landing);
-        }
-        catch
-        {
-            return;
-        }
+            }
 
-        OpticSight? sight = animation.CurrentScope?.ScopePrefabCache?.CurrentModOpticSight;
-        Transform? pivot = sight?.ScopeData != null ? sight.ScopeData.transform : null;
-        Camera? optic = null;
-        try
-        {
-            optic = CameraManager.Instance?.OpticCameraManager?.Camera;
-        }
-        catch
-        {
-        }
-        if (pivot != null && optic != null)
+            Vector3 direction = firearm.WeaponDirection;
+            if (direction.sqrMagnitude < 0.0001f)
+            {
+                stage = "no direction";
+                return;
+            }
+            direction.Normalize();
+            Vector3 start = firearm.CurrentFireport.position - direction * firearm.WeaponLn / 5f;
+            if (!GrenadeLanding(player, firearm, start, direction, out Vector3 landing))
+            {
+                stage = "no landing";
+                return;
+            }
+
+            OpticSight? sight = animation.CurrentScope?.ScopePrefabCache?.CurrentModOpticSight;
+            Transform? pivot = sight?.ScopeData != null ? sight.ScopeData.transform : null;
+            Camera? optic = CameraManager.Instance?.OpticCameraManager?.Camera;
+            if (sight == null || pivot == null)
+            {
+                stage = "no optic sight";
+                return;
+            }
+
+            float drift = optic != null ? Vector3.Angle(optic.transform.forward, pivot.forward) : -1f;
+            stage = "look";
+            try
+            {
+                animation.OpticLookAtGlobal(landing);
+            }
+            catch (System.Exception error)
+            {
+                stage = "look failed (" + error.GetType().Name + ": " + error.Message + "), direct";
+            }
+
+            Vector3 toLanding = landing - pivot.position;
+            if (Vector3.Angle(pivot.forward, toLanding) > 0.05f)
+            {
+                sight.LookAt(landing, firearm.CurrentFireport.Original.forward);
+                stage += " +direct";
+            }
+
+            if (optic == null)
+            {
+                stage += ", no optic camera";
+                return;
+            }
             optic.transform.SetPositionAndRotation(pivot.position, pivot.rotation);
+            if (report)
+                stage += $", range {Vector3.ProjectOnPlane(toLanding, Vector3.up).magnitude:F0}m, sight off {Vector3.Angle(pivot.forward, toLanding):F2}deg, camera had drifted {drift:F2}deg";
+        }
+        catch (System.Exception error)
+        {
+            stage += " threw " + error.GetType().Name + ": " + error.Message;
+        }
+        finally
+        {
+            if (report)
+                GrenadeLog.LogInfo("picture: " + stage);
+        }
     }
+
+    private static float _grenadeReportTime = -10f;
 
     private const float GrenadeStep = 0.01f;
     private const int GrenadeStepsPerCast = 4;
