@@ -547,8 +547,8 @@ internal static class AimArms
 
         Quaternion weaponRotation = turn * weapon.rotation;
         Quaternion kick = ShotKick(animation, weaponRotation);
-        if (kick == Quaternion.identity)
-            return kick;
+        if (Settled(kick))
+            return Quaternion.identity;
 
         Vector3 weaponPosition = pivot + displacement + turn * (weapon.position - pivot);
         Vector3 localPivot = animation.HandsContainer.RecoilPivot;
@@ -1074,7 +1074,7 @@ internal static class AimArms
         _hasChase = true;
         if (_handAction)
             _chaseCatching = true;
-        else if (_chaseCatching && Quaternion.Angle(_chaseTurn, pinnedTurn) < 0.1f)
+        else if (_chaseCatching && Settled(Quaternion.Inverse(_chaseTurn) * pinnedTurn))
             _chaseCatching = false;
         turn = cameraRotation * _chaseTurn * toCamera;
     }
