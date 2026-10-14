@@ -1000,8 +1000,13 @@ internal static class AimArms
         // Like the position above, the turn that undoes a hand animation (bolt, fire mode switch) is chased,
         // so the animation shows first and the sight comes back after it.
         Quaternion pinnedTurn = LineOfSight(animation, sightBone, anim, armBase * gunBase) * keptArm * keptGun * Quaternion.Inverse(armTurn * rawGunTurn);
+        // Small leftovers such as breath sway are pinned at once, or the held reticle drifts.
         if (Chase && _hasChase)
-            _chaseTurn = Quaternion.Slerp(_chaseTurn, pinnedTurn, side).normalized;
+        {
+            float behind = Quaternion.Angle(_chaseTurn, pinnedTurn);
+            float rate = Mathf.Lerp(1f, side, Mathf.Clamp01((behind - 0.5f) / 1.5f));
+            _chaseTurn = Quaternion.Slerp(_chaseTurn, pinnedTurn, rate).normalized;
+        }
         else
             _chaseTurn = pinnedTurn;
         _hasChase = true;
