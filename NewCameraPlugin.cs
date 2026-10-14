@@ -10,9 +10,9 @@ namespace EFTNewCamera;
 [BepInPlugin(PluginGuid, PluginName, PluginVersion)]
 public sealed class NewCameraPlugin : BaseUnityPlugin
 {
-    public const string PluginGuid = "custom.eft.newcamera";
+    public const string PluginGuid = "justachae.thirdpersoncamera";
     public const string PluginName = "Justachae's Third-Person Skeleton and Camera";
-    public const string PluginVersion = "0.1.223";
+    public const string PluginVersion = "0.1.224";
 
     private void Awake()
     {
