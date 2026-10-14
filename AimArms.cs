@@ -1354,7 +1354,7 @@ internal static class AimArms
         return Scale(sway, _mounted ? 0f : Now.HeadFollow) * Lean(_headTurnRaw);
     }
 
-    private const float FreeLookYaw = 70f;
+    internal static float FreeLookYaw = 70f;
     private static Vector2 _lookLimitSaved;
     private static bool _lookLimitSwapped;
 

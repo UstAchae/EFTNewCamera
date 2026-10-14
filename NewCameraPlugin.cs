@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "Justachae 的第三人称骨架与镜头";
-    public const string PluginVersion = "0.1.210";
+    public const string PluginVersion = "0.1.211";
 
     private void Awake()
     {
@@ -52,8 +52,12 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         ConfigEntry<float> headPitch = Config.Bind("人物", "头部仰俯", 0f,
             new ConfigDescription("只转头部模型，镜头保持原位。正值把脸往上抬，单位为度。",
                 new AcceptableValueRange<float>(-45f, 45f)));
+        ConfigEntry<float> freeLookYaw = Config.Bind("人物", "中键扭头角度", 70f,
+            new ConfigDescription("按住鼠标中键自由看时，头最多往左或往右转多少度。",
+                new AcceptableValueRange<float>(30f, 150f)));
         void Refresh()
         {
+            AimArms.FreeLookYaw = freeLookYaw.Value;
             BodyVisibility.ShowHead = showHead.Value;
             BodyVisibility.ShowHeadwear = showHeadwear.Value;
             BodyVisibility.ShowFaceCover = showFaceCover.Value;
@@ -68,6 +72,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         showEyewear.SettingChanged += (_, _) => Refresh();
         showVisor.SettingChanged += (_, _) => Refresh();
         headPitch.SettingChanged += (_, _) => Refresh();
+        freeLookYaw.SettingChanged += (_, _) => Refresh();
         Refresh();
     }
 
