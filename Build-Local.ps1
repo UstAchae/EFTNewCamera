@@ -1,5 +1,6 @@
 param([string]$GameRoot = (Split-Path -Parent $PSScriptRoot))
 $ErrorActionPreference = 'Stop'
+$name = 'JustachaeThirdPersonCamera'
 Add-Type -Path "$PSHOME/Microsoft.CodeAnalysis.dll"
 Add-Type -Path "$PSHOME/Microsoft.CodeAnalysis.CSharp.dll"
 $trees = [Microsoft.CodeAnalysis.SyntaxTree[]]@(Get-ChildItem "$PSScriptRoot/*.cs" | ForEach-Object {
@@ -16,13 +17,26 @@ $refs = [Microsoft.CodeAnalysis.MetadataReference[]]@(
 $options = [Microsoft.CodeAnalysis.CSharp.CSharpCompilationOptions]::new(
     [Microsoft.CodeAnalysis.OutputKind]::DynamicallyLinkedLibrary
 ).WithOptimizationLevel([Microsoft.CodeAnalysis.OptimizationLevel]::Release).WithNullableContextOptions([Microsoft.CodeAnalysis.NullableContextOptions]::Enable)
-$compilation = [Microsoft.CodeAnalysis.CSharp.CSharpCompilation]::Create('EFTNewCamera', $trees, $refs, $options)
+$compilation = [Microsoft.CodeAnalysis.CSharp.CSharpCompilation]::Create($name, $trees, $refs, $options)
 $output = Join-Path $PSScriptRoot '_build'
 New-Item $output -ItemType Directory -Force | Out-Null
-$stream = [IO.File]::Create((Join-Path $output 'EFTNewCamera.dll'))
+$dll = Join-Path $output "$name.dll"
+$stream = [IO.File]::Create($dll)
 try { $result = $compilation.Emit($stream) } finally { $stream.Dispose() }
 $result.Diagnostics | ForEach-Object { $_.ToString() } | Set-Content (Join-Path $output 'build.log') -Encoding utf8
 $result.Diagnostics | Where-Object Severity -eq Error | ForEach-Object { Write-Host $_.ToString() }
 $result.Diagnostics | Group-Object Id, Severity | Select-Object Count, Name | Format-Table
 if (!$result.Success) { throw 'Compilation failed; see _build/build.log.' }
-Get-FileHash (Join-Path $output 'EFTNewCamera.dll') -Algorithm SHA256
+
+# Unzipped into the SPT folder, the archive puts the plugin at BepInEx/plugins/<name>/<name>.dll.
+$version = [regex]::Match([IO.File]::ReadAllText("$PSScriptRoot/NewCameraPlugin.cs"), 'PluginVersion = "([^"]+)"').Groups[1].Value
+$stage = Join-Path $output 'package'
+Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
+$pluginDir = Join-Path $stage "BepInEx/plugins/$name"
+New-Item $pluginDir -ItemType Directory -Force | Out-Null
+Copy-Item $dll $pluginDir
+$zip = Join-Path $output "$name-$version.zip"
+Remove-Item $zip -Force -ErrorAction SilentlyContinue
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+[IO.Compression.ZipFile]::CreateFromDirectory($stage, $zip)
+Get-FileHash $dll -Algorithm SHA256
