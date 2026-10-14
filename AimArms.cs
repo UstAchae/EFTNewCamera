@@ -644,6 +644,68 @@ internal static class AimArms
             ApplyLook(player, bones, _smoothedHead);
     }
 
+    internal static float RecoilChest = 0.5f;
+    internal static float RecoilHead = 0.5f;
+
+    // The first-person camera kick of a shot goes into the chest and on into the head, which carries
+    // the camera. The gun and hands keep their place in the world; only the body and view are pushed.
+    internal static void BodyRecoil(Player player, ref Vector3 cameraPosition, ref Quaternion cameraRotation)
+    {
+        if (RecoilChest <= 0f && RecoilHead <= 0f)
+            return;
+
+        ProceduralWeaponAnimation? animation = player.ProceduralWeaponAnimation;
+        PlayerBones? bones = player.PlayerBones;
+        if (animation?.Shootingg?.CurrentRecoilEffect == null || bones == null || !(player.HandsController is Player.FirearmController))
+            return;
+
+        Vector3 recoil = animation.Shootingg.CurrentRecoilEffect.GetCameraRotationRecoil();
+        if (animation.Shootingg.CurrentRecoilEffect.WeaponRecoilEffect != null)
+            recoil += animation.Shootingg.CurrentRecoilEffect.WeaponRecoilEffect.GetCameraRotationRecoil();
+        Quaternion kick = cameraRotation * Quaternion.Euler(recoil) * Quaternion.Inverse(cameraRotation);
+        if (Settled(kick))
+            return;
+
+        Transform? chest = bones.Ribcage?.Original;
+        Transform? neck = bones.Neck;
+        Quaternion chestKick = Scale(kick, RecoilChest);
+        Quaternion headKick = Scale(kick, RecoilHead);
+        if (chest != null && !Settled(chestKick))
+        {
+            Transform upper = FollowRoot(bones, chest);
+            List<HeldPose> held = new();
+            Hold(held, bones.Weapon_Root_Anim, upper);
+            Hold(held, bones.Weapon_Root_Third, upper);
+            HoldAll(held, bones.Forearms, upper);
+            Hold(held, bones.LeftPalm, upper);
+            Hold(held, bones.RightPalm, upper);
+            Vector3 pivot = chest.position;
+            Carry(chest, pivot, Vector3.zero, chestKick);
+            if (bones.Shoulders != null)
+            {
+                foreach (Transform shoulder in bones.Shoulders)
+                    CarryLoose(shoulder, chest, pivot, Vector3.zero, chestKick);
+            }
+            CarryLoose(bones.LeftShoulder?.Original, chest, pivot, Vector3.zero, chestKick);
+            CarryLoose(bones.RightShoulder?.Original, chest, pivot, Vector3.zero, chestKick);
+            foreach (HeldPose pose in held)
+                pose.Transform.SetPositionAndRotation(pose.Position, pose.Rotation);
+            if (neck == null || neck.IsChildOf(chest))
+            {
+                cameraPosition = pivot + chestKick * (cameraPosition - pivot);
+                cameraRotation = chestKick * cameraRotation;
+            }
+        }
+
+        if (neck != null && !Settled(headKick))
+        {
+            Vector3 pivot = neck.position;
+            Carry(neck, pivot, Vector3.zero, headKick);
+            cameraPosition = pivot + headKick * (cameraPosition - pivot);
+            cameraRotation = headKick * cameraRotation;
+        }
+    }
+
     private struct HeldPose
     {
         internal Transform Transform;
