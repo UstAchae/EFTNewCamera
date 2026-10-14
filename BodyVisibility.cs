@@ -95,6 +95,7 @@ internal static class BodyVisibility
 
         OriginalRenderers.Clear();
         EquipmentRenderers.Clear();
+        DeviceRenderers.Clear();
         _trackedPlayer = null;
         _nextCachePruneFrame = 0;
     }
@@ -211,6 +212,7 @@ internal static class BodyVisibility
     private static PropertyInfo? _opticReady;
     private static MethodInfo? _usesCustomPipeline;
     private static bool _nightResolved;
+    private static readonly object?[] PipelineArgument = new object?[1];
 
     // A mounted night or thermal device stays visible until its own filter is actually on.
     private static void HideActiveDevices(Player player, PlayerBody.SlotView slotView)
@@ -225,27 +227,55 @@ internal static class BodyVisibility
         if (!nightOn && !thermalOn)
             return;
 
+        // This runs every frame. The search walks the whole model and the inventory, so its result is kept
+        // until the filter state or the model changes.
+        int modelId = model.GetInstanceID();
+        if (!DeviceRenderers.TryGetValue(modelId, out DeviceHide cached) || cached.Night != nightOn
+            || cached.Thermal != thermalOn || Destroyed(cached.Renderers))
+        {
+            cached = new DeviceHide { Night = nightOn, Thermal = thermalOn, Renderers = FindDevices(player, slotView, model, nightOn, thermalOn) };
+            DeviceRenderers[modelId] = cached;
+        }
+
+        Hide(cached.Renderers);
+    }
+
+    private struct DeviceHide
+    {
+        internal bool Night;
+        internal bool Thermal;
+        internal Renderer[] Renderers;
+    }
+
+    private static readonly Dictionary<int, DeviceHide> DeviceRenderers = new();
+
+    private static Renderer[] FindDevices(Player player, PlayerBody.SlotView slotView, GameObject model, bool nightOn, bool thermalOn)
+    {
+        List<Renderer> found = new();
         Transform root = model.transform;
         if (nightOn)
         {
             foreach (NightVisionDevice device in model.GetComponentsInChildren<NightVisionDevice>(true))
-                HideBranch(device.transform, root);
+                HideBranch(device.transform, root, found);
         }
 
         if (thermalOn)
         {
             foreach (ThermalVisionDevice device in model.GetComponentsInChildren<ThermalVisionDevice>(true))
-                HideBranch(device.transform, root);
+                HideBranch(device.transform, root, found);
         }
 
         Item? worn = player.InventoryController?.Inventory?.Equipment?.GetSlot(slotView.EquipmentSlot)?.ContainedItem;
-        if (worn == null)
-            return;
+        if (worn != null)
+        {
+            List<Item> carriers = new();
+            CollectCarriers(worn, worn, nightOn, thermalOn, carriers);
+            foreach (Item carrier in carriers)
+                HideNamed(root, PrefabKey(carrier), found);
+        }
 
-        List<Item> carriers = new();
-        CollectCarriers(worn, worn, nightOn, thermalOn, carriers);
-        foreach (Item carrier in carriers)
-            HideNamed(root, PrefabKey(carrier));
+        Snapshot(found);
+        return found.ToArray();
     }
 
     private static bool NightFilterVisible(BSG.CameraEffects.NightVision? nightVision)
@@ -273,7 +303,10 @@ internal static class BodyVisibility
     private static bool UsesNightPipeline(BSG.CameraEffects.NightVision nightVision)
     {
         EnsureNightTypes();
-        return _usesCustomPipeline?.Invoke(null, new object[] { nightVision }) is true;
+        if (_usesCustomPipeline == null)
+            return false;
+        PipelineArgument[0] = nightVision;
+        return _usesCustomPipeline.Invoke(null, PipelineArgument) is true;
     }
 
     private static void EnsureNightTypes()
@@ -337,7 +370,7 @@ internal static class BodyVisibility
         return file ?? string.Empty;
     }
 
-    private static void HideNamed(Transform root, string prefabKey)
+    private static void HideNamed(Transform root, string prefabKey, List<Renderer> found)
     {
         if (prefabKey.Length == 0)
             return;
@@ -345,11 +378,11 @@ internal static class BodyVisibility
         foreach (Transform transform in root.GetComponentsInChildren<Transform>(true))
         {
             if (transform.name.IndexOf(prefabKey, StringComparison.OrdinalIgnoreCase) >= 0)
-                HideBranch(transform, root);
+                HideBranch(transform, root, found);
         }
     }
 
-    private static void HideBranch(Transform device, Transform root)
+    private static void HideBranch(Transform device, Transform root, List<Renderer> found)
     {
         Transform top = device;
         Transform? cursor = device;
@@ -359,7 +392,7 @@ internal static class BodyVisibility
             top = cursor;
         }
 
-        Hide(top == root
+        found.AddRange(top == root
             ? device.GetComponentsInChildren<Renderer>(true)
             : top.GetComponentsInChildren<Renderer>(true));
     }
@@ -396,11 +429,27 @@ internal static class BodyVisibility
             dead.Add(pair.Key);
         }
 
+        if (dead != null)
+        {
+            foreach (int key in dead)
+                EquipmentRenderers.Remove(key);
+        }
+
+        dead = null;
+        foreach (KeyValuePair<int, DeviceHide> pair in DeviceRenderers)
+        {
+            if (!Destroyed(pair.Value.Renderers))
+                continue;
+
+            dead ??= new List<int>();
+            dead.Add(pair.Key);
+        }
+
         if (dead == null)
             return;
 
         foreach (int key in dead)
-            EquipmentRenderers.Remove(key);
+            DeviceRenderers.Remove(key);
     }
 
     private static bool Destroyed(Renderer[] renderers)
