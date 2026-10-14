@@ -1030,7 +1030,7 @@ internal static class AimArms
         Vector3 pinned = toCamera * (cameraPosition + cameraRotation * (aimPoint + sway) - smoothSight);
         float side = 1f;
         bool chasing = Chase && _hasChase && (_handAction || _chaseCatching);
-        if (chasing)
+        if (Chase && _hasChase)
         {
             float speed = animation.AimingSpeed * animation.CameraSmoothBlender.Value;
             if (speed <= 0f)
@@ -1064,8 +1064,8 @@ internal static class AimArms
         Quaternion gunBase = _gunTurnCenter * Scale(Quaternion.Inverse(_gunTurnCenter) * _gunTurnMean, breathScale);
         Quaternion keptArm = armBase * Scale(Quaternion.Inverse(_armTurnMean) * armTurn, armTurnScale);
         Quaternion keptGun = gunBase * Scale(Quaternion.Inverse(_gunTurnMean) * gunTurn, gunTurnScale);
-        // During a bolt cycle or fire mode switch the sight is chased instead of pinned, so the hand
-        // animation shows first and the sight comes back after it. Everything else stays pinned.
+        // The position above is always chased. The turn is chased only during a bolt cycle or fire mode
+        // switch, so that animation shows first; otherwise chasing it lets breath sway through a held breath.
         Quaternion pinnedTurn = LineOfSight(animation, sightBone, anim, armBase * gunBase) * keptArm * keptGun * Quaternion.Inverse(armTurn * rawGunTurn);
         if (chasing)
             _chaseTurn = Quaternion.Slerp(_chaseTurn, pinnedTurn, side).normalized;
@@ -1074,7 +1074,7 @@ internal static class AimArms
         _hasChase = true;
         if (_handAction)
             _chaseCatching = true;
-        else if (_chaseCatching && (pinned - _chase).sqrMagnitude < 0.000001f && Quaternion.Angle(_chaseTurn, pinnedTurn) < 0.1f)
+        else if (_chaseCatching && Quaternion.Angle(_chaseTurn, pinnedTurn) < 0.1f)
             _chaseCatching = false;
         turn = cameraRotation * _chaseTurn * toCamera;
     }

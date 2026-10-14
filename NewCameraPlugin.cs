@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "Justachae 的第三人称骨架与镜头";
-    public const string PluginVersion = "0.1.214";
+    public const string PluginVersion = "0.1.215";
 
     private void Awake()
     {
@@ -129,7 +129,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         BindSwaySet("瞄准摆动-屏息", "按住左 Alt 屏息时", AimArms.Holding, 0f, 0f);
         BindSwaySet("瞄准摆动-没体力", "手臂没体力时（优先于屏息）", AimArms.Exhausted, 1f, 1f);
         ConfigEntry<bool> chase = Config.Bind("瞄准摆动", "照原版慢半拍跟上", true,
-            "打开时，瞄准中栓动枪开枪后拉栓、切换或查看开火模式这几个动作期间，瞄具不钉在眼前，而是像原版第一人称那样慢半拍追过去，动作先把枪带走再回来。其他时候（呼吸、屏息等）照常钉死。关掉就是始终钉死。");
+            "打开时瞄具的位置不再每帧钉死在眼前，而是像原版第一人称那样慢半拍追过去，呼吸、手臂摆动和拉栓这类动作会先把枪带走再回来。枪的转动只在拉栓、切换或查看开火模式时慢半拍，其他时候照常钉死。关掉就是全部每帧钉死。");
         ConfigEntry<float> followDelay = Config.Bind("瞄准摆动", "跟手延迟（秒）", 0f,
             new ConfigDescription("晃鼠标时枪落后画面的快慢，数越大越慢。开镜和退瞄后的腰射都用这个数。0 是不延迟。子弹跟着枪口。",
                 new AcceptableValueRange<float>(0f, 0.3f)));
