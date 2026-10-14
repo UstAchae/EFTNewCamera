@@ -92,8 +92,7 @@ internal static class AimArms
     private static int _rotateHeadFrame = -1;
     private static Quaternion _headTurnRaw = Quaternion.identity;
     private static bool _hasYawCenter;
-    private static float _yawCenter;
-    private static bool _steepLook;
+    private static Quaternion _lookCenter = Quaternion.identity;
     private static Quaternion _headTurnSmooth = Quaternion.identity;
     private static float _headLock;
     private static bool _hasObserved;
@@ -1027,51 +1026,6 @@ internal static class AimArms
         UpdateFreeLookReturn(__instance);
         SprintHeadPitch(__instance);
         CalmWalkHead(__instance);
-        LogSprintPose(__instance);
-    }
-
-    private static readonly BepInEx.Logging.ManualLogSource SprintLog = BepInEx.Logging.Logger.CreateLogSource("EFTNewCamera.Sprint");
-    private static string _sprintReport = "";
-    private static Quaternion _sprintWeaponPose = Quaternion.identity;
-    private static float _sprintSampleTime;
-
-    private static void LogSprintPose(Player player)
-    {
-        try
-        {
-            MovementContext? context = player.MovementContext;
-            if (context == null)
-                return;
-
-            bool physical = player.Physical != null && player.Physical.Sprinting;
-            bool state = context.CurrentState != null && context.CurrentState.Name == EPlayerState.Sprint;
-            bool body = context.PlayerAnimator?.Animator?.GetBool(PlayerAnimator.SPRINT_PARAM_HASH) ?? false;
-            IAnimator? arms = player.ArmsAnimatorCommon;
-            bool armsSprint = arms != null && arms.GetBool(AnimationControllerParametersTable.BOOL_SPRINT);
-            int armsState = arms != null ? arms.GetCurrentAnimatorStateInfo(0).shortNameHash : 0;
-            if (!physical && !state && !body && !armsSprint && _sprintReport.Length == 0)
-                return;
-
-            string report = $"state={(context.CurrentState != null ? context.CurrentState.Name.ToString() : "none")} physical={physical} body={body} arms={armsSprint} armsState={armsState}";
-            Transform? weapon = player.PlayerBones?.Weapon_Root_Anim;
-            Quaternion pose = weapon != null ? Quaternion.Inverse(player.Transform.rotation) * weapon.rotation : Quaternion.identity;
-            float jump = Quaternion.Angle(pose, _sprintWeaponPose);
-            _sprintWeaponPose = pose;
-            bool sample = state && Time.time - _sprintSampleTime >= 0.1f;
-            if (report == _sprintReport && !sample && (jump < 10f || !state))
-                return;
-
-            if (sample)
-                _sprintSampleTime = Time.time;
-            _sprintReport = !physical && !state && !body && !armsSprint ? "" : report;
-            float aimAngle = arms != null ? arms.GetFloat(AnimationControllerParametersTable.FLOAT_AIM_ANGLE) : 0f;
-            Vector3 euler = pose.eulerAngles;
-            SprintLog.LogInfo($"{report} pitch={context.Pitch:F1} armsAimAngle={aimAngle:F1} weapon=({euler.x:F0},{euler.y:F0},{euler.z:F0}) jump={jump:F0} carry={Quaternion.Angle(Quaternion.identity, _turn):F1} frame={Time.frameCount}");
-        }
-        catch (System.Exception error)
-        {
-            SprintLog.LogWarning(error.Message);
-        }
     }
 
     private static Vector3 _freeLookFrom;
@@ -1202,36 +1156,25 @@ internal static class AimArms
         if (head == null || player.MovementContext == null || _freeLookWeight >= 1f)
             return;
 
-        Quaternion cam = CameraDirection.Resolve(head.rotation);
-        Vector3 forwardFlat = Vector3.ProjectOnPlane(cam * Vector3.forward, Vector3.up);
-        Vector3 upFlat = Vector3.ProjectOnPlane(cam * Vector3.up, Vector3.up);
-        // Near straight down the flat part of the view direction shrinks away, and the run
-        // animation's tilt becomes a left-right turn. The camera's up lies flat in that pose.
-        bool wasSteep = _steepLook;
-        if (_steepLook)
-            _steepLook = upFlat.sqrMagnitude > forwardFlat.sqrMagnitude * 0.7f;
-        else
-            _steepLook = upFlat.sqrMagnitude > forwardFlat.sqrMagnitude * 1.4f;
-
-        Vector3 flat = _steepLook ? upFlat : forwardFlat;
-        if (flat.sqrMagnitude < 0.0001f)
-            return;
-
-        float yaw = Vector3.SignedAngle(Quaternion.Euler(0f, player.MovementContext.Rotation.x, 0f) * Vector3.forward, flat, Vector3.up);
+        // The turn about the vertical is read from the head's whole rotation, not from a flattened
+        // view direction: flattening blows a small run tilt up into a large turn when looking far up or down.
+        Quaternion local = Quaternion.Inverse(Quaternion.Euler(0f, player.MovementContext.Rotation.x, 0f)) * CameraDirection.Resolve(head.rotation);
         if (_freeLookWeight <= 0f)
         {
-            if (!_hasYawCenter || wasSteep != _steepLook)
+            if (!_hasYawCenter)
             {
-                _yawCenter = yaw;
+                _lookCenter = local;
                 _hasYawCenter = true;
             }
             else
-                _yawCenter = Mathf.LerpAngle(_yawCenter, yaw, 1f - Mathf.Exp(-Time.deltaTime / 0.5f));
+                _lookCenter = Quaternion.Slerp(_lookCenter, local, 1f - Mathf.Exp(-Time.deltaTime / 0.5f)).normalized;
         }
 
+        Quaternion delta = local * Quaternion.Inverse(_lookCenter);
+        float yaw = Mathf.DeltaAngle(0f, 2f * Mathf.Atan2(delta.y, delta.w) * Mathf.Rad2Deg);
         float moving = Mathf.Clamp01(player.MovementContext.ActualLinearVelocity / 0.6f);
         float keep = Mathf.Lerp(1f, WalkHeadSway, moving);
-        float fix = Mathf.DeltaAngle(yaw, _yawCenter) * (1f - keep) * (1f - _freeLookWeight);
+        float fix = -yaw * (1f - keep) * (1f - _freeLookWeight);
         if (Mathf.Abs(fix) > 0.01f)
             head.rotation = Quaternion.AngleAxis(fix, Vector3.up) * head.rotation;
     }
