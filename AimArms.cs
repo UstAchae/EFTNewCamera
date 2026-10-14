@@ -1015,6 +1015,40 @@ internal static class AimArms
         UpdateFreeLookReturn(__instance);
         SprintHeadPitch(__instance);
         CalmWalkHead(__instance);
+        LogSprintPose(__instance);
+    }
+
+    private static readonly BepInEx.Logging.ManualLogSource SprintLog = BepInEx.Logging.Logger.CreateLogSource("EFTNewCamera.Sprint");
+    private static string _sprintReport = "";
+
+    private static void LogSprintPose(Player player)
+    {
+        try
+        {
+            MovementContext? context = player.MovementContext;
+            if (context == null)
+                return;
+
+            bool physical = player.Physical != null && player.Physical.Sprinting;
+            bool state = context.CurrentState != null && context.CurrentState.Name == EPlayerState.Sprint;
+            bool body = context.PlayerAnimator?.Animator?.GetBool(PlayerAnimator.SPRINT_PARAM_HASH) ?? false;
+            IAnimator? arms = (player.HandsController as Player.FirearmController)?.FirearmsAnimator?.Animator;
+            bool armsSprint = arms != null && arms.GetBool(AnimationControllerParametersTable.BOOL_SPRINT);
+            int armsState = arms != null ? arms.GetCurrentAnimatorStateInfo(0).shortNameHash : 0;
+            if (!physical && !state && !body && !armsSprint && _sprintReport.Length == 0)
+                return;
+
+            string report = $"state={(context.CurrentState != null ? context.CurrentState.Name.ToString() : "none")} physical={physical} body={body} arms={armsSprint} armsState={armsState}";
+            if (report == _sprintReport)
+                return;
+
+            _sprintReport = !physical && !state && !body && !armsSprint ? "" : report;
+            SprintLog.LogInfo($"{report} pitch={context.Pitch:F1} frame={Time.frameCount}");
+        }
+        catch (System.Exception error)
+        {
+            SprintLog.LogWarning(error.Message);
+        }
     }
 
     private static Vector3 _freeLookFrom;
