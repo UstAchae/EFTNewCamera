@@ -81,6 +81,13 @@ internal static class AimArms
     private static Quaternion _gunTurnSmooth = Quaternion.identity;
     private static bool _hasChase;
     private static Quaternion _chaseTurn = Quaternion.identity;
+    private static bool _handAction;
+    private static bool _chaseCatching;
+    private static float _handActionStart;
+    private static float _handActionMin;
+    private const float BoltMinSeconds = 0.3f;
+    private const float FireModeMinSeconds = 0.5f;
+    private const float HandActionMaxSeconds = 2.5f;
     private static Vector3 _chase;
     private static bool _hasHeadMean;
     private static bool _hasCenter;
@@ -146,6 +153,14 @@ internal static class AimArms
         MethodInfo? rotateHeadPostfix = typeof(AimArms).GetMethod(nameof(RotateHeadPostfix), BindingFlags.NonPublic | BindingFlags.Static);
         if (rotateHead != null && rotateHeadPrefix != null && rotateHeadPostfix != null)
             harmony.Patch(rotateHead, prefix: new HarmonyMethod(rotateHeadPrefix), postfix: new HarmonyMethod(rotateHeadPostfix) { priority = Priority.Last });
+        MethodInfo? fireMode = AccessTools.Method(typeof(FirearmsAnimator), nameof(FirearmsAnimator.SetFireMode));
+        MethodInfo? fireModeCheck = AccessTools.Method(typeof(FirearmsAnimator), nameof(FirearmsAnimator.TriggerFiremodeCheck));
+        MethodInfo? fireModePostfix = typeof(AimArms).GetMethod(nameof(FireModePostfix), BindingFlags.NonPublic | BindingFlags.Static);
+        MethodInfo? fireModeCheckPostfix = typeof(AimArms).GetMethod(nameof(FireModeCheckPostfix), BindingFlags.NonPublic | BindingFlags.Static);
+        if (fireMode != null && fireModePostfix != null)
+            harmony.Patch(fireMode, postfix: new HarmonyMethod(fireModePostfix));
+        if (fireModeCheck != null && fireModeCheckPostfix != null)
+            harmony.Patch(fireModeCheck, postfix: new HarmonyMethod(fireModeCheckPostfix));
         MethodInfo? adjustShot = AccessTools.Method(typeof(Player.FirearmController), nameof(Player.FirearmController.AdjustShotVectors));
         MethodInfo? adjustShotPrefix = typeof(AimArms).GetMethod(nameof(AdjustShotPrefix), BindingFlags.NonPublic | BindingFlags.Static);
         if (adjustShot != null && adjustShotPrefix != null)
@@ -279,6 +294,7 @@ internal static class AimArms
     private static void AlignToCameraCore(Player player, Vector3 cameraPosition, Quaternion cameraRotation)
     {
         _mounted = player.MovementContext != null && player.MovementContext.IsInMountedState;
+        UpdateHandAction(player);
         PlayerBones bones = player.PlayerBones;
         bool aiming = player.HandsController != null && player.HandsController.IsAiming;
         int sightId = 0;
@@ -436,10 +452,60 @@ internal static class AimArms
             : (Vector3?)null;
     }
 
+    private static void StartHandAction(float minSeconds)
+    {
+        _handAction = true;
+        _handActionStart = Time.time;
+        _handActionMin = minSeconds;
+    }
+
+    private static bool IsMainFirearmsAnimator(FirearmsAnimator animator)
+    {
+        return Singleton<GameWorld>.Instance?.MainPlayer?.HandsController is Player.FirearmController firearm
+            && ReferenceEquals(firearm.FirearmsAnimator, animator);
+    }
+
+    private static void FireModePostfix(FirearmsAnimator __instance, bool skipAnimation)
+    {
+        if (NewCameraSwitch.Enabled && !skipAnimation && IsMainFirearmsAnimator(__instance))
+            StartHandAction(FireModeMinSeconds);
+    }
+
+    private static void FireModeCheckPostfix(FirearmsAnimator __instance)
+    {
+        if (NewCameraSwitch.Enabled && IsMainFirearmsAnimator(__instance))
+            StartHandAction(FireModeMinSeconds);
+    }
+
+    // The action lasts until the hands layer is back in idle, but at least long enough for the
+    // trigger to reach the animator.
+    private static void UpdateHandAction(Player player)
+    {
+        if (!_handAction)
+            return;
+
+        float elapsed = Time.time - _handActionStart;
+        bool idle = true;
+        try
+        {
+            FirearmsAnimator? animator = (player.HandsController as Player.FirearmController)?.FirearmsAnimator;
+            if (animator != null)
+                idle = animator.IsIdling() && !animator.Animator.IsInTransition(FirearmsAnimator.HANDS_LAYER_INDEX);
+        }
+        catch
+        {
+        }
+        if (elapsed >= HandActionMaxSeconds || (elapsed >= _handActionMin && idle))
+            _handAction = false;
+    }
+
     private static void AdjustShotPrefix(Player.FirearmController __instance, ref Vector3 position, ref Vector3 direction)
     {
         if (NewCameraSwitch.Enabled)
             LogGrenadeShot(__instance, position, direction);
+        if (NewCameraSwitch.Enabled && __instance.Item is Weapon { BoltAction: true }
+            && ReferenceEquals(Singleton<GameWorld>.Instance?.MainPlayer?.HandsController, __instance))
+            StartHandAction(BoltMinSeconds);
         if (!NewCameraSwitch.Enabled || !_hasLaserDisplacement || Time.frameCount - _shotFrame > 2)
             return;
         Player? player = Singleton<GameWorld>.Instance?.MainPlayer;
@@ -963,7 +1029,8 @@ internal static class AimArms
         Vector3 sway = armMoveScale * (armMove - _armMoveMean) + gunMoveScale * (gunMove - _gunMoveMean);
         Vector3 pinned = toCamera * (cameraPosition + cameraRotation * (aimPoint + sway) - smoothSight);
         float side = 1f;
-        if (Chase && _hasChase)
+        bool chasing = Chase && _hasChase && (_handAction || _chaseCatching);
+        if (chasing)
         {
             float speed = animation.AimingSpeed * animation.CameraSmoothBlender.Value;
             if (speed <= 0f)
@@ -997,19 +1064,18 @@ internal static class AimArms
         Quaternion gunBase = _gunTurnCenter * Scale(Quaternion.Inverse(_gunTurnCenter) * _gunTurnMean, breathScale);
         Quaternion keptArm = armBase * Scale(Quaternion.Inverse(_armTurnMean) * armTurn, armTurnScale);
         Quaternion keptGun = gunBase * Scale(Quaternion.Inverse(_gunTurnMean) * gunTurn, gunTurnScale);
-        // Like the position above, the turn that undoes a hand animation (bolt, fire mode switch) is chased,
-        // so the animation shows first and the sight comes back after it.
+        // During a bolt cycle or fire mode switch the sight is chased instead of pinned, so the hand
+        // animation shows first and the sight comes back after it. Everything else stays pinned.
         Quaternion pinnedTurn = LineOfSight(animation, sightBone, anim, armBase * gunBase) * keptArm * keptGun * Quaternion.Inverse(armTurn * rawGunTurn);
-        // Small leftovers such as breath sway are pinned at once, or the held reticle drifts.
-        if (Chase && _hasChase)
-        {
-            float behind = Quaternion.Angle(_chaseTurn, pinnedTurn);
-            float rate = Mathf.Lerp(1f, side, Mathf.Clamp01((behind - 0.5f) / 1.5f));
-            _chaseTurn = Quaternion.Slerp(_chaseTurn, pinnedTurn, rate).normalized;
-        }
+        if (chasing)
+            _chaseTurn = Quaternion.Slerp(_chaseTurn, pinnedTurn, side).normalized;
         else
             _chaseTurn = pinnedTurn;
         _hasChase = true;
+        if (_handAction)
+            _chaseCatching = true;
+        else if (_chaseCatching && (pinned - _chase).sqrMagnitude < 0.000001f && Quaternion.Angle(_chaseTurn, pinnedTurn) < 0.1f)
+            _chaseCatching = false;
         turn = cameraRotation * _chaseTurn * toCamera;
     }
 
@@ -1781,6 +1847,8 @@ internal static class AimArms
         _hasMean = false;
         _hasHeadMean = false;
         _hasChase = false;
+        _handAction = false;
+        _chaseCatching = false;
         _release = 0f;
         _smoothedHead = Vector3.zero;
         _freeLookFrom = Vector3.zero;
