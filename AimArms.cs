@@ -84,6 +84,8 @@ internal static class AimArms
     private static bool _handAction;
     private static bool _chaseCatching;
     private static float _handActionStart;
+    private static float _chaseCatchStart;
+    private const float ChaseCatchSeconds = 0.4f;
     private static float _handActionMin;
     private const float BoltMinSeconds = 0.3f;
     private const float FireModeMinSeconds = 0.5f;
@@ -1124,15 +1126,28 @@ internal static class AimArms
         // The position above is always chased. The turn is chased only during a bolt cycle or fire mode
         // switch, so that animation shows first; otherwise chasing it lets breath sway through a held breath.
         Quaternion pinnedTurn = LineOfSight(animation, sightBone, anim, armBase * gunBase) * keptArm * keptGun * Quaternion.Inverse(armTurn * rawGunTurn);
+        // The catch-up after the action has a fixed length. Waiting for the chase to settle never ends
+        // while breath sway keeps moving the target.
+        if (_handAction)
+            _chaseCatchStart = Time.time;
         if (chasing)
+        {
             _chaseTurn = Quaternion.Slerp(_chaseTurn, pinnedTurn, side).normalized;
+            if (!_handAction)
+            {
+                float t = Mathf.Clamp01((Time.time - _chaseCatchStart) / ChaseCatchSeconds);
+                _chaseTurn = Quaternion.Slerp(_chaseTurn, pinnedTurn, t * t * (3f - 2f * t)).normalized;
+                if (t >= 1f)
+                    _chaseCatching = false;
+            }
+        }
         else
+        {
             _chaseTurn = pinnedTurn;
+        }
         _hasChase = true;
         if (_handAction)
             _chaseCatching = true;
-        else if (_chaseCatching && Settled(Quaternion.Inverse(_chaseTurn) * pinnedTurn))
-            _chaseCatching = false;
         turn = cameraRotation * _chaseTurn * toCamera;
     }
 
