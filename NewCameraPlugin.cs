@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "custom.eft.newcamera";
     public const string PluginName = "Justachae 的第三人称骨架与镜头";
-    public const string PluginVersion = "0.1.217";
+    public const string PluginVersion = "0.1.218";
 
     private void Awake()
     {
@@ -55,9 +55,21 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         ConfigEntry<float> freeLookYaw = Config.Bind("人物", "中键扭头角度", 70f,
             new ConfigDescription("按住鼠标中键自由看时，头最多往左或往右转多少度。",
                 new AcceptableValueRange<float>(30f, 150f)));
+        ConfigEntry<float> freeLookDown = Config.Bind("人物", "中键低头额外角度", 0f,
+            new ConfigDescription("按住鼠标中键自由看时，在原版能低头的角度上再多低多少度。0 是原版的范围。",
+                new AcceptableValueRange<float>(0f, 60f)));
+        ConfigEntry<float> axisForward = Config.Bind("人物", "中键扭头轴前后倾斜", 0f,
+            new ConfigDescription("中键左右扭头时绕的那根轴，0 是竖直。正值让轴的上端往前倒，负值往后倒，单位为度。",
+                new AcceptableValueRange<float>(-60f, 60f)));
+        ConfigEntry<float> axisSide = Config.Bind("人物", "中键扭头轴左右倾斜", 0f,
+            new ConfigDescription("中键左右扭头时绕的那根轴，0 是竖直。正值让轴的上端往右倒，负值往左倒，单位为度。",
+                new AcceptableValueRange<float>(-60f, 60f)));
         void Refresh()
         {
             AimArms.FreeLookYaw = freeLookYaw.Value;
+            AimArms.FreeLookDownExtra = freeLookDown.Value;
+            AimArms.LookAxisForward = axisForward.Value;
+            AimArms.LookAxisSide = axisSide.Value;
             BodyVisibility.ShowHead = showHead.Value;
             BodyVisibility.ShowHeadwear = showHeadwear.Value;
             BodyVisibility.ShowFaceCover = showFaceCover.Value;
@@ -73,6 +85,9 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         showVisor.SettingChanged += (_, _) => Refresh();
         headPitch.SettingChanged += (_, _) => Refresh();
         freeLookYaw.SettingChanged += (_, _) => Refresh();
+        freeLookDown.SettingChanged += (_, _) => Refresh();
+        axisForward.SettingChanged += (_, _) => Refresh();
+        axisSide.SettingChanged += (_, _) => Refresh();
         Refresh();
     }
 

@@ -639,14 +639,9 @@ internal static class AimArms
         if (_smoothedHead.sqrMagnitude < 0.0001f)
             return;
 
-        Vector3 offset = _smoothedHead;
-        float yaw = offset.x;
-        offset.x = 0f;
-        Transform? neck = bones.Neck;
-        if (neck != null)
-            neck.localRotation *= Quaternion.Euler(offset * bones.NeckChain);
-        head.localRotation *= Quaternion.Euler(offset * bones.HeadChain);
-        ApplyLookYaw(bones, yaw);
+        Player? player = Singleton<GameWorld>.Instance?.MainPlayer;
+        if (player != null && ReferenceEquals(player.PlayerBones, bones))
+            ApplyLook(player, bones, _smoothedHead);
     }
 
     private struct HeldPose
@@ -1426,7 +1421,9 @@ internal static class AimArms
     }
 
     internal static float FreeLookYaw = 70f;
+    internal static float FreeLookDownExtra;
     private static Vector2 _lookLimitSaved;
+    private static Vector2 _verticalLimitSaved;
     private static bool _lookLimitSwapped;
 
     private static void LookPrefix(Player __instance)
@@ -1447,6 +1444,8 @@ internal static class AimArms
             scale = 1f;
         float reach = FreeLookYaw / scale;
         settings.MOUSE_LOOK_HORIZONTAL_LIMIT = new Vector2(-reach, reach);
+        _verticalLimitSaved = settings.MOUSE_LOOK_VERTICAL_LIMIT;
+        settings.MOUSE_LOOK_VERTICAL_LIMIT = new Vector2(_verticalLimitSaved.x, _verticalLimitSaved.y + FreeLookDownExtra);
         _lookLimitSwapped = true;
     }
 
@@ -1458,13 +1457,16 @@ internal static class AimArms
         _lookLimitSwapped = false;
         EFTHardSettings settings = EFTHardSettings.Instance;
         if (settings != null)
+        {
             settings.MOUSE_LOOK_HORIZONTAL_LIMIT = _lookLimitSaved;
+            settings.MOUSE_LOOK_VERTICAL_LIMIT = _verticalLimitSaved;
+        }
     }
 
     private static void RotateHeadPostfix(PlayerBones __instance, Vector3 offset)
     {
         if (NewCameraSwitch.Enabled)
-            TurnLookYaw(__instance);
+            TurnLook(__instance);
 
         if (!NewCameraSwitch.Enabled || _turnFrame == Time.frameCount)
             return;
@@ -1546,8 +1548,8 @@ internal static class AimArms
         offset = _smoothedHead;
         if (PlantedAim(player))
             offset = Vector3.zero;
-        _lookYaw = offset.x;
-        offset.x = 0f;
+        _look = offset;
+        offset = Vector3.zero;
         if (player.HeadRotation.sqrMagnitude <= 0.01f && _smoothedHead.sqrMagnitude <= 0.01f)
             return;
         if (!SprintPitchAngle(player, out float missing))
@@ -1559,35 +1561,43 @@ internal static class AimArms
         _pitchUnderLook = true;
     }
 
-    private static float _lookYaw;
+    internal static float LookAxisForward;
+    internal static float LookAxisSide;
+    private static Vector3 _look;
     private static float _lookYawSign = 1f;
 
-    // The game turns the look yaw about the neck and head bones' own long axis, which leans
-    // forward with the neck. The whole yaw is turned about the vertical at the neck instead.
-    private static void TurnLookYaw(PlayerBones bones)
+    // The game turns the free look about the neck and head bones' own axes, which lean forward
+    // with the neck, and splits it so the head falls short of the full angle. The whole look is
+    // turned at the neck instead: down about the body's right, then sideways about the set axis.
+    private static void TurnLook(PlayerBones bones)
     {
         Player? player = Singleton<GameWorld>.Instance?.MainPlayer;
         if (player == null || !ReferenceEquals(player.PlayerBones, bones))
             return;
 
-        float yaw = _lookYaw;
-        _lookYaw = 0f;
-        ApplyLookYaw(bones, yaw);
+        Vector3 look = _look;
+        _look = Vector3.zero;
+        ApplyLook(player, bones, look);
     }
 
-    private static void ApplyLookYaw(PlayerBones bones, float yaw)
+    private static void ApplyLook(Player player, PlayerBones bones, Vector3 offset)
     {
-        if (Mathf.Abs(yaw) < 0.01f)
+        float yaw = offset.x;
+        float down = -offset.z;
+        if (Mathf.Abs(yaw) < 0.01f && Mathf.Abs(down) < 0.01f)
             return;
 
         Transform? pivot = bones.Neck != null ? bones.Neck : bones.Head?.Original;
-        if (pivot == null)
+        if (pivot == null || player.MovementContext == null)
             return;
 
         float up = Vector3.Dot(pivot.rotation * Vector3.right, Vector3.up);
         if (Mathf.Abs(up) > 0.3f)
             _lookYawSign = Mathf.Sign(up);
-        pivot.rotation = Quaternion.AngleAxis(yaw * _lookYawSign, Vector3.up) * pivot.rotation;
+        Quaternion body = Quaternion.Euler(0f, player.MovementContext.Rotation.x, 0f);
+        Vector3 axis = body * (Quaternion.Euler(LookAxisForward, 0f, -LookAxisSide) * Vector3.up);
+        Quaternion turn = Quaternion.AngleAxis(yaw * _lookYawSign, axis) * Quaternion.AngleAxis(down, body * Vector3.right);
+        pivot.rotation = turn * pivot.rotation;
     }
 
     private static Quaternion Scale(Quaternion rotation, float amount)
