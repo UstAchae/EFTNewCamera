@@ -3,6 +3,7 @@ using BepInEx.Configuration;
 using Comfort.Common;
 using EFT;
 using EFT.Ballistics;
+using EFT.CameraControl;
 using EFT.InventoryLogic;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -209,6 +210,7 @@ internal sealed class TrajectoryPreview : MonoBehaviour
         BeforeCamera(camera);
         if (_count < 2) return;
         PopulateLines(camera);
+        bool hasLens = TryLensRect(camera, out Rect lensRect);
         Color saved = GUI.color;
         Matrix4x4 matrix = GUI.matrix;
         try
@@ -226,15 +228,70 @@ internal sealed class TrajectoryPreview : MonoBehaviour
                 Vector2 p = new Vector2(sa.x, Screen.height - sa.y);
                 Vector2 q = new Vector2(sb.x, Screen.height - sb.y);
                 if (!ClipScreen(ref p, ref q)) continue;
-                Vector2 delta = q - p;
-                if (delta.sqrMagnitude < 0.01f) continue;
                 GUI.color = _colors[i];
-                GUIUtility.RotateAroundPivot(Mathf.Atan2(delta.y, delta.x) * Mathf.Rad2Deg, p);
-                GUI.DrawTexture(new Rect(p.x, p.y - 0.75f, delta.magnitude, 1.5f), Texture2D.whiteTexture);
-                GUI.matrix = matrix;
+                if (hasLens)
+                {
+                    int count = ScreenLineMath.OutsideRect(p, q, lensRect, out var a0, out var b0, out var a1, out var b1);
+                    if (count > 0) DrawScreenLine(a0, b0, matrix);
+                    if (count > 1) DrawScreenLine(a1, b1, matrix);
+                }
+                else DrawScreenLine(p, q, matrix);
             }
         }
         finally { GUI.color = saved; GUI.matrix = matrix; }
+    }
+
+    private static void DrawScreenLine(Vector2 a, Vector2 b, Matrix4x4 matrix)
+    {
+        Vector2 delta = b-a;
+        if (delta.sqrMagnitude < 0.01f) return;
+        GUIUtility.RotateAroundPivot(Mathf.Atan2(delta.y, delta.x)*Mathf.Rad2Deg, a);
+        GUI.DrawTexture(new Rect(a.x, a.y-0.75f, delta.magnitude, 1.5f), Texture2D.whiteTexture);
+        GUI.matrix = matrix;
+    }
+
+    private static bool TryLensRect(Camera camera, out Rect rect)
+    {
+        rect = default;
+        var manager = CameraManager.Instance?.OpticCameraManager;
+        Renderer? lens = manager?.CurrentOpticSight?.LensRenderer;
+        if (manager?.Camera == null || !manager.Camera.isActiveAndEnabled || lens == null
+            || !lens.gameObject.activeInHierarchy) return false;
+        Mesh? mesh = lens.GetComponent<MeshFilter>()?.sharedMesh;
+        Bounds bounds = mesh != null ? mesh.bounds : new Bounds();
+        Matrix4x4 matrix = lens.localToWorldMatrix;
+        float scale = 1f;
+        Vector3 shift = Vector3.zero;
+        // The old lens shader expands/shifts the aperture independently of Renderer.bounds.
+        // Match that aperture geometry when determining the screen exclusion region.
+        foreach (Material material in lens.sharedMaterials)
+            if (material != null && material.shader != null && material.shader.name == "CW FX/OpticSight"
+                && material.HasProperty("_Scales") && material.HasProperty("_Shifts") && material.HasProperty("_ShiftDirection"))
+            {
+                scale = material.GetVector("_Scales").y;
+                Vector4 axis = material.GetVector("_ShiftDirection");
+                shift = new Vector3(axis.x, axis.y, axis.z)*material.GetVector("_Shifts").y;
+                Vector4 x = matrix.GetColumn(0), y = matrix.GetColumn(1);
+                float ratio = y.magnitude > 0.000001f ? x.magnitude/y.magnitude : 1f;
+                matrix.SetColumn(1, new Vector4(y.x, y.z, y.y, 0f)*ratio);
+                break;
+            }
+        float minX = float.PositiveInfinity, minY = minX, maxX = float.NegativeInfinity, maxY = maxX;
+        for (int i = 0; i < 8; i++)
+        {
+            Vector3 corner = bounds.center + Vector3.Scale(bounds.extents,
+                new Vector3((i&1)==0 ? -1f:1f, (i&2)==0 ? -1f:1f, (i&4)==0 ? -1f:1f));
+            Vector3 world = mesh != null ? matrix.MultiplyPoint3x4(corner*scale+shift)
+                : lens.bounds.center + Vector3.Scale(lens.bounds.extents, new Vector3((i&1)==0 ? -1f:1f, (i&2)==0 ? -1f:1f, (i&4)==0 ? -1f:1f));
+            Vector3 screen = camera.WorldToScreenPoint(world);
+            if (screen.z <= camera.nearClipPlane) continue;
+            minX = Mathf.Min(minX, screen.x); maxX = Mathf.Max(maxX, screen.x);
+            minY = Mathf.Min(minY, Screen.height-screen.y); maxY = Mathf.Max(maxY, Screen.height-screen.y);
+        }
+        if (float.IsInfinity(minX) || maxX <= minX || maxY <= minY) return false;
+        // Conservative rectangular exclusion also covers the frame; avoids leaking a second line at the edge.
+        rect = Rect.MinMaxRect(minX-3f,minY-3f,maxX+3f,maxY+3f);
+        return true;
     }
 
     private static bool ClipScreen(ref Vector2 a, ref Vector2 b)

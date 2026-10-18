@@ -27,6 +27,15 @@ public static class ZeroRangeRegression
         check(ZeroRangeMath.Format(49.99f)=="< 50 m","under 50 threshold before rounding");
         check(ZeroRangeMath.Format(50f)=="50.0 m","exact 50 boundary");
         check(ZeroRangeMath.Format(-1f)=="—","no intersection");
+        check(ZeroRangeMath.FormatPair(near,far,2)=="近交点  < 50 m\n远交点  489.8 m","both roots shown with independent threshold");
+        check(ZeroRangeMath.FormatPair(123.45f,123.45f,1)=="近交点  123.5 m\n远交点  —","single crossing not duplicated as two");
+        check(ZeroRangeMath.FormatPair(-1,-1,0)=="近交点  —\n远交点  —","missing roots explicit");
+        Rect lensRect=new Rect(10,10,20,20);
+        int pieces=ScreenLineMath.OutsideRect(new Vector2(0,20),new Vector2(40,20),lensRect,out var a0,out var b0,out var a1,out var b1);
+        check(pieces==2 && a0==new Vector2(0,20) && b0==new Vector2(10,20) && a1==new Vector2(30,20) && b1==new Vector2(40,20),"main line crossing lens clipped to two exterior pieces");
+        check(ScreenLineMath.OutsideRect(new Vector2(12,12),new Vector2(28,28),lensRect,out _,out _,out _,out _)==0,"main line inside lens entirely suppressed");
+        check(ScreenLineMath.OutsideRect(new Vector2(0,0),new Vector2(5,5),lensRect,out _,out _,out _,out _)==1,"outside world line retained");
+        check(ScreenLineMath.OutsideRect(new Vector2(20,20),new Vector2(40,20),lensRect,out a0,out b0,out _,out _)==1 && a0==new Vector2(30,20) && b0==new Vector2(40,20),"line leaving lens starts at boundary");
         check(!ZeroRangeMath.Crossing(new Vector3(5,-1,90),new Vector3(5,1,110),origin,forward,up,.1f,out _),"lateral miss rejected");
         check(!ZeroRangeMath.Crossing(new Vector3(0,-1,90),new Vector3(0,-2,110),origin,forward,up,.1f,out _),"no vertical crossing rejected");
         check(ZeroRangeMath.Crossing(new Vector3(0,-1,10),new Vector3(0,1,30),origin,forward,up,.1f,out var below)&&ZeroRangeMath.Format(below.magnitude)=="< 50 m","valid near-only result");

@@ -28,5 +28,11 @@ internal static class ZeroRangeMath
         if (farthest < 0f || float.IsNaN(farthest) || float.IsInfinity(farthest)) return "—";
         return farthest < 50f ? "< 50 m" : farthest.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) + " m";
     }
+
+    internal static string FormatPair(float nearest, float farthest, int count)
+    {
+        return "近交点  " + Format(count > 0 ? nearest : -1f)
+            + "\n远交点  " + Format(count > 1 ? farthest : -1f);
+    }
 }
 }
