@@ -286,6 +286,29 @@ internal static class AimArms
         harmony.Patch(_laserLateUpdate, prefix: new HarmonyMethod(laserPrefix), transpiler: new HarmonyMethod(laserTranspiler));
     }
 
+    private static Player? _contextPlayer;
+    private static object? _contextHands;
+    private static StationaryWeapon? _contextStationary;
+
+    internal static bool PrepareWeapon(Player player)
+    {
+        object? hands = player.HandsController;
+        StationaryHeld(player, out StationaryWeapon? stationary);
+        if (ReferenceEquals(_contextPlayer, player) && ReferenceEquals(_contextHands, hands)
+            && ReferenceEquals(_contextStationary, stationary))
+            return false;
+
+        _contextPlayer = player;
+        _contextHands = hands;
+        _contextStationary = stationary;
+        // Fixed weapons and carried weapons must not share the camera/sight blend.
+        ResetAimState();
+        NewCameraSwitch.InvalidatePose();
+        IronSightAlignment.Invalidate();
+        OpticPicture.ResetForWeapon();
+        return true;
+    }
+
     internal static void Apply(Player player)
     {
         _suppress = true;
@@ -594,7 +617,7 @@ internal static class AimArms
         if (player.HandsController == null || !player.HandsController.IsAiming || player.MovementContext == null)
             return false;
 
-        return player.MovementContext.IsInMountedState || player.MovementContext.IsStationaryWeaponInHands;
+        return player.MovementContext.IsInMountedState || StationaryHeld(player, out _);
     }
 
     internal static bool TrackMountedSight(Player player)
@@ -844,8 +867,15 @@ internal static class AimArms
         weapon = null;
         if (player.HandsController == null || player.MovementContext == null || !player.MovementContext.IsStationaryWeaponInHands)
             return false;
-        weapon = player.MovementContext.StationaryWeapon;
-        return weapon != null;
+        StationaryWeapon? candidate = player.MovementContext.StationaryWeapon;
+        // During a leave/spawn transition MovementContext can still describe the
+        // scene gun while HandsController has already changed to a carried gun.
+        if (candidate == null || candidate.ItemController == null
+            || player.HandsController is not Player.FirearmController firearm
+            || !firearm.Weapon.IsStationaryWeapon || !ReferenceEquals(firearm.Item, candidate.Item))
+            return false;
+        weapon = candidate;
+        return true;
     }
 
     // The launcher sight stays level. The picture inside it has to look at the same point the round will reach,
@@ -1099,6 +1129,7 @@ internal static class AimArms
         if (!NewCameraSwitch.Enabled || !__instance.IsYourPlayer)
             return;
 
+        PrepareWeapon(__instance);
         _mounted = __instance.MovementContext != null && __instance.MovementContext.IsInMountedState;
         ApplyHeadLock(__instance);
         UpdateFreeLookReturn(__instance);
@@ -1541,6 +1572,8 @@ internal static class AimArms
         if (player == null || !ReferenceEquals(player.PlayerBones, __instance))
             return;
 
+        PrepareWeapon(player);
+
         // RotateHead applies its ADS neck/head pose through blendValue independently
         // of the free-look offset. Our postfix supplies free look itself; suppress
         // the native pose as well, including its aim-out blend, for this player only.
@@ -1862,7 +1895,7 @@ internal static class AimArms
         _bodySkinOwner = int.MinValue;
     }
 
-    internal static void Release(Player? player)
+    private static void ResetAimState()
     {
         _blendAiming = false;
         _blendSightId = 0;
@@ -1884,6 +1917,30 @@ internal static class AimArms
         _freeLookReturning = false;
         _pitchUnderLook = false;
         _headLock = 0f;
+        _hasCenter = false;
+        _hasObserved = false;
+        _hasYawCenter = false;
+        _hasPitchCenter = false;
+        _sprintPitch = 0f;
+        _turnFrame = -1;
+        _rotateHeadFrame = -1;
+        _headSmoothFrame = -1;
+        _opticFrame = -1;
+        _laserFrame = -1;
+        _mounted = false;
+        _viewKick = Quaternion.identity;
+        _hasLaserDisplacement = false;
+        _shotFrame = -1;
+        _shotFireport = null;
+        DeferredLasers.Clear();
+    }
+
+    internal static void Release(Player? player)
+    {
+        ResetAimState();
+        _contextPlayer = null;
+        _contextHands = null;
+        _contextStationary = null;
         RestoreSkins();
         if (!_suppress)
             return;

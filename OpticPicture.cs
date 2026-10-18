@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using EFT;
 using EFT.Animations;
 using EFT.CameraControl;
@@ -9,6 +10,7 @@ internal static class OpticPicture
 {
     private static int _frame = -1;
     private static OpticSight? _held;
+    private static readonly List<OpticSight> Quieted = new();
 
     internal static bool IsCamera(Camera camera)
     {
@@ -66,8 +68,26 @@ internal static class OpticPicture
         }
     }
 
+    internal static void ResetForWeapon()
+    {
+        RestoreQuieted();
+        ReleaseHeld();
+        _frame = -1;
+    }
+
+    private static void RestoreQuieted()
+    {
+        foreach (OpticSight sight in Quieted)
+        {
+            if (sight != null)
+                sight.enabled = true;
+        }
+        Quieted.Clear();
+    }
+
     internal static void Release()
     {
+        RestoreQuieted();
         try
         {
             if (_held != null)
@@ -196,6 +216,8 @@ internal static class OpticPicture
             if (sight == null || Same(sight, keep) || !sight.enabled)
                 continue;
 
+            if (!Quieted.Contains(sight))
+                Quieted.Add(sight);
             sight.enabled = false;
         }
     }

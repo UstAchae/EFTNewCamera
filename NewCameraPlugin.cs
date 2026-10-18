@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "justachae.thirdpersoncamera";
     public const string PluginName = "Justachae's Third-Person Skeleton and Camera";
-    public const string PluginVersion = "0.1.228.312";
+    public const string PluginVersion = "0.1.228.313";
 
     private void Awake()
     {
@@ -316,11 +316,18 @@ internal static class NewCameraSwitch
             return;
         }
 
+        if (AimArms.PrepareWeapon(player))
+            _poseFrame = -1;
         if (player.PointOfView != EPointOfView.ThirdPerson)
             player.PointOfView = EPointOfView.ThirdPerson;
         AimArms.Apply(player);
         BodyVisibility.Apply(player);
         _applied = true;
+    }
+
+    internal static void InvalidatePose()
+    {
+        _poseFrame = -1;
     }
 
     internal static void OnCameraPreCull(Camera camera)
@@ -346,6 +353,8 @@ internal static class NewCameraSwitch
             return;
         }
 
+        if (AimArms.PrepareWeapon(player))
+            _poseFrame = -1;
         if (main)
             OpticPicture.Apply(player);
 
