@@ -150,6 +150,9 @@ internal static class AimArms
 
         Harmony harmony = new Harmony(NewCameraPlugin.PluginGuid + ".aimarms");
         harmony.Patch(target, prefix: new HarmonyMethod(prefix));
+        MethodInfo? findAim = AccessTools.Method(typeof(ProceduralWeaponAnimation), "FindAimTransforms");
+        if (findAim != null)
+            harmony.Patch(findAim, postfix: new HarmonyMethod(typeof(IronSightAlignment), nameof(IronSightAlignment.Invalidate)));
         MethodInfo? rotateHead = AccessTools.Method(typeof(PlayerBones), nameof(PlayerBones.RotateHead));
         MethodInfo? rotateHeadPrefix = typeof(AimArms).GetMethod(nameof(RotateHeadPrefix), BindingFlags.NonPublic | BindingFlags.Static);
         MethodInfo? rotateHeadPostfix = typeof(AimArms).GetMethod(nameof(RotateHeadPostfix), BindingFlags.NonPublic | BindingFlags.Static);
@@ -309,8 +312,11 @@ internal static class AimArms
             Transform? bone = animation != null && animation.ScopeAimTransforms != null && animation.ScopeAimTransforms.Count > 0
                 ? animation.CurrentScope?.Bone
                 : null;
+            Vector3 sightPosition = bone != null ? bone.position : Vector3.zero;
+            Vector3 sightForward = Vector3.forward;
+            bool ironAligned = bone != null && animation != null && ResolveIronSight(animation, bone, out sightPosition, out sightForward);
             if (bone != null)
-                sightPoint = bone.position;
+                sightPoint = sightPosition;
             if (PlantedAim(player))
             {
                 // The mounted hip pose is already the aim pose. Leave the gun there.
@@ -333,13 +339,17 @@ internal static class AimArms
                 Quaternion bodyRotation = _bodyLook * Quaternion.Inverse(_smoothLook) * steadyRotation;
                 Vector3 bodyPosition = CameraPosition.Resolve(steadyPosition - CameraPosition.Resolve(Vector3.zero, steadyRotation), bodyRotation);
                 if (bones.Weapon_Root_Third != null && root != null)
-                    Sway(animation, bones.Weapon_Root_Third, root, bone, sightId, bodyPosition, bodyRotation, aimPoint, out target, out turn);
+                    Sway(animation, bones.Weapon_Root_Third, root, bone, sightPosition, sightForward, ironAligned, sightId, bodyPosition, bodyRotation, aimPoint, out target, out turn);
                 else
-                    target = bodyPosition - bone.position + bodyRotation * aimPoint;
+                {
+                    target = bodyPosition - sightPosition + bodyRotation * aimPoint;
+                    if (ironAligned)
+                        turn = Quaternion.FromToRotation(sightForward, bodyRotation * Vector3.forward);
+                }
 
                 Quaternion delay = _lagLook * Quaternion.Inverse(_bodyLook);
-                Vector3 placed = bone.position + target;
-                target = steadyPosition + delay * (placed - bodyPosition) - bone.position;
+                Vector3 placed = sightPosition + target;
+                target = steadyPosition + delay * (placed - bodyPosition) - sightPosition;
                 turn = delay * turn;
             }
             else if (!aiming && FollowDelay > 0f && player.HandsController is Player.FirearmController && bones.Weapon_Root_Anim != null)
@@ -785,7 +795,7 @@ internal static class AimArms
         if (animation == null || bone == null)
             return false;
 
-        Vector3 forward = bone.name == "aim_camera" ? -bone.up : -bone.forward;
+        ResolveIronSight(animation, bone, out Vector3 sightPosition, out Vector3 forward);
         if (forward.sqrMagnitude < 0.0001f)
             return false;
         forward.Normalize();
@@ -812,7 +822,7 @@ internal static class AimArms
             up = -up;
 
         rotation = Quaternion.LookRotation(forward, up);
-        position = bone.position - forward * (ForwardDistance + SightRelief(animation, bone));
+        position = sightPosition - forward * (ForwardDistance + SightRelief(animation, bone));
         return true;
     }
 
@@ -948,10 +958,9 @@ internal static class AimArms
         return _viewKick * view;
     }
 
-    private static void Sway(ProceduralWeaponAnimation animation, Transform third, Transform anim, Transform sightBone, int sightId, Vector3 cameraPosition, Quaternion cameraRotation, Vector3 aimPoint, out Vector3 displacement, out Quaternion turn)
+    private static void Sway(ProceduralWeaponAnimation animation, Transform third, Transform anim, Transform sightBone, Vector3 sight, Vector3 sightForward, bool ironAligned, int sightId, Vector3 cameraPosition, Quaternion cameraRotation, Vector3 aimPoint, out Vector3 displacement, out Quaternion turn)
     {
         Quaternion toCamera = Quaternion.Inverse(cameraRotation);
-        Vector3 sight = sightBone.position;
         Vector3 sightOnThird = third.position + third.rotation * (Quaternion.Inverse(anim.rotation) * (sight - anim.position));
         Vector3 armMove = toCamera * (sightOnThird - cameraPosition);
         Vector3 rawGunMove = toCamera * (sight - sightOnThird);
@@ -1038,7 +1047,7 @@ internal static class AimArms
         Quaternion keptGun = gunBase * Scale(Quaternion.Inverse(_gunTurnMean) * gunTurn, gunTurnScale);
         // The position above is always chased. The turn is chased only during a bolt cycle or fire mode
         // switch, so that animation shows first; otherwise chasing it lets breath sway through a held breath.
-        Quaternion pinnedTurn = LineOfSight(animation, sightBone, anim, armBase * gunBase) * keptArm * keptGun * Quaternion.Inverse(armTurn * rawGunTurn);
+        Quaternion pinnedTurn = LineOfSight(animation, sightBone, sightForward, ironAligned, anim, armBase * gunBase) * keptArm * keptGun * Quaternion.Inverse(armTurn * rawGunTurn);
         // The catch-up after the action has a fixed length. Waiting for the chase to settle never ends
         // while breath sway keeps moving the target.
         if (_handAction)
@@ -1064,14 +1073,16 @@ internal static class AimArms
         turn = cameraRotation * _chaseTurn * toCamera;
     }
 
-    private static Quaternion LineOfSight(ProceduralWeaponAnimation animation, Transform sightBone, Transform anim, Quaternion weaponInCamera)
+    private static Quaternion LineOfSight(ProceduralWeaponAnimation animation, Transform sightBone, Vector3 sightForward, bool ironAligned, Transform anim, Quaternion weaponInCamera)
     {
-        Vector3 axis = sightBone.name == "aim_camera" ? -sightBone.up : -sightBone.forward;
+        Vector3 axis = ironAligned ? sightForward : sightBone.name == "aim_camera" ? -sightBone.up : -sightBone.forward;
         Vector3 sightInCamera = weaponInCamera * (Quaternion.Inverse(anim.rotation) * axis);
         float zeroing = 0f;
         try
         {
-            zeroing = LineOfSightAngle(animation);
+            // The physical marker axis already contains the iron-sight slope.
+            // Applying the native cached slope again would calibrate it twice.
+            if (!ironAligned) zeroing = LineOfSightAngle(animation);
         }
         catch
         {
@@ -1594,6 +1605,16 @@ internal static class AimArms
         if (rotation.w < 0f)
             rotation = new Quaternion(-rotation.x, -rotation.y, -rotation.z, -rotation.w);
         return Quaternion.SlerpUnclamped(Quaternion.identity, rotation, amount);
+    }
+
+    private static bool ResolveIronSight(ProceduralWeaponAnimation animation, Transform bone, out Vector3 position, out Vector3 forward)
+    {
+        position = bone.position;
+        forward = bone.name == "aim_camera" ? -bone.up : -bone.forward;
+        var scope = animation.CurrentScope;
+        Transform? weapon = animation.HandsContainer?.Weapon;
+        return scope != null && weapon != null && IronSightAlignment.TryResolve(weapon, bone,
+            scope.AlignIfAvailable, scope.IsOptic, out position, out forward);
     }
 
     private static float SightRelief(ProceduralWeaponAnimation animation, Transform bone)
