@@ -12,9 +12,9 @@ internal static class EquivalentZeroRange
 {
     private static ConfigEntry<bool> _show = null!;
     private static ConfigEntry<float> _maximum = null!, _tolerance = null!;
+    private static ConfigEntry<float> _bX = null!, _bY = null!;
     private static int _frame = -1;
     private static string _text = ZeroRangeMath.FormatPair(-1f, -1f, 0);
-    private static ConfigEntry<bool> _debug = null!;
     internal static readonly List<Vector3> DebugTrajectory = new(2001);
     internal static readonly List<Vector3> DebugCrossings = new(4);
     internal static readonly List<Vector3> CandidateCrossings = new(4);
@@ -23,24 +23,26 @@ internal static class EquivalentZeroRange
     internal static Vector3 DebugOrigin, DebugDirection, NativeOrigin, NativeDirection, DebugZeroPoint, DebugAimPoint;
     internal static string ObserverSource = "unavailable";
     internal static int ObserverCameraId;
-    internal static bool DebugActive => _debug != null && _debug.Value && DebugTrajectory.Count > 1 && _frame >= Time.frameCount - 1;
+    internal static bool DebugActive => OpticTest.Enabled && DebugTrajectory.Count > 1 && _frame >= Time.frameCount - 1;
 
     internal static void Initialize(ConfigFile config)
     {
-        _debug = config.Bind("等效归零距离", "显示瞄准基准与交点", true,
-            "紫线从实际观察镜头出发，穿过当前分划点；分划移动时射线绕观察位置转动。原生轴只用于标定零位分划点。绿叉为该射线与理论弹道的交点。黄色虚线延伸未碰撞理论弹道以便观察交点，红叉仍是实际首次碰撞。仅调试绘制，不改弹道。");
         _show = config.Bind("等效归零距离", "显示估算距离", true,
             "同时显示紫色瞄准射线与理论弹道的近、远交点，忽略墙壁碰撞。各交点小于50米显示< 50 m，缺失交点显示—。原生节点标定零位分划点，当前射线从观察镜头穿过调节后的分划点；B类计入镜内场景投影。");
         _maximum = config.Bind("等效归零距离", "最大计算距离（米）", 2000f,
             new ConfigDescription("沿瞄准射线的计算范围，最长模拟20秒。", new AcceptableValueRange<float>(100f, 5000f)));
         _tolerance = config.Bind("等效归零距离", "横向重合容差（mrad）", 0.1f,
             new ConfigDescription("垂直交点还必须落在瞄准射线的横向容差内，否则不显示虚假的归零距离。", new AcceptableValueRange<float>(0.01f, 1f)));
+        _bX = config.Bind("等效归零距离", "B类分划中心X", .5f,
+            new ConfigDescription("B类镜内分划瞄准点的归一化横坐标，默认画面中央。用于非居中分划手动校准。",new AcceptableValueRange<float>(0f,1f)));
+        _bY = config.Bind("等效归零距离", "B类分划中心Y", .5f,
+            new ConfigDescription("B类镜内分划瞄准点的归一化纵坐标，默认画面中央。0为底部，1为顶部；不是世界平移距离。",new AcceptableValueRange<float>(0f,1f)));
 
     }
 
     internal static void Sample(Camera camera, float mrad, bool reticleMoving)
     {
-        if (_show == null || (!_show.Value && !_debug.Value && !BallisticProbe.Enabled) || _frame == Time.frameCount) return;
+        if (_show == null || (!_show.Value && !OpticTest.Enabled) || _frame == Time.frameCount) return;
         _frame = Time.frameCount;
         _text = ZeroRangeMath.FormatPair(-1f, -1f, 0);
         DebugTrajectory.Clear(); DebugCrossings.Clear(); CandidateCrossings.Clear();
@@ -83,6 +85,21 @@ internal static class EquivalentZeroRange
             if (!LegacyReticle.TryGetAimPoint(NativeOrigin, NativeDirection, out zeroPoint, out point))
             { _status="无法取得旧式分划平面和当前分划点"; return; }
             ObserverSource = "final-head-pose / native-axis calibrated legacy mark plane";
+        }
+        else if (!reticleMoving)
+        {
+            // B's mark remains at its image coordinate. Invert the actual shifted scene
+            // projection there; do not treat the finite mark mesh as a forward world target.
+            Vector2 viewport = new Vector2(_bX.Value,_bY.Value);
+            if (!SightReferenceMath.ViewRay(projection,camera.cameraToWorldMatrix,viewport,out _,out Vector3 zeroRay))
+            { _status="B类原始镜内投影不可逆"; return; }
+            Matrix4x4 scene = projection; scene.m12 -= shift;
+            if (!SightReferenceMath.ViewRay(scene,camera.cameraToWorldMatrix,viewport,out observerPosition,out Vector3 aimedRay))
+            { _status="B类调节后镜内投影不可逆"; return; }
+            // These are one-metre points ON the image rays, not physical reticle-plane positions.
+            zeroPoint = observerPosition+zeroRay;
+            point = observerPosition+aimedRay;
+            ObserverSource = "B optic image-ray / one-metre diagnostic point";
         }
         else
         {

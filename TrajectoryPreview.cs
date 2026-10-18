@@ -13,7 +13,6 @@ namespace EFTNewCamera;
 // Diagnostic only: never changes shot state or weapon transforms.
 internal sealed class TrajectoryPreview : MonoBehaviour
 {
-    private ConfigEntry<bool> _enabled = null!;
     private ConfigEntry<float> _range = null!;
     private readonly Vector3[] _points = new Vector3[2002];
     private readonly RaycastHit[] _hits = new RaycastHit[64];
@@ -32,18 +31,17 @@ internal sealed class TrajectoryPreview : MonoBehaviour
 
     internal void Initialize(ConfigFile config)
     {
-        _enabled = config.Bind("弹道调试", "显示预测弹道", false,
-            "黄色：重力与G1阻力预测弹道；红色十字：预测终点。遇到首次碰撞停止，不预测散布、穿透或跳弹。独立于骨架镜头总开关，方便比较。");
         _range = config.Bind("弹道调试", "预测最大距离", 1000f,
             new ConfigDescription("从枪口计算的最大路径长度，单位米；最长模拟20秒。", new AcceptableValueRange<float>(50f, 2000f)));
         _rayLength = config.Bind("弹道调试", "瞄准线显示长度（米）", 50000f,
             new ConfigDescription("用足够长的线模拟无限射线，实际可见范围仍受相机远裁剪限制；不改变交点计算的最大距离。", new AcceptableValueRange<float>(100f, 100000f)));
         Camera.onPreRender += Draw;
+        OpticTest.Changed += ClearTestLines;
     }
 
     private void BeforeCamera(Camera camera)
     {
-        if (_enabled == null || !_enabled.Value) { _count = 0; _sampleFrame = -1; return; }
+        if (!OpticTest.Enabled) { _count = 0; _sampleFrame = -1; return; }
         if (!camera.CompareTag("MainCamera") && !OpticPicture.IsCamera(camera)) return;
         // Both cameras use this frame's sample; never reuse a previous frame's trajectory.
         if (_sampleFrame == Time.frameCount) return;
@@ -112,7 +110,7 @@ internal sealed class TrajectoryPreview : MonoBehaviour
         // The optic camera draws in world space. Main-view lines are projected to the final GUI below.
         if (_buffers.TryGetValue(camera.GetInstanceID(), out var previous)) previous.Buffer.Clear();
         BeforeCamera(camera);
-        if (_enabled == null || !_enabled.Value || _count < 2) return;
+        if (!OpticTest.Enabled || _count < 2) return;
         if (!camera.CompareTag("MainCamera") && !OpticPicture.IsCamera(camera)) return;
         if (_material == null)
         {
@@ -205,7 +203,7 @@ internal sealed class TrajectoryPreview : MonoBehaviour
 
     private void OnGUI()
     {
-        if (Event.current.type != EventType.Repaint || _enabled == null || !_enabled.Value) return;
+        if (Event.current.type != EventType.Repaint || !OpticTest.Enabled) return;
         Camera camera = Camera.main;
         if (camera == null) return;
         // Sample the final, visible skeleton pose; never reuse the optic camera's earlier sample.
@@ -325,17 +323,24 @@ internal sealed class TrajectoryPreview : MonoBehaviour
         return true;
     }
 
+    private void ClearTestLines()
+    {
+        _count = 0; _sampleFrame = -1;
+        foreach (var entry in _buffers.Values) entry.Buffer.Clear();
+    }
+
     private void Update()
     {
         // Clear queued lines immediately when disabled or when the player no longer holds a firearm.
         var player = Singleton<GameWorld>.Instance?.MainPlayer;
-        if (_enabled == null || !_enabled.Value || !(player?.HandsController is Player.FirearmController))
+        if (!OpticTest.Enabled || !(player?.HandsController is Player.FirearmController))
             foreach (var entry in _buffers.Values) entry.Buffer.Clear();
     }
 
     private void OnDestroy()
     {
         Camera.onPreRender -= Draw;
+        OpticTest.Changed -= ClearTestLines;
         foreach (var entry in _buffers.Values)
         {
             if (entry.Camera != null) entry.Camera.RemoveCommandBuffer(CameraEvent.BeforeImageEffects, entry.Buffer);

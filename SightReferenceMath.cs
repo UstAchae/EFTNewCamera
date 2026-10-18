@@ -4,6 +4,17 @@ namespace EFTNewCamera
 {
 internal static class SightReferenceMath
 {
+    internal static bool ViewRay(Matrix4x4 projection, Matrix4x4 cameraToWorld, Vector2 viewport,
+        out Vector3 origin, out Vector3 direction)
+    {
+        origin=cameraToWorld.MultiplyPoint3x4(Vector3.zero);
+        direction=Vector3.zero;
+        Vector4 point=projection.inverse*new Vector4(viewport.x*2f-1f,viewport.y*2f-1f,1f,1f);
+        if(Mathf.Abs(point.w)<0.0000001f)return false;
+        direction=cameraToWorld.MultiplyVector(new Vector3(point.x,point.y,point.z)/point.w).normalized;
+        return direction.sqrMagnitude>.5f && Vector3.Dot(direction,cameraToWorld.MultiplyVector(Vector3.back))>0f;
+    }
+
     internal static bool AxisPlanePoint(Vector3 origin, Vector3 axis, Vector3 planePoint, Vector3 planeNormal, out Vector3 point)
     {
         point = Vector3.zero;

@@ -63,6 +63,19 @@ public static class ZeroRangeRegression
         check(!SightReferenceMath.EyeRay(eye,eye-Vector3.forward,Vector3.forward,out _),"point behind eye rejected instead of backward zero range");
         check(!SightReferenceMath.EyeRay(eye,eye,Vector3.forward,out _),"point coincident with observer rejected");
         check(!SightReferenceMath.AxisPlanePoint(Vector3.zero,Vector3.right,Vector3.forward,Vector3.forward,out _),"axis parallel to reticle plane rejected");
+        Matrix4x4 opticWorld=Matrix4x4.TRS(new Vector3(3,2,1),Quaternion.identity,Vector3.one)*Matrix4x4.Scale(new Vector3(1,1,-1));
+        check(SightReferenceMath.ViewRay(projection,opticWorld,new Vector2(.5f,.5f),out var opticOrigin,out var centreRay)
+            && (opticOrigin-new Vector3(3,2,1)).sqrMagnitude<1e-10f && (centreRay-Vector3.forward).sqrMagnitude<1e-10f,"B ray starts at optic camera and follows image centre");
+        Matrix4x4 shiftedScene=projection; shiftedScene.m12-=Mathf.Tan(.002f)*shiftedScene.m11;
+        check(SightReferenceMath.ViewRay(shiftedScene,opticWorld,new Vector2(.5f,.5f),out var shiftedOrigin,out var shiftedRay)
+            && shiftedOrigin==opticOrigin && shiftedRay.y<0,"B upward scene shift changes ray direction without moving origin");
+        Vector3 target=shiftedOrigin+shiftedRay*100f;Vector3 targetView=opticWorld.inverse.MultiplyPoint3x4(target);
+        Vector4 targetClip=shiftedScene*new Vector4(targetView.x,targetView.y,targetView.z,1);
+        check(Mathf.Abs(targetClip.x/targetClip.w)<1e-6f && Mathf.Abs(targetClip.y/targetClip.w)<1e-6f,"B computed target projects exactly onto stationary reticle centre");
+        check(SightReferenceMath.ViewRay(shiftedScene,opticWorld,new Vector2(.6f,.4f),out _,out var calibratedRay),"B noncentral reticle image calibration accepted");
+        targetView=opticWorld.inverse.MultiplyPoint3x4(opticOrigin+calibratedRay*100f);
+        targetClip=shiftedScene*new Vector4(targetView.x,targetView.y,targetView.z,1);
+        check(Mathf.Abs(targetClip.x/targetClip.w-.2f)<1e-6f && Mathf.Abs(targetClip.y/targetClip.w+.2f)<1e-6f,"B off-centre image calibration round trips through projection");
         File.WriteAllText("D:/games/SPT-4.1.6/.codex-work/EFTNewCamera-source/_build/zero-range-regression.txt", "PASS "+passed+" zero-range assertions");
         Debug.Log("PASS "+passed+" zero-range assertions");
     }

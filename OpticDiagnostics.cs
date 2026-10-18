@@ -13,7 +13,6 @@ namespace EFTNewCamera;
 // Observe the actual camera callbacks. This deliberately does not try to repair overwritten matrices.
 internal sealed class OpticDiagnostics : MonoBehaviour
 {
-    private static ConfigEntry<bool> _enabled = null!;
     private static ConfigEntry<bool> _force = null!;
     private static ManualLogSource _log = null!;
     private static readonly Dictionary<string, float> Next = new();
@@ -24,8 +23,6 @@ internal sealed class OpticDiagnostics : MonoBehaviour
     internal void Initialize(ConfigFile config, ManualLogSource log)
     {
         _log = log;
-        _enabled = config.Bind("光学密位诊断", "记录镜内渲染流程", true,
-            "瞄准时将相机ID、RenderTexture、视图/投影矩阵、当前瞄具及各阶段变化写入BepInEx/LogOutput.log。每个阶段每秒最多一条。用于定位修改被覆盖的位置。");
         _force = config.Bind("光学密位诊断", "强制镜内画面上移测试", false,
             "诊断用：骨架镜头开启并瞄准时，绕过型号白名单和密位数值，对管理器的镜内相机施加画面高度20%的上移。分划仍走原投影。开启后无需按PgUp；测试完成请关闭。");
         _force.SettingChanged += (_, _) => _log.LogInfo("[OpticDiag] force20percent=" + _force.Value);
@@ -41,12 +38,13 @@ internal sealed class OpticDiagnostics : MonoBehaviour
     }
 
     private static bool Aiming => Singleton<GameWorld>.Instance?.MainPlayer?.HandsController?.IsAiming == true;
-    internal static bool Force => _force != null && _force.Value && NewCameraSwitch.Enabled && Aiming;
+    internal static bool Force => OpticTest.Enabled && _force != null && _force.Value && NewCameraSwitch.Enabled && Aiming;
 
     internal static void Input(string stage, string detail)
     {
+        if (!OpticTest.Enabled) return;
         _input = stage + " " + detail;
-        if (_enabled != null && _enabled.Value) _log.LogInfo("[OpticDiag] input " + _input);
+        _log.LogInfo("[OpticDiag] input " + _input);
     }
 
     private static string Matrix(Matrix4x4 m) =>
@@ -54,7 +52,7 @@ internal sealed class OpticDiagnostics : MonoBehaviour
 
     internal static void Trace(string stage, Camera camera, string detail = "")
     {
-        if (_enabled == null || !_enabled.Value || !Aiming || camera == null) return;
+        if (!OpticTest.Enabled || !Aiming || camera == null) return;
         string key = stage + ":" + camera.GetInstanceID();
         if (Next.TryGetValue(key, out float next) && Time.unscaledTime < next) return;
         Next[key] = Time.unscaledTime + 1f;
@@ -75,7 +73,7 @@ internal sealed class OpticDiagnostics : MonoBehaviour
 
     private void Update()
     {
-        if (_enabled == null || !_enabled.Value || !Aiming) return;
+        if (!OpticTest.Enabled || !Aiming) return;
         if (UnityEngine.Input.GetKeyDown(KeyCode.PageUp)) Input("raw.PgUp", "收到物理按键");
         if (UnityEngine.Input.GetKeyDown(KeyCode.PageDown)) Input("raw.PgDown", "收到物理按键");
         if (Time.unscaledTime < _inventoryNext) return;
@@ -85,7 +83,7 @@ internal sealed class OpticDiagnostics : MonoBehaviour
 
     private void OnGUI()
     {
-        if (_enabled == null || !_enabled.Value || !Aiming) return;
+        if (!OpticTest.Enabled || !Aiming) return;
         GUI.Box(new Rect(20f, 180f, 760f, 90f), $"镜内诊断 | 强制上移20%：{Force}\n{_last}\n输入：{_input}");
     }
 

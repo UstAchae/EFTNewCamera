@@ -12,7 +12,6 @@ namespace EFTNewCamera;
 // Two independent observations of the existing calculations, never a replacement shot solver.
 internal sealed class BallisticProbe : MonoBehaviour
 {
-    private static ConfigEntry<bool> _record = null!, _side = null!;
     private static ManualLogSource _log = null!;
     private static StreamWriter? _writer;
     private static bool _failed;
@@ -27,13 +26,10 @@ internal sealed class BallisticProbe : MonoBehaviour
     internal void Initialize(ConfigFile config, ManualLogSource log)
     {
         _log = log;
-        _record = config.Bind("密位双探针", "记录密位调整", true,
-            "每次调节密位后记录2秒，最长每秒10组。分别记录实际黄线采样和紫线求交输入，含帧号、世界坐标、相机矩阵、候选及有效交点。保存到BepInEx/ballistic-probes，不修改弹道。");
-        _side = config.Bind("密位双探针", "显示侧视演示", true,
-            "侧视窗口使用探针记录的位置，显示黄线和紫线、交点及失败原因。横纵轴分别自动缩放，明确标注真实米数；侧视重合不代表三维相交。");
+        OpticTest.Changed += ResetCapture;
     }
 
-    internal static bool Enabled => _record != null && (_record.Value || _side.Value);
+    internal static bool Enabled => OpticTest.Enabled;
     internal static void Adjust(string scope, float before, float after)
     {
         if (!Enabled) return;
@@ -100,7 +96,7 @@ internal sealed class BallisticProbe : MonoBehaviour
 
     private static void Write(object row)
     {
-        if(_record==null || !_record.Value || _failed)return;
+        if(!Enabled || _failed)return;
         try
         {
             if(_writer==null)
@@ -126,7 +122,7 @@ internal sealed class BallisticProbe : MonoBehaviour
     }
     private void OnGUI()
     {
-        if(_side==null || !_side.Value || Event.current.type!=EventType.Repaint || !NewCameraSwitch.Enabled)return;
+        if(!Enabled || Event.current.type!=EventType.Repaint || !NewCameraSwitch.Enabled)return;
         if(Comfort.Common.Singleton<EFT.GameWorld>.Instance?.MainPlayer?.HandsController?.IsAiming!=true)return;
         _label ??= new GUIStyle(GUI.skin.label){fontSize=13,wordWrap=false,alignment=TextAnchor.UpperLeft,clipping=TextClipping.Clip};
         _label.normal.textColor=Color.white;
@@ -161,5 +157,12 @@ internal sealed class BallisticProbe : MonoBehaviour
         GUI.Label(new Rect(panel.x+10,panel.yMax-52,width-20,22),"黄=实线弹道；淡黄=理论延长；紫=求交射线；绿=有效交点。侧视重合不等于三维相交。",_label);
         GUI.Label(new Rect(panel.x+10,panel.yMax-30,width-20,22),$"有效交点 {_hits.Length}；数据：BepInEx/ballistic-probes/（调节后自动记录2秒）",_label);
     }
-    private void OnDestroy(){_writer?.Dispose();_writer=null;}
+    private static void ResetCapture()
+    {
+        _until=0f; _nextReference=_nextMain=_nextOptic=0f;
+        _solid=_theory=_hits=Array.Empty<Vector3>(); _shotFrame=_sightFrame=-1;
+        _status="等待瞄准及调整密位";
+        _writer?.Dispose(); _writer=null; _failed=false; _records=0;
+    }
+    private void OnDestroy(){OpticTest.Changed-=ResetCapture;_writer?.Dispose();_writer=null;}
 }
