@@ -30,6 +30,20 @@ public static class ZeroRangeRegression
         check(!ZeroRangeMath.Crossing(new Vector3(5,-1,90),new Vector3(5,1,110),origin,forward,up,.1f,out _),"lateral miss rejected");
         check(!ZeroRangeMath.Crossing(new Vector3(0,-1,90),new Vector3(0,-2,110),origin,forward,up,.1f,out _),"no vertical crossing rejected");
         check(ZeroRangeMath.Crossing(new Vector3(0,-1,10),new Vector3(0,1,30),origin,forward,up,.1f,out var below)&&ZeroRangeMath.Format(below.magnitude)=="< 50 m","valid near-only result");
+        check(SightReferenceMath.UvVertical(Vector3.zero, Vector3.right, Vector3.forward,
+            Vector2.zero, Vector2.right, Vector2.up, out var perV) && (perV-Vector3.forward).sqrMagnitude<1e-10f,"reticle V follows authored mesh axis");
+        var delta=SightReferenceMath.LegacyTranslation(Matrix4x4.identity,perV,2f,.1f);
+        check((delta-new Vector3(0,0,.02f)).sqrMagnitude<1e-10f,"mark scale and native tenfold UV mapping");
+        var reverse=SightReferenceMath.LegacyTranslation(Matrix4x4.identity,perV,2f,-.1f);
+        check((delta+reverse).sqrMagnitude<1e-10f,"opposite adjustments reverse translation");
+        Vector3 reference=new Vector3(2,3,4), endpoint=reference+Vector3.forward*100f;
+        check(((endpoint+delta)-(reference+delta)-Vector3.forward*100f).sqrMagnitude<1e-10f,"translated sight remains parallel at both endpoints");
+        check(!SightReferenceMath.UvVertical(Vector3.zero,Vector3.right,Vector3.up,Vector2.zero,Vector2.zero,Vector2.zero,out _),"degenerate UV rejected");
+        Matrix4x4 projection=Matrix4x4.Perspective(30f,1f,.01f,1000f);
+        check(SightReferenceMath.ProjectionTranslation(projection,Matrix4x4.identity,new Vector3(0,0,-2),.1f,out var pixelDelta),"native reticle plane displacement available");
+        Vector4 clip=projection*new Vector4(pixelDelta.x,pixelDelta.y,-2+pixelDelta.z,1);
+        Debug.Log("Projection translation delta="+pixelDelta.ToString("F9")+" ndc="+(clip.y/clip.w).ToString("R"));
+        check(Mathf.Abs(clip.y/clip.w-.1f)<1e-6f && Mathf.Abs(pixelDelta.z)<1e-6f,"world translation reproduces actual reticle pixel shift at fixed depth");
         File.WriteAllText("D:/games/SPT-4.1.6/.codex-work/EFTNewCamera-source/_build/zero-range-regression.txt", "PASS "+passed+" zero-range assertions");
         Debug.Log("PASS "+passed+" zero-range assertions");
     }

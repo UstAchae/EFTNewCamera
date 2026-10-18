@@ -185,20 +185,12 @@ internal sealed class TrajectoryPreview : MonoBehaviour
 
     private void AppendSightDebug(Camera camera)
     {
-        var cyan = new Color32(0, 255, 255, 255);
         var purple = new Color32(220, 100, 255, 255);
         var green = new Color32(70, 255, 70, 255);
         Vector3 origin = EquivalentZeroRange.DebugOrigin, direction = EquivalentZeroRange.DebugDirection;
-        Line(origin, origin + direction * _rayLength.Value, cyan);
-        Marker(camera, origin, cyan);
-        Marker(camera, origin + direction * 0.5f, cyan);
-        if (EquivalentZeroRange.HasNative)
-        {
-            Vector3 native = EquivalentZeroRange.NativeOrigin;
-            Line(native, native + EquivalentZeroRange.NativeDirection * _rayLength.Value, purple);
-            Marker(camera, native, purple);
-            foreach (Vector3 hit in EquivalentZeroRange.NativeCrossings) Marker(camera, hit, purple);
-        }
+        Line(origin, origin + direction * _rayLength.Value, purple);
+        Marker(camera, origin, purple);
+        Marker(camera, origin + direction * 0.5f, purple);
         // Continue the theoretical path past scene collision so distant intersections can be inspected.
         // Dashes distinguish this from the solid collision-limited yellow prediction and red impact.
         var points = EquivalentZeroRange.DebugTrajectory;

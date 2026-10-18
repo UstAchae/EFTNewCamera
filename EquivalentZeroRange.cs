@@ -2,6 +2,7 @@ using BepInEx.Configuration;
 using Comfort.Common;
 using EFT;
 using EFT.Ballistics;
+using EFT.CameraControl;
 using UnityEngine;
 using System.Collections.Generic;
 
@@ -10,7 +11,7 @@ namespace EFTNewCamera;
 internal static class EquivalentZeroRange
 {
     private static ConfigEntry<bool> _show = null!;
-    private static ConfigEntry<float> _maximum = null!, _tolerance = null!, _x = null!, _y = null!;
+    private static ConfigEntry<float> _maximum = null!, _tolerance = null!;
     private static int _frame = -1;
     private static string _text = "—";
     private static ConfigEntry<bool> _debug = null!;
@@ -24,17 +25,14 @@ internal static class EquivalentZeroRange
     internal static void Initialize(ConfigFile config)
     {
         _debug = config.Bind("等效归零距离", "显示瞄准基准与交点", true,
-            "青线为当前估算实际使用的瞄准射线，紫线为游戏原生瞄准节点轴；绿叉标估算交点，紫叉标原生轴交点。黄色虚线延伸未碰撞理论弹道以便观察交点，红叉仍是实际首次碰撞。仅调试绘制，不改弹道。");
+            "紫线以游戏原生瞄准节点轴为基准；A类跟随实际分划位移平移，绿叉为同一条线与理论弹道的交点。黄色虚线延伸未碰撞理论弹道以便观察交点，红叉仍是实际首次碰撞。仅调试绘制，不改弹道。");
         _show = config.Bind("等效归零距离", "显示估算距离", true,
-            "独立显示当前瞄准射线与理论弹道的近交点，忽略墙壁碰撞。小于50米显示< 50 m，无有效交点显示—。首版以原版瞄准中心为基准，未逐镜校准尖柱/尖角。");
+            "独立显示当前瞄准射线与理论弹道的近交点，忽略墙壁碰撞。小于50米显示< 50 m，无有效交点显示—。以游戏原生瞄准节点为零位；A类按实际分划纹理或渲染几何位移平移基准，B类计入镜内画面投影调节。");
         _maximum = config.Bind("等效归零距离", "最大计算距离（米）", 2000f,
             new ConfigDescription("沿瞄准射线的计算范围，最长模拟20秒。", new AcceptableValueRange<float>(100f, 5000f)));
         _tolerance = config.Bind("等效归零距离", "横向重合容差（mrad）", 0.1f,
             new ConfigDescription("垂直交点还必须落在瞄准射线的横向容差内，否则不显示虚假的归零距离。", new AcceptableValueRange<float>(0.01f, 1f)));
-        _x = config.Bind("等效归零距离", "基准瞄准点X", 0.5f,
-            new ConfigDescription("镜内画面归一化坐标。0.5为中心；这是首版手动校准项，尚非逐镜自动识别。", new AcceptableValueRange<float>(0f, 1f)));
-        _y = config.Bind("等效归零距离", "基准瞄准点Y", 0.5f,
-            new ConfigDescription("镜内画面归一化坐标，0为底部、1为顶部。A类位移在此基准上叠加。", new AcceptableValueRange<float>(0f, 1f)));
+
     }
 
     internal static void Sample(Camera camera, float mrad, bool reticleMoving)
@@ -42,31 +40,52 @@ internal static class EquivalentZeroRange
         if (_show == null || (!_show.Value && !_debug.Value) || _frame == Time.frameCount) return;
         _frame = Time.frameCount;
         _text = "—";
-        DebugTrajectory.Clear(); DebugCrossings.Clear(); NativeCrossings.Clear(); HasNative = false;
+        DebugTrajectory.Clear(); DebugCrossings.Clear();
         if (OpticDiagnostics.Force) return;
         Player? player = Singleton<GameWorld>.Instance?.MainPlayer;
         if (player == null || !(player.HandsController is Player.FirearmController firearm)
             || firearm.CurrentFireport?.Original == null) return;
         var ammo = firearm.Weapon.CurrentAmmoTemplate;
         if (ammo == null || ammo.BulletMassGram <= 0f || ammo.BulletDiameterMilimeters <= 0f || ammo.BallisticCoeficient <= 0f) return;
+        var bone = player.ProceduralWeaponAnimation?.CurrentScope?.Bone;
+        if (bone == null) return;
+        NativeOrigin = bone.position;
+        NativeDirection = (bone.name == "aim_camera" ? -bone.up : -bone.forward).normalized;
+        HasNative = true;
+        Vector3 origin = NativeOrigin, ray = NativeDirection;
         Matrix4x4 projection = camera.nonJitteredProjectionMatrix;
-        float ndcY = _y.Value * 2f - 1f;
         float shift = Mathf.Tan(mrad / 1000f) * projection.m11;
-        if (reticleMoving) ndcY += shift;
-        else projection.m12 -= shift;
-        Vector4 point = projection.inverse * new Vector4(_x.Value * 2f - 1f, ndcY, 1f, 1f);
-        if (Mathf.Abs(point.w) < 0.0000001f) return;
-        Vector3 ray = camera.cameraToWorldMatrix.MultiplyVector(new Vector3(point.x, point.y, point.z) / point.w).normalized;
-        Vector3 origin = camera.cameraToWorldMatrix.MultiplyPoint3x4(Vector3.zero);
-        DebugOrigin = origin; DebugDirection = ray;
-        var scope = player.ProceduralWeaponAnimation?.CurrentScope;
-        if (scope?.Bone != null)
+        if (reticleMoving && Mathf.Abs(mrad) > 0.000001f)
         {
-            var bone = scope.Bone;
-            NativeOrigin = bone.position;
-            NativeDirection = (bone.name == "aim_camera" ? -bone.up : -bone.forward).normalized;
-            HasNative = true;
+            Vector3 translation;
+            var reticle = CameraManager.Instance?.OpticCameraManager?.OpticRetrice;
+            if (reticle?.CanUpdate == true && reticle.Renderer != null)
+            {
+                if (!SightReferenceMath.ProjectionTranslation(projection, camera.cameraToWorldMatrix,
+                    reticle.Renderer.bounds.center, shift, out translation)) return;
+            }
+            else if (!LegacyReticle.TryGetTranslation(out translation))
+            {
+                OpticDiagnostics.Trace("reference.unavailable", camera, "No readable reticle geometry; distance suppressed rather than using an arbitrary displacement.");
+                return;
+            }
+            // Translate the native reference by exactly the rendered mark's displacement. Never turn its axis.
+            origin += translation;
         }
+        else if (!reticleMoving && Mathf.Abs(mrad) > 0.000001f)
+        {
+            // B keeps the mark stationary and changes the scene projection. Apply only that angular delta
+            // to the native reference, preserving the native zero instead of assuming optic-camera centre.
+            Matrix4x4 inverse = projection.inverse;
+            Vector4 before = inverse * new Vector4(0f, 0f, 1f, 1f);
+            Matrix4x4 moved = projection; moved.m12 -= shift;
+            Vector4 after = moved.inverse * new Vector4(0f, 0f, 1f, 1f);
+            Vector3 a = camera.cameraToWorldMatrix.MultiplyVector(new Vector3(before.x, before.y, before.z));
+            Vector3 b = camera.cameraToWorldMatrix.MultiplyVector(new Vector3(after.x, after.y, after.z));
+            ray = (Quaternion.FromToRotation(a, b) * ray).normalized;
+        }
+        DebugOrigin = origin; DebugDirection = ray;
+        OpticDiagnostics.Trace("reference.native", camera, $"reticleMoving={reticleMoving} mrad={mrad:R} translation={origin-NativeOrigin} origin={origin} axis={ray}");
         Vector3 up = Vector3.ProjectOnPlane(-Physics.gravity, ray).normalized;
         if (up.sqrMagnitude < 0.5f) return;
         Vector3 muzzle = firearm.CurrentFireport.Original.position;
@@ -80,7 +99,6 @@ internal static class EquivalentZeroRange
         float coefficient = mass * 0.0014223f / (diameter * diameter * ammo.BallisticCoeficient);
         float area = 1.2f * diameter * diameter * Mathf.PI / 4f;
         float nearest = -1f;
-        Vector3 nativeUp = HasNative ? Vector3.ProjectOnPlane(-Physics.gravity, NativeDirection).normalized : Vector3.zero;
         const float step = 0.01f;
         for (int i = 0; i < 2000; i++)
         {
@@ -99,9 +117,6 @@ internal static class EquivalentZeroRange
                     if (nearest < 0f || range < nearest) nearest = range;
                 }
             }
-            if (HasNative && ZeroRangeMath.Crossing(position, next, NativeOrigin, NativeDirection, nativeUp, _tolerance.Value, out Vector3 nativeHit)
-                && Vector3.Distance(muzzle, nativeHit) <= _maximum.Value
-                && (NativeCrossings.Count == 0 || Vector3.Distance(NativeCrossings[NativeCrossings.Count - 1], nativeHit) > 0.02f)) NativeCrossings.Add(nativeHit);
             if (Vector3.Dot(next - origin, ray) > _maximum.Value) break;
             position = next;
             velocity += acceleration * step;

@@ -227,7 +227,7 @@ internal static class OpticElevation
             offset = shown;
         }
         if (legacy)
-            LegacyReticle.Apply(CameraManager.Instance?.OpticCameraManager?.CurrentOpticSight, camera, offset);
+            LegacyReticle.Apply(CameraManager.Instance?.OpticCameraManager?.CurrentOpticSight, camera, offset, mod!.Item.TemplateId);
         if (eligible)
             EquivalentZeroRange.Sample(camera, offset, ReticleMoving.Contains(mod!.Item.TemplateId));
         if (!OpticDiagnostics.Force && (!eligible || Mathf.Abs(offset) < 0.000001f))
