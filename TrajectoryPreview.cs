@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using HarmonyLib;
 using BepInEx.Configuration;
 using Comfort.Common;
 using EFT;
@@ -26,6 +27,8 @@ internal sealed class TrajectoryPreview : MonoBehaviour
     private readonly Dictionary<int, (Camera Camera, CommandBuffer Buffer)> _buffers = new();
     private int _sampleFrame = -1;
     private const float Step = 0.01f;
+    private ConfigEntry<float> _rayLength = null!;
+    private static TrajectoryPreview? _instance;
 
     internal void Initialize(ConfigFile config)
     {
@@ -33,13 +36,19 @@ internal sealed class TrajectoryPreview : MonoBehaviour
             "黄色：重力与G1阻力预测弹道；红色十字：预测终点。遇到首次碰撞停止，不预测散布、穿透或跳弹。独立于骨架镜头总开关，方便比较。");
         _range = config.Bind("弹道调试", "预测最大距离", 1000f,
             new ConfigDescription("从枪口计算的最大路径长度，单位米；最长模拟20秒。", new AcceptableValueRange<float>(50f, 2000f)));
+        _rayLength = config.Bind("弹道调试", "瞄准线显示长度（米）", 50000f,
+            new ConfigDescription("用足够长的线模拟无限射线，实际可见范围仍受相机远裁剪限制；不改变交点计算的最大距离。", new AcceptableValueRange<float>(100f, 100000f)));
+        _instance = this;
+        new Harmony(NewCameraPlugin.PluginGuid + ".trajectoryComposite").Patch(
+            AccessTools.Method(typeof(SSAAPropagator), "FillCommandBuffer"),
+            postfix: new HarmonyMethod(typeof(TrajectoryPreview), nameof(CompositePostfix)));
         Camera.onPreRender += Draw;
     }
 
     private void BeforeCamera(Camera camera)
     {
         if (_enabled == null || !_enabled.Value) { _count = 0; _sampleFrame = -1; return; }
-        if (camera != Camera.main && !OpticPicture.IsCamera(camera)) return;
+        if (!camera.CompareTag("MainCamera") && !OpticPicture.IsCamera(camera)) return;
         // Both cameras use this frame's sample; never reuse a previous frame's trajectory.
         if (_sampleFrame == Time.frameCount) return;
         _sampleFrame = Time.frameCount;
@@ -105,7 +114,7 @@ internal sealed class TrajectoryPreview : MonoBehaviour
         if (_buffers.TryGetValue(camera.GetInstanceID(), out var previous)) previous.Buffer.Clear();
         BeforeCamera(camera);
         if (_enabled == null || !_enabled.Value || _count < 2) return;
-        if (camera != Camera.main && !OpticPicture.IsCamera(camera)) return;
+        if (!camera.CompareTag("MainCamera") && !OpticPicture.IsCamera(camera)) return;
         if (_material == null)
         {
             Shader shader = Shader.Find("Hidden/Internal-Colored");
@@ -138,6 +147,7 @@ internal sealed class TrajectoryPreview : MonoBehaviour
         _vertices.Add(end - camera.transform.up * size);
         _vertices.Add(end + camera.transform.up * size);
         for (int i = 0; i < 4; i++) _colors.Add(new Color32(255, 0, 0, 255));
+        if (EquivalentZeroRange.DebugActive) AppendSightDebug(camera);
         for (int i = 0; i < _vertices.Count; i++) _indices.Add(i);
         _mesh.Clear();
         _mesh.SetVertices(_vertices);
@@ -159,6 +169,62 @@ internal sealed class TrajectoryPreview : MonoBehaviour
         entry.Buffer.DrawMesh(_mesh, Matrix4x4.identity, _material, 0, 0);
     }
 
+    private void Line(Vector3 a, Vector3 b, Color32 color)
+    {
+        _vertices.Add(a); _vertices.Add(b);
+        _colors.Add(color); _colors.Add(color);
+    }
+
+    private void Marker(Camera camera, Vector3 point, Color32 color)
+    {
+        float size = Mathf.Max(0.001f, Vector3.Distance(camera.transform.position, point)
+            * Mathf.Tan(camera.fieldOfView * Mathf.Deg2Rad * 0.5f) * 12f / Mathf.Max(1, camera.pixelHeight));
+        Line(point - camera.transform.right * size, point + camera.transform.right * size, color);
+        Line(point - camera.transform.up * size, point + camera.transform.up * size, color);
+    }
+
+    private void AppendSightDebug(Camera camera)
+    {
+        var cyan = new Color32(0, 255, 255, 255);
+        var purple = new Color32(220, 100, 255, 255);
+        var green = new Color32(70, 255, 70, 255);
+        Vector3 origin = EquivalentZeroRange.DebugOrigin, direction = EquivalentZeroRange.DebugDirection;
+        Line(origin, origin + direction * _rayLength.Value, cyan);
+        Marker(camera, origin, cyan);
+        Marker(camera, origin + direction * 0.5f, cyan);
+        if (EquivalentZeroRange.HasNative)
+        {
+            Vector3 native = EquivalentZeroRange.NativeOrigin;
+            Line(native, native + EquivalentZeroRange.NativeDirection * _rayLength.Value, purple);
+            Marker(camera, native, purple);
+            foreach (Vector3 hit in EquivalentZeroRange.NativeCrossings) Marker(camera, hit, purple);
+        }
+        // Continue the theoretical path past scene collision so distant intersections can be inspected.
+        // Dashes distinguish this from the solid collision-limited yellow prediction and red impact.
+        var points = EquivalentZeroRange.DebugTrajectory;
+        for (int i = 1; i < points.Count; i++)
+            if ((i / 3) % 2 == 0) Line(points[i - 1], points[i], new Color32(255,255,0,190));
+        foreach (Vector3 hit in EquivalentZeroRange.DebugCrossings) Marker(camera, hit, green);
+    }
+
+    private static void CompositePostfix(SSAAPropagator __instance, CommandBuffer externalCommandBuffer)
+    {
+        var instance = _instance;
+        Camera camera = __instance.GetComponent<Camera>();
+        if (instance == null || camera == null || !camera.CompareTag("MainCamera")
+            || instance._enabled == null || !instance._enabled.Value) return;
+        if (!__instance.GetSourceDestination(out RenderTexture source, out _) || source == null) return;
+        instance.Draw(camera);
+        if (instance._count < 2 || instance._mesh == null || instance._material == null) return;
+        bool own = externalCommandBuffer == null;
+        CommandBuffer command = externalCommandBuffer ?? new CommandBuffer { name = "World trajectory after scope composite" };
+        command.SetRenderTarget(source);
+        command.SetViewProjectionMatrices(camera.worldToCameraMatrix, camera.nonJitteredProjectionMatrix);
+        command.DrawMesh(instance._mesh, Matrix4x4.identity, instance._material, 0, 0);
+        command.SetViewProjectionMatrices(camera.worldToCameraMatrix, camera.projectionMatrix);
+        if (own) { Graphics.ExecuteCommandBuffer(command); command.Dispose(); }
+    }
+
     private void Update()
     {
         // Clear queued lines immediately when disabled or when the player no longer holds a firearm.
@@ -169,6 +235,7 @@ internal sealed class TrajectoryPreview : MonoBehaviour
 
     private void OnDestroy()
     {
+        if (_instance == this) _instance = null;
         Camera.onPreRender -= Draw;
         foreach (var entry in _buffers.Values)
         {

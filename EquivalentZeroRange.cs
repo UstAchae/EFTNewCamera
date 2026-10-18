@@ -3,6 +3,7 @@ using Comfort.Common;
 using EFT;
 using EFT.Ballistics;
 using UnityEngine;
+using System.Collections.Generic;
 
 namespace EFTNewCamera;
 
@@ -12,9 +13,18 @@ internal static class EquivalentZeroRange
     private static ConfigEntry<float> _maximum = null!, _tolerance = null!, _x = null!, _y = null!;
     private static int _frame = -1;
     private static string _text = "—";
+    private static ConfigEntry<bool> _debug = null!;
+    internal static readonly List<Vector3> DebugTrajectory = new(2001);
+    internal static readonly List<Vector3> DebugCrossings = new(4);
+    internal static readonly List<Vector3> NativeCrossings = new(4);
+    internal static Vector3 DebugOrigin, DebugDirection, NativeOrigin, NativeDirection;
+    internal static bool HasNative;
+    internal static bool DebugActive => _debug != null && _debug.Value && DebugTrajectory.Count > 1 && _frame >= Time.frameCount - 1;
 
     internal static void Initialize(ConfigFile config)
     {
+        _debug = config.Bind("等效归零距离", "显示瞄准基准与交点", true,
+            "青线为当前估算实际使用的瞄准射线，紫线为游戏原生瞄准节点轴；绿叉标估算交点，紫叉标原生轴交点。黄色虚线延伸未碰撞理论弹道以便观察交点，红叉仍是实际首次碰撞。仅调试绘制，不改弹道。");
         _show = config.Bind("等效归零距离", "显示估算距离", true,
             "独立显示当前瞄准射线与理论弹道的近交点，忽略墙壁碰撞。小于50米显示< 50 m，无有效交点显示—。首版以原版瞄准中心为基准，未逐镜校准尖柱/尖角。");
         _maximum = config.Bind("等效归零距离", "最大计算距离（米）", 2000f,
@@ -29,9 +39,10 @@ internal static class EquivalentZeroRange
 
     internal static void Sample(Camera camera, float mrad, bool reticleMoving)
     {
-        if (_show == null || !_show.Value || _frame == Time.frameCount) return;
+        if (_show == null || (!_show.Value && !_debug.Value) || _frame == Time.frameCount) return;
         _frame = Time.frameCount;
         _text = "—";
+        DebugTrajectory.Clear(); DebugCrossings.Clear(); NativeCrossings.Clear(); HasNative = false;
         if (OpticDiagnostics.Force) return;
         Player? player = Singleton<GameWorld>.Instance?.MainPlayer;
         if (player == null || !(player.HandsController is Player.FirearmController firearm)
@@ -47,18 +58,29 @@ internal static class EquivalentZeroRange
         if (Mathf.Abs(point.w) < 0.0000001f) return;
         Vector3 ray = camera.cameraToWorldMatrix.MultiplyVector(new Vector3(point.x, point.y, point.z) / point.w).normalized;
         Vector3 origin = camera.cameraToWorldMatrix.MultiplyPoint3x4(Vector3.zero);
+        DebugOrigin = origin; DebugDirection = ray;
+        var scope = player.ProceduralWeaponAnimation?.CurrentScope;
+        if (scope?.Bone != null)
+        {
+            var bone = scope.Bone;
+            NativeOrigin = bone.position;
+            NativeDirection = (bone.name == "aim_camera" ? -bone.up : -bone.forward).normalized;
+            HasNative = true;
+        }
         Vector3 up = Vector3.ProjectOnPlane(-Physics.gravity, ray).normalized;
         if (up.sqrMagnitude < 0.5f) return;
         Vector3 muzzle = firearm.CurrentFireport.position;
         Vector3 direction = firearm.WeaponDirection.normalized;
         AimArms.ResolvePreviewShot(firearm, ref muzzle, ref direction);
         Vector3 position = muzzle;
+        DebugTrajectory.Add(position);
         Vector3 velocity = direction * (ammo.InitialSpeed * firearm.Weapon.SpeedFactor);
         float mass = ammo.BulletMassGram / 1000f;
         float diameter = ammo.BulletDiameterMilimeters / 1000f;
         float coefficient = mass * 0.0014223f / (diameter * diameter * ammo.BallisticCoeficient);
         float area = 1.2f * diameter * diameter * Mathf.PI / 4f;
         float nearest = -1f;
+        Vector3 nativeUp = HasNative ? Vector3.ProjectOnPlane(-Physics.gravity, NativeDirection).normalized : Vector3.zero;
         const float step = 0.01f;
         for (int i = 0; i < 2000; i++)
         {
@@ -67,11 +89,19 @@ internal static class EquivalentZeroRange
             float drag = Shot.CalculateG1DragCoefficient(speed) * coefficient;
             Vector3 acceleration = Physics.gravity - area * drag * speed * speed / (2f * mass) * velocity.normalized;
             Vector3 next = position + velocity * step + acceleration * (0.5f * step * step);
+            DebugTrajectory.Add(next);
             if (ZeroRangeMath.Crossing(position, next, origin, ray, up, _tolerance.Value, out Vector3 crossing))
             {
                 float range = Vector3.Distance(muzzle, crossing);
-                if (range <= _maximum.Value && (nearest < 0f || range < nearest)) nearest = range;
+                if (range <= _maximum.Value)
+                {
+                    if (DebugCrossings.Count == 0 || Vector3.Distance(DebugCrossings[DebugCrossings.Count - 1], crossing) > 0.02f) DebugCrossings.Add(crossing);
+                    if (nearest < 0f || range < nearest) nearest = range;
+                }
             }
+            if (HasNative && ZeroRangeMath.Crossing(position, next, NativeOrigin, NativeDirection, nativeUp, _tolerance.Value, out Vector3 nativeHit)
+                && Vector3.Distance(muzzle, nativeHit) <= _maximum.Value
+                && (NativeCrossings.Count == 0 || Vector3.Distance(NativeCrossings[NativeCrossings.Count - 1], nativeHit) > 0.02f)) NativeCrossings.Add(nativeHit);
             if (Vector3.Dot(next - origin, ray) > _maximum.Value) break;
             position = next;
             velocity += acceleration * step;
