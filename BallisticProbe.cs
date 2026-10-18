@@ -85,6 +85,8 @@ internal sealed class BallisticProbe : MonoBehaviour
         }
         if(Time.unscaledTime<=_until) Write(new {kind="reference",frame=_sightFrame,time=Time.unscaledTime,scope=_scope,mrad,moving,status,
             trajectoryFrame=_shotFrame,nativeOrigin=V(EquivalentZeroRange.NativeOrigin),nativeAxis=V(EquivalentZeroRange.NativeDirection),
+            observerCameraId=EquivalentZeroRange.ObserverCameraId,observerSource=EquivalentZeroRange.ObserverSource,
+            zeroAimPoint=V(EquivalentZeroRange.DebugZeroPoint),aimPoint=V(EquivalentZeroRange.DebugAimPoint),
             origin=V(_origin),axis=V(_ray),theory=Points(_theory),crossings=Points(_hits),candidates,
             cameraId=camera.GetInstanceID(),cameraPosition=V(camera.transform.position),view=Matrix(camera.worldToCameraMatrix),projection=Matrix(camera.nonJitteredProjectionMatrix)});
     }

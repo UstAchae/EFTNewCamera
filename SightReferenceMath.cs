@@ -4,6 +4,31 @@ namespace EFTNewCamera
 {
 internal static class SightReferenceMath
 {
+    internal static bool AxisPlanePoint(Vector3 origin, Vector3 axis, Vector3 planePoint, Vector3 planeNormal, out Vector3 point)
+    {
+        point = Vector3.zero;
+        float denominator = Vector3.Dot(axis, planeNormal);
+        if (Mathf.Abs(denominator)<0.000001f) return false;
+        point = origin + axis*(Vector3.Dot(planePoint-origin,planeNormal)/denominator);
+        return true;
+    }
+
+    internal static bool EyeRay(Vector3 eye, Vector3 point, Vector3 cameraForward, out Vector3 direction)
+    {
+        direction = point-eye;
+        if (direction.sqrMagnitude < 0.00000001f || Vector3.Dot(direction,cameraForward)<=0f)
+        { direction=Vector3.zero; return false; }
+        direction.Normalize();
+        return true;
+    }
+
+    internal static Matrix4x4 LegacyMatrix(Matrix4x4 objectToWorld)
+    {
+        Vector4 x=objectToWorld.GetColumn(0), y=objectToWorld.GetColumn(1);
+        float ratio=y.magnitude>0.000001f?x.magnitude/y.magnitude:1f;
+        objectToWorld.SetColumn(1,new Vector4(y.x,y.z,y.y,0f)*ratio);
+        return objectToWorld;
+    }
     // SPT 4.1.6 ships these meshes without CPU read access. Values extracted from the central
     // UV triangle of the original bundles; guard identity/bounds instead of guessing a mm/mrad ratio.
     internal static bool NativeVertical(string template, string meshName, int vertexCount, Vector3 boundsSize, out Vector3 perV)
@@ -34,9 +59,7 @@ internal static class SightReferenceMath
     internal static Vector3 LegacyTranslation(Matrix4x4 objectToWorld, Vector3 perV, float markScale, float textureShift)
     {
         // Match CW FX/OpticSight's corrected object Y column, not the raw Transform matrix.
-        Vector4 x = objectToWorld.GetColumn(0), y = objectToWorld.GetColumn(1);
-        float ratio = y.magnitude > 0.000001f ? x.magnitude / y.magnitude : 1f;
-        objectToWorld.SetColumn(1, new Vector4(y.x, y.z, y.y, 0f) * ratio);
+        objectToWorld = LegacyMatrix(objectToWorld);
         // Native mark sampling is 10*UV-4.5; translating the texture by d moves mesh UV by d/10.
         return objectToWorld.MultiplyVector(perV * (markScale * textureShift / 10f));
     }

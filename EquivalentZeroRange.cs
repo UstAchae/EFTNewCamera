@@ -20,15 +20,17 @@ internal static class EquivalentZeroRange
     internal static readonly List<Vector3> CandidateCrossings = new(4);
     private static string _status = "等待瞄准采样";
     private static GUIStyle? _readout;
-    internal static Vector3 DebugOrigin, DebugDirection, NativeOrigin, NativeDirection;
+    internal static Vector3 DebugOrigin, DebugDirection, NativeOrigin, NativeDirection, DebugZeroPoint, DebugAimPoint;
+    internal static string ObserverSource = "unavailable";
+    internal static int ObserverCameraId;
     internal static bool DebugActive => _debug != null && _debug.Value && DebugTrajectory.Count > 1 && _frame >= Time.frameCount - 1;
 
     internal static void Initialize(ConfigFile config)
     {
         _debug = config.Bind("等效归零距离", "显示瞄准基准与交点", true,
-            "紫线以游戏原生瞄准节点轴为基准；A类跟随实际分划位移平移，绿叉为同一条线与理论弹道的交点。黄色虚线延伸未碰撞理论弹道以便观察交点，红叉仍是实际首次碰撞。仅调试绘制，不改弹道。");
+            "紫线从实际观察镜头出发，穿过当前分划点；分划移动时射线绕观察位置转动。原生轴只用于标定零位分划点。绿叉为该射线与理论弹道的交点。黄色虚线延伸未碰撞理论弹道以便观察交点，红叉仍是实际首次碰撞。仅调试绘制，不改弹道。");
         _show = config.Bind("等效归零距离", "显示估算距离", true,
-            "同时显示紫色瞄准射线与理论弹道的近、远交点，忽略墙壁碰撞。各交点小于50米显示< 50 m，缺失交点显示—。以游戏原生瞄准节点为零位；A类按分划位移平移基准，B类计入镜内画面投影调节。");
+            "同时显示紫色瞄准射线与理论弹道的近、远交点，忽略墙壁碰撞。各交点小于50米显示< 50 m，缺失交点显示—。原生节点标定零位分划点，当前射线从观察镜头穿过调节后的分划点；B类计入镜内场景投影。");
         _maximum = config.Bind("等效归零距离", "最大计算距离（米）", 2000f,
             new ConfigDescription("沿瞄准射线的计算范围，最长模拟20秒。", new AcceptableValueRange<float>(100f, 5000f)));
         _tolerance = config.Bind("等效归零距离", "横向重合容差（mrad）", 0.1f,
@@ -42,7 +44,8 @@ internal static class EquivalentZeroRange
         _frame = Time.frameCount;
         _text = ZeroRangeMath.FormatPair(-1f, -1f, 0);
         DebugTrajectory.Clear(); DebugCrossings.Clear(); CandidateCrossings.Clear();
-        DebugOrigin = DebugDirection = NativeOrigin = NativeDirection = Vector3.zero;
+        DebugOrigin = DebugDirection = NativeOrigin = NativeDirection = DebugZeroPoint = DebugAimPoint = Vector3.zero;
+        ObserverSource = "unavailable"; ObserverCameraId = 0;
         _status = "未取得有效数据";
         try { SampleCore(camera, mrad, reticleMoving); }
         finally { BallisticProbe.Reference(camera, mrad, reticleMoving, _status); }
@@ -60,41 +63,43 @@ internal static class EquivalentZeroRange
         if (bone == null) { _status="原生瞄准节点不可用"; return; }
         NativeOrigin = bone.position;
         NativeDirection = (bone.name == "aim_camera" ? -bone.up : -bone.forward).normalized;
-        Vector3 origin = NativeOrigin, ray = NativeDirection;
+        Camera observer = camera;
+        Vector3 zeroPoint, point;
         Matrix4x4 projection = camera.nonJitteredProjectionMatrix;
         float shift = Mathf.Tan(mrad / 1000f) * projection.m11;
-        if (reticleMoving && Mathf.Abs(mrad) > 0.000001f)
+        var reticle = CameraManager.Instance?.OpticCameraManager?.OpticRetrice;
+        bool legacy = reticleMoving && reticle?.CanUpdate != true;
+        if (legacy)
         {
-            Vector3 translation;
-            var reticle = CameraManager.Instance?.OpticCameraManager?.OpticRetrice;
-            if (reticle?.CanUpdate == true && reticle.Renderer != null)
-            {
-                if (!SightReferenceMath.ProjectionTranslation(projection, camera.cameraToWorldMatrix,
-                    reticle.Renderer.bounds.center, shift, out translation)) { _status="分划投影位移不可用"; return; }
-            }
-            else if (!LegacyReticle.TryGetTranslation(out translation))
-            {
-                OpticDiagnostics.Trace("reference.unavailable", camera, "No readable reticle geometry; distance suppressed rather than using an arbitrary displacement.");
-                _status="A类纹理/网格位移不可用，求交已暂停";
-                return;
-            }
-            // Translate the native reference by exactly the rendered mark's displacement. Never turn its axis.
-            origin += translation;
+            observer = Camera.main;
+            if (observer == null) { _status="主观察镜头不可用"; return; }
+            if (!LegacyReticle.TryGetAimPoint(NativeOrigin, NativeDirection, out zeroPoint, out point))
+            { _status="无法取得旧式分划平面和当前分划点"; return; }
+            ObserverSource = "main-eye / native-axis calibrated legacy mark plane";
         }
-        else if (!reticleMoving && Mathf.Abs(mrad) > 0.000001f)
+        else
         {
-            // B keeps the mark stationary and changes the scene projection. Apply only that angular delta
-            // to the native reference, preserving the native zero instead of assuming optic-camera centre.
-            Matrix4x4 inverse = projection.inverse;
-            Vector4 before = inverse * new Vector4(0f, 0f, 1f, 1f);
-            Matrix4x4 moved = projection; moved.m12 -= shift;
-            Vector4 after = moved.inverse * new Vector4(0f, 0f, 1f, 1f);
-            Vector3 a = camera.cameraToWorldMatrix.MultiplyVector(new Vector3(before.x, before.y, before.z));
-            Vector3 b = camera.cameraToWorldMatrix.MultiplyVector(new Vector3(after.x, after.y, after.z));
-            ray = (Quaternion.FromToRotation(a, b) * ray).normalized;
+            Renderer? renderer = reticle?.CanUpdate == true ? reticle.Renderer
+                : CameraManager.Instance?.OpticCameraManager?.CurrentOpticSight?.LensRenderer;
+            if (renderer == null || !SightReferenceMath.AxisPlanePoint(NativeOrigin,NativeDirection,
+                renderer.bounds.center,camera.transform.forward,out zeroPoint))
+            { _status="无法取得镜内分划基准平面"; return; }
+            // A moves the mark upward. B moves the scene upward, hence the world target at the
+            // stationary mark moves downward. Both now define an aim POINT before forming the ray.
+            float ndcShift = reticleMoving ? shift : -shift;
+            if (!SightReferenceMath.ProjectionTranslation(projection,camera.cameraToWorldMatrix,
+                zeroPoint,ndcShift,out Vector3 displacement))
+            { _status="分划点投影换算失败"; return; }
+            point = zeroPoint+displacement;
+            ObserverSource = reticleMoving ? "optic-eye / projected moving mark" : "optic-eye / stationary mark with scene projection";
         }
+        Vector3 origin = observer.cameraToWorldMatrix.MultiplyPoint3x4(Vector3.zero);
+        DebugZeroPoint = zeroPoint; DebugAimPoint = point; ObserverCameraId = observer.GetInstanceID();
+        DebugOrigin = origin;
+        if (!SightReferenceMath.EyeRay(origin,point,observer.transform.forward,out Vector3 ray))
+        { _status="分划点在观察镜头后方或与镜头重合，停止输出错误距离"; return; }
         DebugOrigin = origin; DebugDirection = ray;
-        OpticDiagnostics.Trace("reference.native", camera, $"reticleMoving={reticleMoving} mrad={mrad:R} translation={(origin-NativeOrigin).ToString("F6")} origin={origin.ToString("F6")} axis={ray.ToString("F6")}");
+        OpticDiagnostics.Trace("reference.eye", camera, $"source={ObserverSource} observerId={ObserverCameraId} reticleMoving={reticleMoving} mrad={mrad:R} eye={origin.ToString("F6")} zeroPoint={zeroPoint.ToString("F6")} aimPoint={point.ToString("F6")} axis={ray.ToString("F6")}");
         Vector3 up = Vector3.ProjectOnPlane(-Physics.gravity, ray).normalized;
         if (up.sqrMagnitude < 0.5f) { _status="瞄准轴接近重力方向，垂直求交基准退化"; return; }
         Vector3 muzzle = firearm.CurrentFireport.Original.position;

@@ -53,6 +53,16 @@ public static class ZeroRangeRegression
         Vector4 clip=projection*new Vector4(pixelDelta.x,pixelDelta.y,-2+pixelDelta.z,1);
         Debug.Log("Projection translation delta="+pixelDelta.ToString("F9")+" ndc="+(clip.y/clip.w).ToString("R"));
         check(Mathf.Abs(clip.y/clip.w-.1f)<1e-6f && Mathf.Abs(pixelDelta.z)<1e-6f,"world translation reproduces actual reticle pixel shift at fixed depth");
+        Vector3 eye=new Vector3(0,0,-.2f);
+        check(SightReferenceMath.AxisPlanePoint(Vector3.zero,Vector3.forward,new Vector3(0,0,.1f),Vector3.forward,out var markZero)
+            && Mathf.Abs(markZero.z-.1f)<1e-6f,"native zero axis calibrated on actual mark plane");
+        check(SightReferenceMath.EyeRay(eye,markZero,Vector3.forward,out var zeroRay) && (zeroRay-Vector3.forward).sqrMagnitude<1e-10f,"zero ray starts at observer and crosses zero mark point");
+        Vector3 markUp=markZero+Vector3.up*.003f;
+        check(SightReferenceMath.EyeRay(eye,markUp,Vector3.forward,out var upRay) && upRay.y>0f,"moving mark rotates ray upward at fixed observer");
+        check(Vector3.Cross(markUp-eye,upRay).magnitude<1e-7f && Mathf.Abs(upRay.y/upRay.z-.01f)<1e-6f,"ray passes through actual mark point with correct eye relief scale");
+        check(!SightReferenceMath.EyeRay(eye,eye-Vector3.forward,Vector3.forward,out _),"point behind eye rejected instead of backward zero range");
+        check(!SightReferenceMath.EyeRay(eye,eye,Vector3.forward,out _),"point coincident with observer rejected");
+        check(!SightReferenceMath.AxisPlanePoint(Vector3.zero,Vector3.right,Vector3.forward,Vector3.forward,out _),"axis parallel to reticle plane rejected");
         File.WriteAllText("D:/games/SPT-4.1.6/.codex-work/EFTNewCamera-source/_build/zero-range-regression.txt", "PASS "+passed+" zero-range assertions");
         Debug.Log("PASS "+passed+" zero-range assertions");
     }

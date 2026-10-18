@@ -154,4 +154,23 @@ internal static class LegacyReticle
         translation = SightReferenceMath.LegacyTranslation(_renderer.localToWorldMatrix, _perV, _mark.GetVector("_Scales").x, _lastUv);
         return true;
     }
+
+    internal static bool TryGetAimPoint(Vector3 nativeOrigin, Vector3 nativeAxis, out Vector3 zeroPoint, out Vector3 currentPoint)
+    {
+        zeroPoint = currentPoint = Vector3.zero;
+        if (_renderer == null || _mark == null || !TryGetTranslation(out Vector3 translation)) return false;
+        Mesh? mesh = _renderer.GetComponent<MeshFilter>()?.sharedMesh;
+        if (mesh == null) return false;
+        Matrix4x4 matrix = SightReferenceMath.LegacyMatrix(_renderer.localToWorldMatrix);
+        Vector4 axis = _mark.GetVector("_ShiftDirection");
+        Vector3 local = mesh.bounds.center*_mark.GetVector("_Scales").x
+            + new Vector3(axis.x,axis.y,axis.z)*_shifts.x;
+        Vector3 centre = matrix.MultiplyPoint3x4(local);
+        Vector3 normal = Vector3.Cross(matrix.MultiplyVector(Vector3.right),matrix.MultiplyVector(Vector3.forward)).normalized;
+        // The user-confirmed native axis defines the zero aim point on the actual virtual mark plane.
+        // No pixel recognition of an arbitrary texture tip is claimed here.
+        if (!SightReferenceMath.AxisPlanePoint(nativeOrigin,nativeAxis,centre,normal,out zeroPoint)) return false;
+        currentPoint = zeroPoint+translation;
+        return true;
+    }
 }

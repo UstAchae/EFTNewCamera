@@ -192,7 +192,7 @@ internal sealed class TrajectoryPreview : MonoBehaviour
         Vector3 origin = EquivalentZeroRange.DebugOrigin, direction = EquivalentZeroRange.DebugDirection;
         Line(origin, origin + direction * _rayLength.Value, purple);
         Marker(camera, origin, purple);
-        Marker(camera, origin + direction * 0.5f, purple);
+        Marker(camera, EquivalentZeroRange.DebugAimPoint, purple);
         // Continue the theoretical path past scene collision so distant intersections can be inspected.
         // Dashes distinguish this from the solid collision-limited yellow prediction and red impact.
         var points = EquivalentZeroRange.DebugTrajectory;
