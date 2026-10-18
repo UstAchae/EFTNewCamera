@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "justachae.thirdpersoncamera";
     public const string PluginName = "Justachae's Third-Person Skeleton and Camera";
-    public const string PluginVersion = "0.1.228";
+    public const string PluginVersion = "0.1.239";
 
     private void Awake()
     {
@@ -35,6 +35,9 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         BindAimDistance();
         BindSway();
         BindBody();
+        OpticElevation.Initialize(Config);
+        gameObject.AddComponent<OpticDiagnostics>().Initialize(Config, Logger);
+        gameObject.AddComponent<TrajectoryPreview>().Initialize(Config);
     }
 
     private void BindBody()
@@ -127,9 +130,9 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         _aimDistance = Config.Bind("瞄准", "前后距离", -0.05f,
             new ConfigDescription("瞄准后沿镜头前方向移动枪，单位为米。负值让枪离镜头更近。",
                 new AcceptableValueRange<float>(AimDistanceMin, AimDistanceMax)));
-        _aimDistanceFarther = Config.Bind("瞄准", "前后距离调远快捷键", new KeyboardShortcut(KeyCode.PageUp),
+        _aimDistanceFarther = Config.Bind("瞄准", "前后距离调远快捷键", new KeyboardShortcut(KeyCode.Equals),
             "按住时瞄准的前后距离慢慢变大，枪离镜头更远。");
-        _aimDistanceCloser = Config.Bind("瞄准", "前后距离调近快捷键", new KeyboardShortcut(KeyCode.PageDown),
+        _aimDistanceCloser = Config.Bind("瞄准", "前后距离调近快捷键", new KeyboardShortcut(KeyCode.Minus),
             "按住时瞄准的前后距离慢慢变小，枪离镜头更近。");
         _aimDistance.SettingChanged += (_, _) => AimArms.ForwardDistance = _aimDistance.Value;
         AimArms.ForwardDistance = _aimDistance.Value;
@@ -253,6 +256,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         Camera.onPreCull += NewCameraSwitch.OnCameraPreCull;
         Camera.onPreRender += NewCameraSwitch.OnCameraPreRender;
         Camera.onPostRender += ReticleAfterTaa.OnCameraPostRender;
+        Camera.onPostRender += OpticElevation.Restore;
     }
 
     private void OnDisable()
@@ -260,12 +264,20 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         Camera.onPreCull -= NewCameraSwitch.OnCameraPreCull;
         Camera.onPreRender -= NewCameraSwitch.OnCameraPreRender;
         Camera.onPostRender -= ReticleAfterTaa.OnCameraPostRender;
+        Camera.onPostRender -= OpticElevation.Restore;
+        OpticElevation.Shutdown();
     }
 
     private void Update()
     {
+        OpticElevation.UpdateHeld();
         AimArms.ReleaseMouse();
         AdjustAimDistance();
+    }
+
+    private void OnGUI()
+    {
+        OpticElevation.DrawStatus();
     }
 
     private void LateUpdate()
@@ -377,6 +389,8 @@ internal static class NewCameraSwitch
             AimArms.CarryOptic(camera);
 
         AimArms.ReplayLasers(camera);
+        if (optic)
+            OpticElevation.Apply(camera);
     }
 
     internal static void OnCameraPreRender(Camera camera)

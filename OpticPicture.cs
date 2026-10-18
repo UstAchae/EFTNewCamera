@@ -229,6 +229,16 @@ internal static class OpticPicture
         _held = sight;
     }
 
+    internal static OpticSight? ResolveForElevation(ProceduralWeaponAnimation.SightNBone scope)
+    {
+        Transform? bone = scope.Bone;
+        if (bone == null) return null;
+        ScopePrefabCache? cache = bone.GetComponentInParent<ScopePrefabCache>(true);
+        if (cache != null && cache.CurrentModHasOptics && cache.CurrentModOpticSight != null)
+            return cache.CurrentModOpticSight;
+        return bone.GetComponentInParent<OpticSight>(true) ?? bone.GetComponentInChildren<OpticSight>(true);
+    }
+
     private static OpticSight? Resolve(ProceduralWeaponAnimation animation)
     {
         Transform? bone = animation.CurrentScope?.Bone;
