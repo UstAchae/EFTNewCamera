@@ -91,10 +91,10 @@ internal sealed class BallisticProbe : MonoBehaviour
             cameraId=camera.GetInstanceID(),cameraPosition=V(camera.transform.position),view=Matrix(camera.worldToCameraMatrix),projection=Matrix(camera.nonJitteredProjectionMatrix)});
     }
 
-    internal static void Overlay(Camera camera, bool excluded, Rect rect)
+    internal static void Overlay(Camera camera, bool excluded, Rect rect, bool suppressed = false)
     {
         if(!Enabled || Time.unscaledTime>_until || Time.frameCount%30!=0)return;
-        Write(new {kind="overlay",frame=Time.frameCount,time=Time.unscaledTime,cameraId=camera.GetInstanceID(),excluded,
+        Write(new {kind="overlay",frame=Time.frameCount,time=Time.unscaledTime,cameraId=camera.GetInstanceID(),excluded,suppressed,
             rect=new[]{rect.x,rect.y,rect.width,rect.height},screen=new[]{Screen.width,Screen.height}});
     }
 

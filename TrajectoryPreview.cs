@@ -28,6 +28,7 @@ internal sealed class TrajectoryPreview : MonoBehaviour
     private int _sampleFrame = -1;
     private const float Step = 0.01f;
     private ConfigEntry<float> _rayLength = null!;
+    private static int _opticRenderedFrame = -1;
 
     internal void Initialize(ConfigFile config)
     {
@@ -107,6 +108,7 @@ internal sealed class TrajectoryPreview : MonoBehaviour
     private void Draw(Camera camera)
     {
         if (!OpticPicture.IsCamera(camera)) return;
+        _opticRenderedFrame = Time.frameCount;
         // The optic camera draws in world space. Main-view lines are projected to the final GUI below.
         if (_buffers.TryGetValue(camera.GetInstanceID(), out var previous)) previous.Buffer.Clear();
         BeforeCamera(camera);
@@ -212,7 +214,12 @@ internal sealed class TrajectoryPreview : MonoBehaviour
         if (_count < 2) return;
         PopulateLines(camera);
         bool hasLens = TryLensRect(camera, out Rect lensRect);
-        BallisticProbe.Overlay(camera, hasLens, lensRect);
+        bool suppressMain = !hasLens && _opticRenderedFrame >= Time.frameCount-1
+            && Singleton<GameWorld>.Instance?.MainPlayer?.HandsController?.IsAiming == true;
+        BallisticProbe.Overlay(camera, hasLens, lensRect, suppressMain);
+        // If the lens cannot be projected reliably, retain the optic rendering and suppress
+        // this overlay rather than leaking an unmasked second copy through the scope.
+        if (suppressMain) return;
         Color saved = GUI.color;
         Matrix4x4 matrix = GUI.matrix;
         try
@@ -257,7 +264,8 @@ internal sealed class TrajectoryPreview : MonoBehaviour
         rect = default;
         var manager = CameraManager.Instance?.OpticCameraManager;
         Renderer? lens = manager?.CurrentOpticSight?.LensRenderer;
-        if (manager?.Camera == null || !manager.Camera.isActiveAndEnabled || lens == null
+        // Optics may be rendered manually while Camera.enabled is false.
+        if (manager?.Camera == null || _opticRenderedFrame < Time.frameCount-1 || lens == null
             || !lens.gameObject.activeInHierarchy) return false;
         Mesh? mesh = lens.GetComponent<MeshFilter>()?.sharedMesh;
         Bounds bounds = mesh != null ? mesh.bounds : new Bounds();

@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "justachae.thirdpersoncamera";
     public const string PluginName = "Justachae's Third-Person Skeleton and Camera";
-    public const string PluginVersion = "0.1.247";
+    public const string PluginVersion = "0.1.248";
 
     private void Awake()
     {
@@ -297,6 +297,12 @@ internal static class NewCameraSwitch
     private static int _poseFrame = -1;
     private static Vector3 _posePosition;
     private static Quaternion _poseRotation;
+
+    internal static bool TryObserverPose(out Vector3 position, out Quaternion rotation)
+    {
+        position = _posePosition; rotation = _poseRotation;
+        return Enabled && _poseFrame == Time.frameCount;
+    }
 
     internal static void LateUpdate()
     {

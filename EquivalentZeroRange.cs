@@ -64,6 +64,8 @@ internal static class EquivalentZeroRange
         NativeOrigin = bone.position;
         NativeDirection = (bone.name == "aim_camera" ? -bone.up : -bone.forward).normalized;
         Camera observer = camera;
+        Vector3 observerPosition = camera.cameraToWorldMatrix.MultiplyPoint3x4(Vector3.zero);
+        Vector3 observerForward = camera.transform.forward;
         Vector3 zeroPoint, point;
         Matrix4x4 projection = camera.nonJitteredProjectionMatrix;
         float shift = Mathf.Tan(mrad / 1000f) * projection.m11;
@@ -73,9 +75,14 @@ internal static class EquivalentZeroRange
         {
             observer = Camera.main;
             if (observer == null) { _status="主观察镜头不可用"; return; }
+            // Optic rendering can precede the main camera's pre-cull. Its Transform still contains
+            // the game's pre-override pose then. Use the exact pose NewCameraSwitch will render.
+            if (!NewCameraSwitch.TryObserverPose(out observerPosition,out Quaternion observerRotation))
+            { _status="本帧最终观察姿态尚未就绪，等待下一帧"; return; }
+            observerForward = observerRotation*Vector3.forward;
             if (!LegacyReticle.TryGetAimPoint(NativeOrigin, NativeDirection, out zeroPoint, out point))
             { _status="无法取得旧式分划平面和当前分划点"; return; }
-            ObserverSource = "main-eye / native-axis calibrated legacy mark plane";
+            ObserverSource = "final-head-pose / native-axis calibrated legacy mark plane";
         }
         else
         {
@@ -93,10 +100,10 @@ internal static class EquivalentZeroRange
             point = zeroPoint+displacement;
             ObserverSource = reticleMoving ? "optic-eye / projected moving mark" : "optic-eye / stationary mark with scene projection";
         }
-        Vector3 origin = observer.cameraToWorldMatrix.MultiplyPoint3x4(Vector3.zero);
+        Vector3 origin = observerPosition;
         DebugZeroPoint = zeroPoint; DebugAimPoint = point; ObserverCameraId = observer.GetInstanceID();
         DebugOrigin = origin;
-        if (!SightReferenceMath.EyeRay(origin,point,observer.transform.forward,out Vector3 ray))
+        if (!SightReferenceMath.EyeRay(origin,point,observerForward,out Vector3 ray))
         { _status="分划点在观察镜头后方或与镜头重合，停止输出错误距离"; return; }
         DebugOrigin = origin; DebugDirection = ray;
         OpticDiagnostics.Trace("reference.eye", camera, $"source={ObserverSource} observerId={ObserverCameraId} reticleMoving={reticleMoving} mrad={mrad:R} eye={origin.ToString("F6")} zeroPoint={zeroPoint.ToString("F6")} aimPoint={point.ToString("F6")} axis={ray.ToString("F6")}");
