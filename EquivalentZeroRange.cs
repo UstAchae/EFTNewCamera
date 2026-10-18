@@ -69,7 +69,7 @@ internal static class EquivalentZeroRange
         }
         Vector3 up = Vector3.ProjectOnPlane(-Physics.gravity, ray).normalized;
         if (up.sqrMagnitude < 0.5f) return;
-        Vector3 muzzle = firearm.CurrentFireport.position;
+        Vector3 muzzle = firearm.CurrentFireport.Original.position;
         Vector3 direction = firearm.WeaponDirection.normalized;
         AimArms.ResolvePreviewShot(firearm, ref muzzle, ref direction);
         Vector3 position = muzzle;

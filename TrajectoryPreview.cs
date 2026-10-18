@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using HarmonyLib;
 using BepInEx.Configuration;
 using Comfort.Common;
 using EFT;
@@ -28,7 +27,6 @@ internal sealed class TrajectoryPreview : MonoBehaviour
     private int _sampleFrame = -1;
     private const float Step = 0.01f;
     private ConfigEntry<float> _rayLength = null!;
-    private static TrajectoryPreview? _instance;
 
     internal void Initialize(ConfigFile config)
     {
@@ -38,10 +36,6 @@ internal sealed class TrajectoryPreview : MonoBehaviour
             new ConfigDescription("从枪口计算的最大路径长度，单位米；最长模拟20秒。", new AcceptableValueRange<float>(50f, 2000f)));
         _rayLength = config.Bind("弹道调试", "瞄准线显示长度（米）", 50000f,
             new ConfigDescription("用足够长的线模拟无限射线，实际可见范围仍受相机远裁剪限制；不改变交点计算的最大距离。", new AcceptableValueRange<float>(100f, 100000f)));
-        _instance = this;
-        new Harmony(NewCameraPlugin.PluginGuid + ".trajectoryComposite").Patch(
-            AccessTools.Method(typeof(SSAAPropagator), "FillCommandBuffer"),
-            postfix: new HarmonyMethod(typeof(TrajectoryPreview), nameof(CompositePostfix)));
         Camera.onPreRender += Draw;
     }
 
@@ -60,7 +54,7 @@ internal sealed class TrajectoryPreview : MonoBehaviour
         if (ammo == null || ammo.BulletMassGram <= 0f || ammo.BulletDiameterMilimeters <= 0f || ammo.BallisticCoeficient <= 0f) return;
         _axis = firearm.WeaponDirection.normalized;
         if (_axis.sqrMagnitude < 0.5f) return;
-        _start = firearm.CurrentFireport.position;
+        _start = firearm.CurrentFireport.Original.position;
         AimArms.ResolvePreviewShot(firearm, ref _start, ref _axis);
         float speed = ammo.InitialSpeed * firearm.Weapon.SpeedFactor;
         float mass = ammo.BulletMassGram / 1000f;
@@ -110,7 +104,8 @@ internal sealed class TrajectoryPreview : MonoBehaviour
 
     private void Draw(Camera camera)
     {
-        // Sample after the skeleton/camera render preparation has finished.
+        if (!OpticPicture.IsCamera(camera)) return;
+        // The optic camera draws in world space. Main-view lines are projected to the final GUI below.
         if (_buffers.TryGetValue(camera.GetInstanceID(), out var previous)) previous.Buffer.Clear();
         BeforeCamera(camera);
         if (_enabled == null || !_enabled.Value || _count < 2) return;
@@ -128,6 +123,30 @@ internal sealed class TrajectoryPreview : MonoBehaviour
         }
         if (_mesh == null)
             _mesh = new Mesh { name = "Predicted ballistic path", hideFlags = HideFlags.HideAndDontSave };
+        PopulateLines(camera);
+        for (int i = 0; i < _vertices.Count; i++) _indices.Add(i);
+        _mesh.Clear();
+        _mesh.SetVertices(_vertices);
+        _mesh.SetColors(_colors);
+        _mesh.SetIndices(_indices, MeshTopology.Lines, 0, false);
+        _material.SetColor("_Color", Color.white);
+        int id = camera.GetInstanceID();
+        if (!_buffers.TryGetValue(id, out var entry))
+        {
+            var buffer = new CommandBuffer { name = "Yellow predicted trajectory (world space)" };
+            camera.AddCommandBuffer(CameraEvent.BeforeImageEffects, buffer);
+            entry = (camera, buffer);
+            _buffers[id] = entry;
+        }
+        entry.Buffer.Clear();
+        // Render into the scene target BEFORE post-processing, with the same scene projection.
+        // Never use the reticle-only projection or a post-render projection reset by image effects.
+        entry.Buffer.SetViewProjectionMatrices(camera.worldToCameraMatrix, camera.projectionMatrix);
+        entry.Buffer.DrawMesh(_mesh, Matrix4x4.identity, _material, 0, 0);
+    }
+
+    private void PopulateLines(Camera camera)
+    {
         _vertices.Clear();
         _indices.Clear();
         _colors.Clear();
@@ -148,25 +167,6 @@ internal sealed class TrajectoryPreview : MonoBehaviour
         _vertices.Add(end + camera.transform.up * size);
         for (int i = 0; i < 4; i++) _colors.Add(new Color32(255, 0, 0, 255));
         if (EquivalentZeroRange.DebugActive) AppendSightDebug(camera);
-        for (int i = 0; i < _vertices.Count; i++) _indices.Add(i);
-        _mesh.Clear();
-        _mesh.SetVertices(_vertices);
-        _mesh.SetColors(_colors);
-        _mesh.SetIndices(_indices, MeshTopology.Lines, 0, false);
-        _material.SetColor("_Color", Color.white);
-        int id = camera.GetInstanceID();
-        if (!_buffers.TryGetValue(id, out var entry))
-        {
-            var buffer = new CommandBuffer { name = "Yellow predicted trajectory (world space)" };
-            camera.AddCommandBuffer(CameraEvent.BeforeImageEffects, buffer);
-            entry = (camera, buffer);
-            _buffers[id] = entry;
-        }
-        entry.Buffer.Clear();
-        // Render into the scene target BEFORE post-processing, with the same scene projection.
-        // Never use the reticle-only projection or a post-render projection reset by image effects.
-        entry.Buffer.SetViewProjectionMatrices(camera.worldToCameraMatrix, camera.projectionMatrix);
-        entry.Buffer.DrawMesh(_mesh, Matrix4x4.identity, _material, 0, 0);
     }
 
     private void Line(Vector3 a, Vector3 b, Color32 color)
@@ -207,22 +207,63 @@ internal sealed class TrajectoryPreview : MonoBehaviour
         foreach (Vector3 hit in EquivalentZeroRange.DebugCrossings) Marker(camera, hit, green);
     }
 
-    private static void CompositePostfix(SSAAPropagator __instance, CommandBuffer externalCommandBuffer)
+    private void OnGUI()
     {
-        var instance = _instance;
-        Camera camera = __instance.GetComponent<Camera>();
-        if (instance == null || camera == null || !camera.CompareTag("MainCamera")
-            || instance._enabled == null || !instance._enabled.Value) return;
-        if (!__instance.GetSourceDestination(out RenderTexture source, out _) || source == null) return;
-        instance.Draw(camera);
-        if (instance._count < 2 || instance._mesh == null || instance._material == null) return;
-        bool own = externalCommandBuffer == null;
-        CommandBuffer command = externalCommandBuffer ?? new CommandBuffer { name = "World trajectory after scope composite" };
-        command.SetRenderTarget(source);
-        command.SetViewProjectionMatrices(camera.worldToCameraMatrix, camera.nonJitteredProjectionMatrix);
-        command.DrawMesh(instance._mesh, Matrix4x4.identity, instance._material, 0, 0);
-        command.SetViewProjectionMatrices(camera.worldToCameraMatrix, camera.projectionMatrix);
-        if (own) { Graphics.ExecuteCommandBuffer(command); command.Dispose(); }
+        if (Event.current.type != EventType.Repaint || _enabled == null || !_enabled.Value) return;
+        Camera camera = Camera.main;
+        if (camera == null) return;
+        // Sample the final, visible skeleton pose; never reuse the optic camera's earlier sample.
+        _sampleFrame = -1;
+        BeforeCamera(camera);
+        if (_count < 2) return;
+        PopulateLines(camera);
+        Color saved = GUI.color;
+        Matrix4x4 matrix = GUI.matrix;
+        try
+        {
+            for (int i = 0; i + 1 < _vertices.Count; i += 2)
+            {
+                Vector3 a = _vertices[i], b = _vertices[i + 1];
+                float da = camera.WorldToViewportPoint(a).z;
+                float db = camera.WorldToViewportPoint(b).z;
+                float near = camera.nearClipPlane + 0.001f;
+                if (da < near && db < near) continue;
+                if (da < near) a = Vector3.LerpUnclamped(a, b, (near - da) / (db - da));
+                else if (db < near) b = Vector3.LerpUnclamped(b, a, (near - db) / (da - db));
+                Vector3 sa = camera.WorldToScreenPoint(a), sb = camera.WorldToScreenPoint(b);
+                Vector2 p = new Vector2(sa.x, Screen.height - sa.y);
+                Vector2 q = new Vector2(sb.x, Screen.height - sb.y);
+                if (!ClipScreen(ref p, ref q)) continue;
+                Vector2 delta = q - p;
+                if (delta.sqrMagnitude < 0.01f) continue;
+                GUI.color = _colors[i];
+                GUIUtility.RotateAroundPivot(Mathf.Atan2(delta.y, delta.x) * Mathf.Rad2Deg, p);
+                GUI.DrawTexture(new Rect(p.x, p.y - 0.75f, delta.magnitude, 1.5f), Texture2D.whiteTexture);
+                GUI.matrix = matrix;
+            }
+        }
+        finally { GUI.color = saved; GUI.matrix = matrix; }
+    }
+
+    private static bool ClipScreen(ref Vector2 a, ref Vector2 b)
+    {
+        Vector2 d = b - a;
+        float enter = 0f, leave = 1f;
+        if (!ClipEdge(-d.x, a.x, ref enter, ref leave) || !ClipEdge(d.x, Screen.width - a.x, ref enter, ref leave)
+            || !ClipEdge(-d.y, a.y, ref enter, ref leave) || !ClipEdge(d.y, Screen.height - a.y, ref enter, ref leave)) return false;
+        Vector2 start = a;
+        a = start + enter * d;
+        b = start + leave * d;
+        return true;
+    }
+
+    private static bool ClipEdge(float p, float q, ref float enter, ref float leave)
+    {
+        if (Mathf.Abs(p) < 0.0000001f) return q >= 0f;
+        float t = q / p;
+        if (p < 0f) { if (t > leave) return false; enter = Mathf.Max(enter, t); }
+        else { if (t < enter) return false; leave = Mathf.Min(leave, t); }
+        return true;
     }
 
     private void Update()
@@ -235,7 +276,6 @@ internal sealed class TrajectoryPreview : MonoBehaviour
 
     private void OnDestroy()
     {
-        if (_instance == this) _instance = null;
         Camera.onPreRender -= Draw;
         foreach (var entry in _buffers.Values)
         {
