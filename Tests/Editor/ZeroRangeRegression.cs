@@ -22,7 +22,8 @@ public static class ZeroRangeRegression
         }
         check(Mathf.Abs(near-10.2084f)<.01f,"near crossing interpolation");
         check(Mathf.Abs(far-489.7916f)<.01f,"far crossing interpolation");
-        check(ZeroRangeMath.Format(far)=="489.8 m","far intersection selected, one decimal");
+        check(ZeroRangeMath.Format(near)=="< 50 m","near intersection selected even when far exceeds 50");
+        check(ZeroRangeMath.Format(153.74f)=="153.7 m","one decimal above threshold");
         check(ZeroRangeMath.Format(49.99f)=="< 50 m","under 50 threshold before rounding");
         check(ZeroRangeMath.Format(50f)=="50.0 m","exact 50 boundary");
         check(ZeroRangeMath.Format(-1f)=="—","no intersection");

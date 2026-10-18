@@ -16,7 +16,7 @@ internal static class EquivalentZeroRange
     internal static void Initialize(ConfigFile config)
     {
         _show = config.Bind("等效归零距离", "显示估算距离", true,
-            "独立显示当前瞄准射线与理论弹道的远交点，忽略墙壁碰撞。小于50米显示< 50 m，无有效交点显示—。首版以原版瞄准中心为基准，未逐镜校准尖柱/尖角。");
+            "独立显示当前瞄准射线与理论弹道的近交点，忽略墙壁碰撞。小于50米显示< 50 m，无有效交点显示—。首版以原版瞄准中心为基准，未逐镜校准尖柱/尖角。");
         _maximum = config.Bind("等效归零距离", "最大计算距离（米）", 2000f,
             new ConfigDescription("沿瞄准射线的计算范围，最长模拟20秒。", new AcceptableValueRange<float>(100f, 5000f)));
         _tolerance = config.Bind("等效归零距离", "横向重合容差（mrad）", 0.1f,
@@ -58,7 +58,7 @@ internal static class EquivalentZeroRange
         float diameter = ammo.BulletDiameterMilimeters / 1000f;
         float coefficient = mass * 0.0014223f / (diameter * diameter * ammo.BallisticCoeficient);
         float area = 1.2f * diameter * diameter * Mathf.PI / 4f;
-        float farthest = -1f;
+        float nearest = -1f;
         const float step = 0.01f;
         for (int i = 0; i < 2000; i++)
         {
@@ -70,13 +70,13 @@ internal static class EquivalentZeroRange
             if (ZeroRangeMath.Crossing(position, next, origin, ray, up, _tolerance.Value, out Vector3 crossing))
             {
                 float range = Vector3.Distance(muzzle, crossing);
-                if (range > farthest && range <= _maximum.Value) farthest = range;
+                if (range <= _maximum.Value && (nearest < 0f || range < nearest)) nearest = range;
             }
             if (Vector3.Dot(next - origin, ray) > _maximum.Value) break;
             position = next;
             velocity += acceleration * step;
         }
-        _text = ZeroRangeMath.Format(farthest);
+        _text = ZeroRangeMath.Format(nearest);
     }
 
     internal static void Draw()
