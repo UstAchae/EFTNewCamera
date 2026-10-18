@@ -228,6 +228,8 @@ internal static class OpticElevation
         }
         if (legacy)
             LegacyReticle.Apply(CameraManager.Instance?.OpticCameraManager?.CurrentOpticSight, camera, offset);
+        if (eligible)
+            EquivalentZeroRange.Sample(camera, offset, ReticleMoving.Contains(mod!.Item.TemplateId));
         if (!OpticDiagnostics.Force && (!eligible || Mathf.Abs(offset) < 0.000001f))
         {
             OpticDiagnostics.Trace("apply.skipped", camera, $"eligible={eligible} offset={offset:R}");

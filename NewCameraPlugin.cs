@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "justachae.thirdpersoncamera";
     public const string PluginName = "Justachae's Third-Person Skeleton and Camera";
-    public const string PluginVersion = "0.1.239";
+    public const string PluginVersion = "0.1.240";
 
     private void Awake()
     {
@@ -36,6 +36,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         BindSway();
         BindBody();
         OpticElevation.Initialize(Config);
+        EquivalentZeroRange.Initialize(Config);
         gameObject.AddComponent<OpticDiagnostics>().Initialize(Config, Logger);
         gameObject.AddComponent<TrajectoryPreview>().Initialize(Config);
     }
@@ -278,6 +279,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
     private void OnGUI()
     {
         OpticElevation.DrawStatus();
+        EquivalentZeroRange.Draw();
     }
 
     private void LateUpdate()
