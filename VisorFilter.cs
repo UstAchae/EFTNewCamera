@@ -8,7 +8,8 @@ internal static class VisorFilter
 {
     internal static bool Show = true;
 
-    private static readonly FieldInfo? VisorPointField = AccessTools.Field(typeof(VisorEffect), "_visorPoint");
+    // 35392: Visor Point instance and the render implementation called by OnRenderImage.
+    private static readonly FieldInfo? VisorPointField = AccessTools.Field(typeof(VisorEffect), "gameObject_0");
     private static GameObject? _hiddenPoint;
     private static bool _installed;
 
@@ -18,7 +19,7 @@ internal static class VisorFilter
             return;
 
         Harmony harmony = new Harmony(NewCameraPlugin.PluginGuid + ".visor");
-        MethodInfo? render = AccessTools.Method(typeof(VisorEffect), "OnRenderImageImpl");
+        MethodInfo? render = AccessTools.Method(typeof(VisorEffect), "method_1", new[] { typeof(RenderTexture), typeof(RenderTexture) });
         MethodInfo? prefix = typeof(VisorFilter).GetMethod(nameof(OnRenderImageImplPrefix), BindingFlags.NonPublic | BindingFlags.Static);
         if (render != null && prefix != null)
             harmony.Patch(render, prefix: new HarmonyMethod(prefix));
@@ -46,7 +47,7 @@ internal static class VisorFilter
             _hiddenPoint = point;
         }
 
-        RendererExtensions.BlitOrCopy(source, destination);
+        GClass839.BlitOrCopy(source, destination);
         return false;
     }
 }

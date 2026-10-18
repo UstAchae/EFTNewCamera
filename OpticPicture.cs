@@ -72,7 +72,7 @@ internal static class OpticPicture
         {
             if (_held != null)
             {
-                OpticSight.OpticSightState.Value = new OpticSight.OpticSightStatus
+                OpticSight.OpticSightState.Value = new OpticSight.GStruct421
                 {
                     IsEnabled = true,
                     OpticSight = _held
@@ -94,10 +94,10 @@ internal static class OpticPicture
 
         try
         {
-            OpticSight.OpticSightStatus state = OpticSight.OpticSightState.Value;
+            OpticSight.GStruct421 state = OpticSight.OpticSightState.Value;
             if (Same(state.OpticSight, _held))
             {
-                OpticSight.OpticSightState.Value = new OpticSight.OpticSightStatus
+                OpticSight.OpticSightState.Value = new OpticSight.GStruct421
                 {
                     IsEnabled = false,
                     OpticSight = _held
@@ -209,17 +209,17 @@ internal static class OpticPicture
         OpticSight? current = CameraManager.Instance?.OpticCameraManager?.CurrentOpticSight;
         if (current != null && !Same(current, sight))
         {
-            OpticSight.OpticSightState.Value = new OpticSight.OpticSightStatus
+            OpticSight.OpticSightState.Value = new OpticSight.GStruct421
             {
                 IsEnabled = false,
                 OpticSight = current
             };
         }
 
-        OpticSight.OpticSightStatus state = OpticSight.OpticSightState.Value;
+        OpticSight.GStruct421 state = OpticSight.OpticSightState.Value;
         if (!state.IsEnabled || !Same(state.OpticSight, sight))
         {
-            OpticSight.OpticSightState.Value = new OpticSight.OpticSightStatus
+            OpticSight.OpticSightState.Value = new OpticSight.GStruct421
             {
                 IsEnabled = true,
                 OpticSight = sight

@@ -50,7 +50,7 @@ internal static class BodyVisibility
         if (updateRenders != null && updatePostfix != null)
             harmony.Patch(updateRenders, postfix: new HarmonyMethod(updatePostfix) { priority = Priority.Last });
 
-        MethodInfo? parentModel = AccessTools.Method(typeof(PlayerBody.SlotView), "CreateAndParent", new[] { typeof(PlayerBody), typeof(GameObject) });
+        MethodInfo? parentModel = AccessTools.Method(typeof(PlayerBody.GClass2119), "method_4", new[] { typeof(PlayerBody), typeof(GameObject) });
         MethodInfo? parentPostfix = typeof(BodyVisibility).GetMethod(nameof(ParentEquipmentModelPostfix), BindingFlags.NonPublic | BindingFlags.Static);
         if (parentModel != null && parentPostfix != null)
             harmony.Patch(parentModel, postfix: new HarmonyMethod(parentPostfix) { priority = Priority.Last });
@@ -77,7 +77,7 @@ internal static class BodyVisibility
         SetHead(body, ShowHead);
         foreach (EquipmentSlot slot in PlayerBody.SlotNames)
         {
-            if (body.SlotViews.TryGetByKey(slot, out PlayerBody.SlotView? view) && view != null)
+            if (body.SlotViews.TryGetByKey(slot, out PlayerBody.GClass2119? view) && view != null)
                 ApplySlot(player, view);
         }
     }
@@ -112,13 +112,13 @@ internal static class BodyVisibility
         Apply(player);
     }
 
-    private static void ParentEquipmentModelPostfix(PlayerBody.SlotView __instance)
+    private static void ParentEquipmentModelPostfix(PlayerBody.GClass2119 __instance, PlayerBody __0)
     {
         if (!NewCameraSwitch.Enabled)
             return;
 
         Player? player = Singleton<GameWorld>.Instance?.MainPlayer;
-        if (player == null || __instance._playerBody == null || !ReferenceEquals(player.PlayerBody, __instance._playerBody))
+        if (player == null || __0 == null || !ReferenceEquals(player.PlayerBody, __0))
             return;
 
         ApplySlot(player, __instance);
@@ -154,7 +154,7 @@ internal static class BodyVisibility
             skin.SetLayer(playerLayer);
     }
 
-    private static void ApplySlot(Player player, PlayerBody.SlotView slotView)
+    private static void ApplySlot(Player player, PlayerBody.GClass2119 slotView)
     {
         if (slotView.EquipmentSlot != EquipmentSlot.Headwear
             && slotView.EquipmentSlot != EquipmentSlot.FaceCover
@@ -191,7 +191,7 @@ internal static class BodyVisibility
         }
     }
 
-    private static Renderer[] SlotRenderers(PlayerBody.SlotView slotView)
+    private static Renderer[] SlotRenderers(PlayerBody.GClass2119 slotView)
     {
         if (slotView.Model == null)
             return Array.Empty<Renderer>();
@@ -206,7 +206,7 @@ internal static class BodyVisibility
         return renderers;
     }
 
-    private static readonly FieldInfo? CameraManagerInstance = AccessTools.Field(typeof(CameraManager), "instance");
+    private static readonly FieldInfo? CameraManagerInstance = AccessTools.Field(typeof(CameraManager), "cameraClass");
     private static Type? _nightRendererType;
     private static PropertyInfo? _nightEnabled;
     private static PropertyInfo? _opticReady;
@@ -215,7 +215,7 @@ internal static class BodyVisibility
     private static readonly object?[] PipelineArgument = new object?[1];
 
     // A mounted night or thermal device stays visible until its own filter is actually on.
-    private static void HideActiveDevices(Player player, PlayerBody.SlotView slotView)
+    private static void HideActiveDevices(Player player, PlayerBody.GClass2119 slotView)
     {
         GameObject? model = slotView.Model;
         CameraManager? camera = CameraManagerInstance?.GetValue(null) as CameraManager;
@@ -249,7 +249,7 @@ internal static class BodyVisibility
 
     private static readonly Dictionary<int, DeviceHide> DeviceRenderers = new();
 
-    private static Renderer[] FindDevices(Player player, PlayerBody.SlotView slotView, GameObject model, bool nightOn, bool thermalOn)
+    private static Renderer[] FindDevices(Player player, PlayerBody.GClass2119 slotView, GameObject model, bool nightOn, bool thermalOn)
     {
         List<Renderer> found = new();
         Transform root = model.transform;

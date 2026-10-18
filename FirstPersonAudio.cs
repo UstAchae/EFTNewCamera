@@ -35,6 +35,7 @@ internal static class FirstPersonAudio
         if (bridgeGetter != null && bridgePostfix != null)
             harmony.Patch(bridgeGetter, postfix: new HarmonyMethod(bridgePostfix));
 
+        // 35392 audio methods, verified by their POV reads and decompiled behavior.
         string[] playerAudioMethods =
         {
             "method_31",
@@ -50,14 +51,12 @@ internal static class FirstPersonAudio
             "method_46",
             nameof(Player.PlayInteractionSound),
             nameof(Player.StopInteractionSound),
-            "method_55",
+            "method_53",
             nameof(Player.DefaultPlay),
             nameof(Player.PlayStepSound),
-            "method_61",
+            "method_59",
             nameof(Player.PlaySoundBank),
-            "method_64",
-            "method_67",
-            "method_80",
+            "method_78",
             nameof(Player.SpawnInHands)
         };
 
@@ -74,8 +73,8 @@ internal static class FirstPersonAudio
             harmony.Patch(target, transpiler: new HarmonyMethod(transpiler));
         }
 
+        PatchIterator(harmony, "method_69", transpiler);
         PatchIterator(harmony, "method_71", transpiler);
-        PatchIterator(harmony, "method_73", transpiler);
         _installed = true;
     }
 
@@ -97,7 +96,7 @@ internal static class FirstPersonAudio
 
     private static void PlayerBridgePointOfViewPostfix(BaseSoundPlayer.PlayerBridge __instance, ref EPointOfView __result)
     {
-        Player? player = __instance?._player;
+        Player? player = __instance?.iPlayer as Player;
         if (ShouldUseFirstPersonAudio(player))
             __result = EPointOfView.FirstPerson;
     }

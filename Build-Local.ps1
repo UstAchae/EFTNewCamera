@@ -31,11 +31,15 @@ if (!$result.Success) { throw 'Compilation failed; see _build/build.log.' }
 # Unzipped into the SPT folder, the archive puts the plugin at BepInEx/plugins/<name>/<name>.dll.
 $version = [regex]::Match([IO.File]::ReadAllText("$PSScriptRoot/NewCameraPlugin.cs"), 'PluginVersion = "([^"]+)"').Groups[1].Value
 $stage = Join-Path $output 'package'
-Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
+$buildRoot = [IO.Path]::GetFullPath($output).TrimEnd([IO.Path]::DirectorySeparatorChar)
+$stage = [IO.Path]::GetFullPath($stage)
+if ([IO.Path]::GetDirectoryName($stage) -ne $buildRoot) { throw 'Package staging directory is outside _build.' }
+if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
 $pluginDir = Join-Path $stage "BepInEx/plugins/$name"
 New-Item $pluginDir -ItemType Directory -Force | Out-Null
-Copy-Item $dll $pluginDir
-$zip = Join-Path $output "$name-$version.zip"
+Copy-Item -LiteralPath $dll -Destination $pluginDir
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot "PORTING-3.11.4.md") -Destination $stage
+$zip = Join-Path $output "$name-$version-SPT-3.11.4.zip"
 Remove-Item $zip -Force -ErrorAction SilentlyContinue
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 [IO.Compression.ZipFile]::CreateFromDirectory($stage, $zip)

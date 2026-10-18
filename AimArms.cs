@@ -16,6 +16,7 @@ namespace EFTNewCamera;
 
 internal static class AimArms
 {
+    private static readonly AccessTools.FieldRef<Player.FirearmController, float> WeaponLength = AccessTools.FieldRefAccess<Player.FirearmController, float>("WeaponLn");
     private struct SkinState
     {
         public SkinnedMeshRenderer Renderer;
@@ -863,7 +864,7 @@ internal static class AimArms
             if (direction.sqrMagnitude < 0.0001f)
                 return;
             direction.Normalize();
-            Vector3 start = firearm.CurrentFireport.position - direction * firearm.WeaponLn / 5f;
+            Vector3 start = firearm.CurrentFireport.position - direction * WeaponLength(firearm) / 5f;
             if (!GrenadeLanding(player, firearm, start, direction, out Vector3 landing))
                 return;
 
@@ -875,7 +876,8 @@ internal static class AimArms
 
             try
             {
-                animation.OpticLookAtGlobal(landing);
+                // 35392: global optic target; also repositions the active aim bone.
+                animation.method_6(landing);
             }
             catch (System.Exception)
             {
@@ -920,7 +922,7 @@ internal static class AimArms
         for (int i = 1; i <= steps; i++)
         {
             float speed = velocity.magnitude;
-            float drag = EFT.Ballistics.Shot.CalculateG1DragCoefficient(speed) * coefficient;
+            float drag = EftBulletClass.CalculateG1DragCoefficient(speed) * coefficient;
             Vector3 acceleration = gravity + slowdown * (0f - drag) * speed * speed / (2f * massKg) * velocity.normalized;
             position += velocity * GrenadeStep + 5E-05f * acceleration;
             velocity += acceleration * GrenadeStep;
@@ -1327,7 +1329,8 @@ internal static class AimArms
             return true;
         }
 
-        __instance._aimMass = mass;
+        // 35392 stores the current aim mass in float_5.
+        __instance.float_5 = mass;
         __instance.Consumptions[Physical.EConsumptionType.Aim].Delta.SetDirty();
         ApplyAimDrain(__instance);
         return false;
@@ -1343,7 +1346,7 @@ internal static class AimArms
 
     private static void ApplyAimDrain(Physical physical)
     {
-        SetAimDrain(physical, physical._aimMass > 0f && physical.HoldingBreath);
+        SetAimDrain(physical, physical.float_5 > 0f && physical.HoldingBreath);
     }
 
     private static void SetAimDrain(Physical physical, bool active)
@@ -1357,7 +1360,7 @@ internal static class AimArms
             return;
 
         _aimDrain = active;
-        Physical.Consumption consumption = physical.Consumptions[Physical.EConsumptionType.Aim];
+        Physical.GClass751 consumption = physical.Consumptions[Physical.EConsumptionType.Aim];
         consumption.SetActive(physical, active);
         if (!active)
             physical.Stamina.RemoveConsumption(consumption);
@@ -1529,7 +1532,7 @@ internal static class AimArms
         rotation = _smoothLook * steadyTurn;
     }
 
-    private static void RotateHeadPrefix(PlayerBones __instance, ref Vector3 offset)
+    private static void RotateHeadPrefix(PlayerBones __instance, ref float blendValue, ref Vector3 offset)
     {
         if (!NewCameraSwitch.Enabled)
             return;
@@ -1537,6 +1540,11 @@ internal static class AimArms
         Player? player = Comfort.Common.Singleton<GameWorld>.Instance?.MainPlayer;
         if (player == null || !ReferenceEquals(player.PlayerBones, __instance))
             return;
+
+        // RotateHead applies its ADS neck/head pose through blendValue independently
+        // of the free-look offset. Our postfix supplies free look itself; suppress
+        // the native pose as well, including its aim-out blend, for this player only.
+        blendValue = 0f;
 
         if (_headSmoothFrame != Time.frameCount)
         {
