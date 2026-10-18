@@ -179,6 +179,12 @@ internal static class AimArms
         MethodInfo? holdBreathPostfix = typeof(AimArms).GetMethod(nameof(HoldBreathPostfix), BindingFlags.NonPublic | BindingFlags.Static);
         if (holdBreath != null && holdBreathPostfix != null)
             harmony.Patch(holdBreath, postfix: new HarmonyMethod(holdBreathPostfix));
+        // The native stationary-exit callback uses the POV captured at player Init,
+        // not the POV currently selected by this mod. Only intercept the POV overload;
+        // the explicit stationary strategies must keep their native behavior.
+        MethodInfo? setStrategy = AccessTools.Method(typeof(ProceduralWeaponAnimation), nameof(ProceduralWeaponAnimation.SetStrategy), new[] { typeof(EPointOfView) });
+        if (setStrategy != null)
+            harmony.Patch(setStrategy, prefix: new HarmonyMethod(typeof(AimArms), nameof(SetStrategyPrefix)));
         MethodInfo? visualPass = AccessTools.Method(typeof(Player), "VisualPass");
         MethodInfo? visualPassPostfix = typeof(AimArms).GetMethod(nameof(VisualPassPostfix), BindingFlags.NonPublic | BindingFlags.Static);
         if (visualPass != null && visualPassPostfix != null)
@@ -207,6 +213,15 @@ internal static class AimArms
 
     // Third-person VisualPass only places the weapon (sprint pose included) while the body
     // mesh is on screen. Looking up from the head camera takes the body out of view.
+    private static void SetStrategyPrefix(ProceduralWeaponAnimation __instance, ref EPointOfView pointOfView)
+    {
+        Player? player = Singleton<GameWorld>.Instance?.MainPlayer;
+        if (NewCameraSwitch.Enabled && player != null && player.IsYourPlayer
+            && player.PointOfView != EPointOfView.FreeCamera
+            && ReferenceEquals(player.ProceduralWeaponAnimation, __instance))
+            pointOfView = EPointOfView.ThirdPerson;
+    }
+
     private static void VisiblePostfix(Player __instance, ref bool __result)
     {
         if (!__result && NewCameraSwitch.Enabled && __instance.IsYourPlayer)
@@ -302,6 +317,9 @@ internal static class AimArms
         _contextHands = hands;
         _contextStationary = stationary;
         // Fixed weapons and carried weapons must not share the camera/sight blend.
+        // First-person arm meshes belong to the item prefab and can be pooled on
+        // a weapon change. Recollect them instead of retaining the old transforms.
+        RestoreSkins();
         ResetAimState();
         NewCameraSwitch.InvalidatePose();
         IronSightAlignment.Invalidate();

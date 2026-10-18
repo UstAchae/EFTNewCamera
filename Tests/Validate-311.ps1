@@ -23,6 +23,7 @@ $checks=@(
  @('EFT.Player/FirearmController','AdjustShotVectors','AimArms','AdjustShotPrefix'),
  @('PlayerPhysicalClass','Aim','AimArms','AimPrefix'),
  @('PlayerPhysicalClass','HoldBreath','AimArms','HoldBreathPostfix'),
+ @('EFT.Animations.ProceduralWeaponAnimation','SetStrategy','AimArms','SetStrategyPrefix'),
  @('EFT.Player','VisualPass','AimArms','VisualPassPostfix'),
  @('EFT.Player','Rotate','AimArms','RotatePrefix'),
  @('EFT.Player','Look','AimArms','LookPrefix'),
@@ -41,6 +42,7 @@ $checks=@(
 $failed=0
 foreach($c in $checks){
  $target=@($types[$c[0]].Methods | Where-Object Name -eq $c[1])
+ if($c[1] -eq 'SetStrategy') { $target=@($target | Where-Object { $_.Parameters.Count -eq 1 -and $_.Parameters[0].ParameterType.FullName -eq 'EFT.EPointOfView' }) }
  $patch=@($types["EFTNewCamera.$($c[2])"].Methods | Where-Object Name -eq $c[3])
  if($target.Count -ne 1 -or $patch.Count -ne 1){"FAIL target $($c -join ' ')";$failed++;continue}
  foreach($p in $patch[0].Parameters){

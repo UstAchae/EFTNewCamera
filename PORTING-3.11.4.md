@@ -1,6 +1,6 @@
 # SPT 3.11.4 移植记录
 
-目标：SPT 3.11.4，EFT 0.16.1.3.35392。版本：0.1.228.313。
+目标：SPT 3.11.4，EFT 0.16.1.3.35392。版本：0.1.228.314。
 基于 UstAchae/EFTNewCamera 提交 `774d067df260b46470cdd77fdf86c41117f6cb77`（0.1.228）。
 
 ## 客户端接口
@@ -22,6 +22,20 @@
 
 瞄准歪头修复：本地玩家开启模组时，RotateHead 前缀清零独立的 blendValue，再交由原有模组后缀处理自由观察。仅清零 offset 无法屏蔽原版头颈瞄准旋转。此改动也屏蔽退出瞄准时的原版混合过渡。
 
+## 动画策略及骨骼修订（0.1.228.314）
+
+收到 0.1.228.313 仍会枪手脱节、噪音和枪管发红的反馈。日志没有对应异常；未确认异常时是否实际扣弹。
+
+35392 的 Player.Init 为 MovementContext.OnStateChanged 注册回调；离开 Stationary 时调用 SetStrategy(pointOfView)，参数是 Init 捕获的旧 POV，而非当前玩家 POV。模组把玩家改为 ThirdPerson 后，该回调仍可选到 FirstPerson 策略。此时玩家和 PWA 的 POV 属性仍为 ThirdPerson，模组原有的 POV 属性检查不能发现策略不一致。
+
+现在仅对本地玩家且总开关开启时，约束 SetStrategy(EPointOfView) 的选择；不拦截 SetStrategy(GInterface38) 所接收的显式固定武器策略，也不干预自由镜头或其他玩家。
+
+另修正了上臂缓存按玩家 ID 常驻的问题：武器 prefab 中的第一人称手臂随换枪进入对象池，旧 Transform 仍可能不为 null。手部控制器变化时先恢复渲染标记、清空上臂列表，再从当前层级收集。
+
+上述代码问题可以解释姿态混用和旧骨骼引用，尚未证明异常射击音/枪管发红与它们同源，不能宣称已全部解决。没有修改射速、弹药、温度、开火输入或存档。
+
+通过 Tests/StationaryStrategyRegression.ps1 的 6 个离线场景：模拟旧 Init POV 的退出回调、普通第三人称、不同动画实例、关闭模组、自由镜头、非本地玩家。测试编译生产前缀与最小托管替身，不执行 Unity/Harmony 或枪械动画，不能替代实机回归。
+
 ## 固定武器切换修订（0.1.228.313）
 
 收到使用场景 AGS 后普通武器瞄准异常的反馈，日志未显示对应异常。确认存在两个状态管理缺口：固定武器分支没有核对当前物品身份，且切换手部控制器后沿用对齐/头部/架枪过渡和瞄具缓存。现在按玩家、手部控制器和固定武器身份重置这些状态，并恢复由模组临时关闭的瞄具组件。
@@ -35,11 +49,12 @@
 ```powershell
 pwsh -NoProfile -File Build-Local.ps1 -GameRoot "D:\games\SPT-3.11.4"
 pwsh -NoProfile -File Tests/Validate-311.ps1 -GameRoot "D:\games\SPT-3.11.4"
+pwsh -NoProfile -File Tests/StationaryStrategyRegression.ps1
 ```
 
 构建输出 `_build/JustachaeThirdPersonCamera.dll` 和可解压到游戏根目录的 ZIP。游戏程序集不上传仓库；脚本只从本地引用。
 
-已通过 Release 编译，以及静态检查：22 个前后置补丁签名、5 个反射字段、20 个声音方法的 POV 读取位置、2 个协程状态机及开火后坐力补丁所依赖的两个 POV 判断。
+已通过 Release 编译，以及静态检查：23 个前后置补丁签名、5 个反射字段、20 个声音方法的 POV 读取位置、2 个协程状态机及开火后坐力补丁所依赖的两个 POV 判断。
 
 静态检查不运行 Harmony/Unity，不能保证补丁执行或最终画面正确。当前歪头及固定武器切换修订尚未完成游戏内验证。未运行需要 Unity 2022.3 检查工程的铁瞄资源回归（见 Tests/README.md）。
 
