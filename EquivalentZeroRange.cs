@@ -17,6 +17,9 @@ internal static class EquivalentZeroRange
     private static ConfigEntry<bool> _debug = null!;
     internal static readonly List<Vector3> DebugTrajectory = new(2001);
     internal static readonly List<Vector3> DebugCrossings = new(4);
+    internal static readonly List<Vector3> CandidateCrossings = new(4);
+    private static string _status = "等待瞄准采样";
+    private static GUIStyle? _readout;
     internal static Vector3 DebugOrigin, DebugDirection, NativeOrigin, NativeDirection;
     internal static bool DebugActive => _debug != null && _debug.Value && DebugTrajectory.Count > 1 && _frame >= Time.frameCount - 1;
 
@@ -35,18 +38,26 @@ internal static class EquivalentZeroRange
 
     internal static void Sample(Camera camera, float mrad, bool reticleMoving)
     {
-        if (_show == null || (!_show.Value && !_debug.Value) || _frame == Time.frameCount) return;
+        if (_show == null || (!_show.Value && !_debug.Value && !BallisticProbe.Enabled) || _frame == Time.frameCount) return;
         _frame = Time.frameCount;
         _text = ZeroRangeMath.FormatPair(-1f, -1f, 0);
-        DebugTrajectory.Clear(); DebugCrossings.Clear();
-        if (OpticDiagnostics.Force) return;
+        DebugTrajectory.Clear(); DebugCrossings.Clear(); CandidateCrossings.Clear();
+        DebugOrigin = DebugDirection = NativeOrigin = NativeDirection = Vector3.zero;
+        _status = "未取得有效数据";
+        try { SampleCore(camera, mrad, reticleMoving); }
+        finally { BallisticProbe.Reference(camera, mrad, reticleMoving, _status); }
+    }
+
+    private static void SampleCore(Camera camera, float mrad, bool reticleMoving)
+    {
+        if (OpticDiagnostics.Force) { _status="强制投影测试开启，暂停求交"; return; }
         Player? player = Singleton<GameWorld>.Instance?.MainPlayer;
         if (player == null || !(player.HandsController is Player.FirearmController firearm)
-            || firearm.CurrentFireport?.Original == null) return;
+            || firearm.CurrentFireport?.Original == null) { _status="枪械或枪口不可用"; return; }
         var ammo = firearm.Weapon.CurrentAmmoTemplate;
-        if (ammo == null || ammo.BulletMassGram <= 0f || ammo.BulletDiameterMilimeters <= 0f || ammo.BallisticCoeficient <= 0f) return;
+        if (ammo == null || ammo.BulletMassGram <= 0f || ammo.BulletDiameterMilimeters <= 0f || ammo.BallisticCoeficient <= 0f) { _status="弹药参数不可用"; return; }
         var bone = player.ProceduralWeaponAnimation?.CurrentScope?.Bone;
-        if (bone == null) return;
+        if (bone == null) { _status="原生瞄准节点不可用"; return; }
         NativeOrigin = bone.position;
         NativeDirection = (bone.name == "aim_camera" ? -bone.up : -bone.forward).normalized;
         Vector3 origin = NativeOrigin, ray = NativeDirection;
@@ -59,11 +70,12 @@ internal static class EquivalentZeroRange
             if (reticle?.CanUpdate == true && reticle.Renderer != null)
             {
                 if (!SightReferenceMath.ProjectionTranslation(projection, camera.cameraToWorldMatrix,
-                    reticle.Renderer.bounds.center, shift, out translation)) return;
+                    reticle.Renderer.bounds.center, shift, out translation)) { _status="分划投影位移不可用"; return; }
             }
             else if (!LegacyReticle.TryGetTranslation(out translation))
             {
                 OpticDiagnostics.Trace("reference.unavailable", camera, "No readable reticle geometry; distance suppressed rather than using an arbitrary displacement.");
+                _status="A类纹理/网格位移不可用，求交已暂停";
                 return;
             }
             // Translate the native reference by exactly the rendered mark's displacement. Never turn its axis.
@@ -82,9 +94,9 @@ internal static class EquivalentZeroRange
             ray = (Quaternion.FromToRotation(a, b) * ray).normalized;
         }
         DebugOrigin = origin; DebugDirection = ray;
-        OpticDiagnostics.Trace("reference.native", camera, $"reticleMoving={reticleMoving} mrad={mrad:R} translation={origin-NativeOrigin} origin={origin} axis={ray}");
+        OpticDiagnostics.Trace("reference.native", camera, $"reticleMoving={reticleMoving} mrad={mrad:R} translation={(origin-NativeOrigin).ToString("F6")} origin={origin.ToString("F6")} axis={ray.ToString("F6")}");
         Vector3 up = Vector3.ProjectOnPlane(-Physics.gravity, ray).normalized;
-        if (up.sqrMagnitude < 0.5f) return;
+        if (up.sqrMagnitude < 0.5f) { _status="瞄准轴接近重力方向，垂直求交基准退化"; return; }
         Vector3 muzzle = firearm.CurrentFireport.Original.position;
         Vector3 direction = firearm.WeaponDirection.normalized;
         AimArms.ResolvePreviewShot(firearm, ref muzzle, ref direction);
@@ -105,6 +117,9 @@ internal static class EquivalentZeroRange
             Vector3 acceleration = Physics.gravity - area * drag * speed * speed / (2f * mass) * velocity.normalized;
             Vector3 next = position + velocity * step + acceleration * (0.5f * step * step);
             DebugTrajectory.Add(next);
+            if (ZeroRangeMath.Crossing(position, next, origin, ray, up, 1000000f, out Vector3 candidate)
+                && Vector3.Distance(muzzle,candidate)<=_maximum.Value
+                && (CandidateCrossings.Count==0 || Vector3.Distance(CandidateCrossings[CandidateCrossings.Count-1],candidate)>.02f)) CandidateCrossings.Add(candidate);
             if (ZeroRangeMath.Crossing(position, next, origin, ray, up, _tolerance.Value, out Vector3 crossing))
             {
                 float range = Vector3.Distance(muzzle, crossing);
@@ -120,12 +135,18 @@ internal static class EquivalentZeroRange
             velocity += acceleration * step;
         }
         _text = ZeroRangeMath.FormatPair(nearest, farthest, DebugCrossings.Count);
+        _status = _text.Replace("\n", " | ") + $" | 垂直候选 {CandidateCrossings.Count} / 三维有效 {DebugCrossings.Count}";
     }
 
     internal static void Draw()
     {
         if (_show == null || !_show.Value || !NewCameraSwitch.Enabled || _frame < Time.frameCount - 1) return;
         if (Singleton<GameWorld>.Instance?.MainPlayer?.HandsController?.IsAiming != true) return;
-        GUI.Box(new Rect(Screen.width - 340f, Screen.height - 160f, 320f, 72f), "等效归零（估算）\n" + _text);
+        _readout ??= new GUIStyle(GUI.skin.label) { fontSize=15,alignment=TextAnchor.UpperLeft,wordWrap=false };
+        _readout.normal.textColor=Color.white;
+        Rect box = new Rect(Screen.width-380f,190f,360f,92f);
+        GUI.Box(box,"");
+        GUI.Label(new Rect(box.x+10,box.y+5,340f,22f),"等效归零（估算）／当前紫线",_readout);
+        GUI.Label(new Rect(box.x+10,box.y+30,340f,55f),_text,_readout);
     }
 }

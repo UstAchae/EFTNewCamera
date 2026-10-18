@@ -35,6 +35,9 @@ Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
 $pluginDir = Join-Path $stage "BepInEx/plugins/$name"
 New-Item $pluginDir -ItemType Directory -Force | Out-Null
 Copy-Item $dll $pluginDir
+$probeDir = Join-Path $stage 'BepInEx/ballistic-probes'
+New-Item $probeDir -ItemType Directory -Force | Out-Null
+Copy-Item "$PSScriptRoot/Tools/ballistic-probe-viewer.html" (Join-Path $probeDir 'viewer.html')
 $zip = Join-Path $output "$name-$version.zip"
 Remove-Item $zip -Force -ErrorAction SilentlyContinue
 Add-Type -AssemblyName System.IO.Compression.FileSystem

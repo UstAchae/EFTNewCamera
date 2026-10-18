@@ -100,6 +100,7 @@ internal sealed class TrajectoryPreview : MonoBehaviour
             velocity += acceleration * Step;
         }
         OpticDiagnostics.Trace("trajectory.world", camera, $"origin={_start.ToString("F6")} direction={_axis.ToString("F6")} end={_points[_count - 1].ToString("F6")}");
+        BallisticProbe.Trajectory(camera, firearm.CurrentFireport.Original.position, _start, _axis, _points, _count);
 
     }
 
@@ -211,6 +212,7 @@ internal sealed class TrajectoryPreview : MonoBehaviour
         if (_count < 2) return;
         PopulateLines(camera);
         bool hasLens = TryLensRect(camera, out Rect lensRect);
+        BallisticProbe.Overlay(camera, hasLens, lensRect);
         Color saved = GUI.color;
         Matrix4x4 matrix = GUI.matrix;
         try

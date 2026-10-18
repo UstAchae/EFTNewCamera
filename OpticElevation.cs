@@ -115,6 +115,7 @@ internal static class OpticElevation
         string key = Key(mod);
         Offsets.TryGetValue(key, out float offset);
         Offsets[key] = Mathf.Clamp(offset + sign * _step.Value, -_limit.Value, _limit.Value);
+        BallisticProbe.Adjust(mod.Item.TemplateId, offset, Offsets[key]);
         OpticDiagnostics.Input("custom.changed", $"tpl={mod.Item.TemplateId} item={mod.Item.Id} mrad={Offsets[key]:R}");
     }
 
