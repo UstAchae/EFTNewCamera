@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "justachae.thirdpersoncamera";
     public const string PluginName = "Justachae's Third-Person Skeleton and Camera";
-    public const string PluginVersion = "0.1.251";
+    public const string PluginVersion = "0.1.252";
 
     private void Awake()
     {
@@ -35,12 +35,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         BindAimDistance();
         BindSway();
         BindBody();
-        OpticTest.Initialize(Config);
         OpticElevation.Initialize(Config);
-        gameObject.AddComponent<BallisticProbe>().Initialize(Config, Logger);
-        EquivalentZeroRange.Initialize(Config);
-        gameObject.AddComponent<OpticDiagnostics>().Initialize(Config, Logger);
-        gameObject.AddComponent<TrajectoryPreview>().Initialize(Config);
     }
 
     private void BindBody()
@@ -278,12 +273,6 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         AdjustAimDistance();
     }
 
-    private void OnGUI()
-    {
-        OpticElevation.DrawStatus();
-        EquivalentZeroRange.Draw();
-    }
-
     private void LateUpdate()
     {
         NewCameraSwitch.LateUpdate();
@@ -298,12 +287,6 @@ internal static class NewCameraSwitch
     private static int _poseFrame = -1;
     private static Vector3 _posePosition;
     private static Quaternion _poseRotation;
-
-    internal static bool TryObserverPose(out Vector3 position, out Quaternion rotation)
-    {
-        position = _posePosition; rotation = _poseRotation;
-        return Enabled && _poseFrame == Time.frameCount;
-    }
 
     internal static void LateUpdate()
     {

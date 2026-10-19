@@ -17,8 +17,6 @@ internal static class LegacyReticle
     private static MaterialPropertyBlock? _originalBlock;
     private static readonly MaterialPropertyBlock DrawBlock = new();
     private static Vector4 _wanted;
-    private static Vector3 _perV;
-    private static bool _hasGeometry;
     private static readonly int ShiftsId = Shader.PropertyToID("_Shifts");
     private static readonly AccessTools.FieldRef<SSAAPropagator, Material> CachedMaterial =
         AccessTools.FieldRefAccess<SSAAPropagator, Material>("_opticLensMaterial");
@@ -40,17 +38,12 @@ internal static class LegacyReticle
         // Renderer property blocks take precedence over values on the material passed to DrawRenderer.
         // Set the effective per-slot value at the last draw-command preparation point as well.
         _renderer.GetPropertyBlock(DrawBlock, _materialIndex);
-        bool hadOverride = DrawBlock.HasVector(ShiftsId);
-        Vector4 before = DrawBlock.GetVector(ShiftsId);
         DrawBlock.SetVector(ShiftsId, _wanted);
         if (_shiftedMark != null) DrawBlock.SetTexture("_MarkTex", _shiftedMark);
         _renderer.SetPropertyBlock(DrawBlock, _materialIndex);
         __state = CachedMaterial(__instance);
         CachedMaterial(__instance) = _mark;
-        Camera? optic = CameraManager.Instance?.OpticCameraManager?.Camera;
-        if (optic != null)
-            OpticDiagnostics.Trace("legacy.ssaa.bind", optic,
-                $"renderer={_renderer.GetInstanceID()} oldMaterial={(__state != null ? __state.GetInstanceID() : 0)} drawMaterial={_mark.GetInstanceID()} shift={_mark.GetVector("_Shifts").x:R} slot={_materialIndex} hadBlockShift={hadOverride} beforeBlock={before} wantedBlock={_wanted}");
+
     }
 
     private static void AfterComposite(SSAAPropagator __instance, Material? __state)
@@ -59,7 +52,7 @@ internal static class LegacyReticle
         if (__state != null && CachedMaterial(__instance) == _mark) CachedMaterial(__instance) = __state;
     }
 
-    internal static void Apply(OpticSight? sight, Camera optic, float mrad, string template)
+    internal static void Apply(OpticSight? sight, Camera optic, float mrad)
     {
         Renderer? lens = sight?.LensRenderer;
         Camera? main = Camera.main;
@@ -80,21 +73,6 @@ internal static class LegacyReticle
                 lens.GetPropertyBlock(_originalBlock, i);
                 _mark = new Material(material) { name = material.name + " (A reticle instance)", hideFlags = HideFlags.HideAndDontSave };
                 _shifts = material.GetVector("_Shifts");
-                Mesh? mesh = lens.GetComponent<MeshFilter>()?.sharedMesh;
-                if (mesh != null && mesh.isReadable)
-                {
-                    Vector3[] vertices = mesh.vertices;
-                    Vector2[] uv = mesh.uv;
-                    int[] triangles = mesh.GetTriangles(i);
-                    if (uv.Length == vertices.Length)
-                        for (int t = 0; t + 2 < triangles.Length && !_hasGeometry; t += 3)
-                        {
-                            int a = triangles[t], b = triangles[t + 1], c = triangles[t + 2];
-                            _hasGeometry = SightReferenceMath.UvVertical(vertices[a], vertices[b], vertices[c], uv[a], uv[b], uv[c], out _perV);
-                        }
-                }
-                if (!_hasGeometry && mesh != null)
-                    _hasGeometry = SightReferenceMath.NativeVertical(template, mesh.name, mesh.vertexCount, mesh.bounds.size, out _perV);
                 Texture source = material.GetTexture("_MarkTex");
                 if (source != null)
                 {
@@ -131,7 +109,6 @@ internal static class LegacyReticle
         DrawBlock.SetVector(ShiftsId, _shifts);
         DrawBlock.SetTexture("_MarkTex", _shiftedMark);
         lens.SetPropertyBlock(DrawBlock, _materialIndex);
-        OpticDiagnostics.Trace("legacy.texture", optic, $"mrad={mrad:R} uvShift={uvShift:R} texture={_shiftedMark.GetInstanceID()} originalGeometryUnchanged=True");
     }
 
     internal static void Release()
@@ -144,33 +121,6 @@ internal static class LegacyReticle
         if (_sourceMark != null) { _sourceMark.Release(); Object.Destroy(_sourceMark); }
         if (_shiftedMark != null) { _shiftedMark.Release(); Object.Destroy(_shiftedMark); }
         _sourceMark = null; _shiftedMark = null; _lastUv = float.NaN;
-        _hasGeometry = false; _perV = Vector3.zero;
     }
 
-    internal static bool TryGetTranslation(out Vector3 translation)
-    {
-        translation = Vector3.zero;
-        if (_renderer == null || _mark == null || !_hasGeometry || float.IsNaN(_lastUv)) return false;
-        translation = SightReferenceMath.LegacyTranslation(_renderer.localToWorldMatrix, _perV, _mark.GetVector("_Scales").x, _lastUv);
-        return true;
-    }
-
-    internal static bool TryGetAimPoint(Vector3 nativeOrigin, Vector3 nativeAxis, out Vector3 zeroPoint, out Vector3 currentPoint)
-    {
-        zeroPoint = currentPoint = Vector3.zero;
-        if (_renderer == null || _mark == null || !TryGetTranslation(out Vector3 translation)) return false;
-        Mesh? mesh = _renderer.GetComponent<MeshFilter>()?.sharedMesh;
-        if (mesh == null) return false;
-        Matrix4x4 matrix = SightReferenceMath.LegacyMatrix(_renderer.localToWorldMatrix);
-        Vector4 axis = _mark.GetVector("_ShiftDirection");
-        Vector3 local = mesh.bounds.center*_mark.GetVector("_Scales").x
-            + new Vector3(axis.x,axis.y,axis.z)*_shifts.x;
-        Vector3 centre = matrix.MultiplyPoint3x4(local);
-        Vector3 normal = Vector3.Cross(matrix.MultiplyVector(Vector3.right),matrix.MultiplyVector(Vector3.forward)).normalized;
-        // The user-confirmed native axis defines the zero aim point on the actual virtual mark plane.
-        // No pixel recognition of an arbitrary texture tip is claimed here.
-        if (!SightReferenceMath.AxisPlanePoint(nativeOrigin,nativeAxis,centre,normal,out zeroPoint)) return false;
-        currentPoint = zeroPoint+translation;
-        return true;
-    }
 }

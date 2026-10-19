@@ -43,8 +43,6 @@ internal static class OpticElevation
     private static Matrix4x4 _reticleProjection, _reticleNonJittered;
     private static ConfigEntry<bool> _enabled = null!;
     private static ConfigEntry<float> _step = null!;
-    private static ConfigEntry<float> _limit = null!;
-    private static ConfigEntry<bool> _show = null!;
     private static ConfigEntry<float> _repeat = null!;
     private static ConfigEntry<float> _smooth = null!;
     private static readonly Dictionary<string, float> Displayed = new();
@@ -63,14 +61,11 @@ internal static class OpticElevation
     {
         LegacyReticle.Install();
         _enableA = config.Bind("光学密位", "启用A类分划调节", true,
-            "PU及PSO-1系列：PageUp分划垂直向上、PageDown分划向下。背景及实际弹道不变。使用相同的步长、连调速度和平滑设置。");
+            "PU及PSO-1系列：PageDown分划向下，PageUp调回初始位置；范围0至-50 mrad，不可高于初始位置。背景及实际弹道不变。使用相同的步长、连调速度和平滑设置。");
         _enabled = config.Bind("光学密位", "启用B类画面调节", true,
-            "仅骨架镜头开启时生效。B类以及合并处理的C/D类接管原版归零上下命令（默认PageUp/PageDown）。分划不动，PageUp背景向上、PageDown背景向下；原版米数档位不再随之切换。A类和未确认型号不接管。");
+            "仅骨架镜头开启时生效。B类以及合并处理的C/D类接管原版归零上下命令（默认PageUp/PageDown）。分划不动，PageDown背景向下、PageUp调回初始位置；范围0至-50 mrad，不可高于初始位置；原版米数档位不再随之切换。A类和未确认型号不接管。");
         _step = config.Bind("光学密位", "每格角度（mrad）", 0.05f,
             new ConfigDescription("暂用统一步长，可修改；不是各型号已核实的真实旋钮刻度。", new AcceptableValueRange<float>(0.01f, 1f)));
-        _limit = config.Bind("光学密位", "上下限（mrad）", 30f,
-            new ConfigDescription("相对当前原版归零的上下可调范围。每个瞄具实例独立记录，本次游戏会话有效。", new AcceptableValueRange<float>(1f, 100f)));
-        _show = config.Bind("光学密位", "显示当前调节量", true, "瞄准支持的瞄具时，显示镜内背景的上下调节量。正值向上，负值向下，单位mrad。");
         _repeat = config.Bind("光学密位", "按住每秒步数", 60f,
             new ConfigDescription("按住PageUp/PageDown，首次单步后等待0.15秒，再按此速度连续调整。", new AcceptableValueRange<float>(1f, 200f)));
         _smooth = config.Bind("光学密位", "画面平滑时间（秒）", 0.04f,
@@ -96,12 +91,10 @@ internal static class OpticElevation
     private static bool InputPrefix(FirearmHandsInputTranslator __instance, ECommand __0, ref InputNode.ETranslateResult __result)
     {
         if (__0 != ECommand.OpticCalibrationSwitchUp && __0 != ECommand.OpticCalibrationSwitchDown) return true;
-        OpticDiagnostics.Input("TranslateCommand", __0.ToString());
         Player? player = Singleton<GameWorld>.Instance?.MainPlayer;
         if (player == null || !ReferenceEquals(Controller(__instance), player.HandsController)
             || !TryTarget(out SightComponent? mod))
         {
-            OpticDiagnostics.Input("native.passthrough", "控制器或目标识别未通过");
             return true;
         }
         if (UnityEngine.Input.GetKey(KeyCode.PageUp) || UnityEngine.Input.GetKey(KeyCode.PageDown))
@@ -116,9 +109,7 @@ internal static class OpticElevation
     {
         string key = Key(mod);
         Offsets.TryGetValue(key, out float offset);
-        Offsets[key] = Mathf.Clamp(offset + sign * _step.Value, -_limit.Value, _limit.Value);
-        BallisticProbe.Adjust(mod.Item.TemplateId, offset, Offsets[key]);
-        OpticDiagnostics.Input("custom.changed", $"tpl={mod.Item.TemplateId} item={mod.Item.Id} mrad={Offsets[key]:R}");
+        Offsets[key] = OpticAdjustmentMath.Next(offset, sign, _step.Value);
     }
 
     private static bool Adjust(ProceduralWeaponAnimation animation, float sign)
@@ -162,14 +153,6 @@ internal static class OpticElevation
         }
     }
 
-    internal static void DrawStatus()
-    {
-        if (!OpticTest.Enabled || _show == null || !_show.Value || !TryTarget(out SightComponent? mod)) return;
-        Offsets.TryGetValue(Key(mod!), out float offset);
-        string kind = ReticleMoving.Contains(mod!.Item.TemplateId) ? "A类分划" : "B类画面";
-        GUI.Box(new Rect(20f, 142f, 400f, 30f), $"{kind} {offset:+0.00;-0.00;0.00} mrad  |  每格 {_step.Value:0.00} mrad");
-    }
-
     private static bool Eligible(ProceduralWeaponAnimation.SightNBone scope, OpticSight? current)
     {
         return scope.Mod != null && ((_enabled.Value && Supported.Contains(scope.Mod.Item.TemplateId))
@@ -206,7 +189,6 @@ internal static class OpticElevation
     internal static void Apply(Camera camera)
     {
         if (!OpticPicture.IsCamera(camera)) return;
-        OpticDiagnostics.Trace("apply.entry", camera);
         // Multiple pre-cull calls must never accumulate the rotation.
         Release();
         bool eligible = TryTarget(out SightComponent? mod);
@@ -230,14 +212,8 @@ internal static class OpticElevation
             offset = shown;
         }
         if (legacy)
-            LegacyReticle.Apply(CameraManager.Instance?.OpticCameraManager?.CurrentOpticSight, camera, offset, mod!.Item.TemplateId);
-        if (eligible)
-            EquivalentZeroRange.Sample(camera, offset, ReticleMoving.Contains(mod!.Item.TemplateId));
-        if (!OpticDiagnostics.Force && (!eligible || Mathf.Abs(offset) < 0.000001f))
-        {
-            OpticDiagnostics.Trace("apply.skipped", camera, $"eligible={eligible} offset={offset:R}");
-            return;
-        }
+            LegacyReticle.Apply(CameraManager.Instance?.OpticCameraManager?.CurrentOpticSight, camera, offset);
+        if (!eligible || Mathf.Abs(offset) < 0.000001f) return;
         _camera = camera;
         _projection = camera.projectionMatrix;
         _nonJittered = camera.nonJitteredProjectionMatrix;
@@ -245,10 +221,10 @@ internal static class OpticElevation
         _reticleNonJittered = _nonJittered;
         // Off-axis projection translates the scene vertically without rotating any geometry.
         Matrix4x4 shifted = _projection;
-        shifted.m12 -= OpticDiagnostics.Force ? 0.4f : Mathf.Tan(offset / 1000f) * shifted.m11;
+        shifted.m12 -= Mathf.Tan(offset / 1000f) * shifted.m11;
         Matrix4x4 steady = _nonJittered;
-        steady.m12 -= OpticDiagnostics.Force ? 0.4f : Mathf.Tan(offset / 1000f) * steady.m11;
-        if (eligible && ReticleMoving.Contains(mod!.Item.TemplateId) && !OpticDiagnostics.Force)
+        steady.m12 -= Mathf.Tan(offset / 1000f) * steady.m11;
+        if (ReticleMoving.Contains(mod!.Item.TemplateId))
         {
             // Shift only the reticle's clip-space projection. Never rotate/translate its mesh.
             _reticleProjection = shifted;
@@ -259,14 +235,12 @@ internal static class OpticElevation
             camera.projectionMatrix = shifted;
             camera.nonJitteredProjectionMatrix = steady;
         }
-        OpticDiagnostics.Trace("apply.after", camera, $"baseM12={_projection.m12:R} wantedM12={shifted.m12:R} eligible={eligible} offset={offset:R}");
     }
 
     private static void ReticlePostfix(OpticRetrice __instance)
     {
         Camera camera = __instance.GetComponent<Camera>();
         if (!OpticPicture.IsCamera(camera)) return;
-        OpticDiagnostics.Trace("reticle.postfix.entry", camera);
         // Ensure the skeleton pose and projection are ready regardless of callback order.
         NewCameraSwitch.OnCameraPreCull(camera);
         if (_camera != camera || !__instance.CanUpdate || __instance.Renderer == null) return;
@@ -280,12 +254,10 @@ internal static class OpticElevation
         command.DrawRenderer(__instance.Renderer, material, 0, 0);
         command.SetViewProjectionMatrices(camera.worldToCameraMatrix, camera.projectionMatrix);
         command.SetGlobalMatrix(Shader.PropertyToID("_NonJitteredProj"), GL.GetGPUProjectionMatrix(camera.nonJitteredProjectionMatrix, true));
-        OpticDiagnostics.Trace("reticle.buffer.rebuilt", camera);
     }
 
     internal static void Restore(Camera camera)
     {
-        if (OpticPicture.IsCamera(camera)) OpticDiagnostics.Trace("restore.before", camera);
         if (_camera == camera) Release();
     }
 

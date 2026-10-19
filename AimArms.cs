@@ -528,29 +528,6 @@ internal static class AimArms
         direction = _laserTurn * direction;
     }
 
-    internal static void ResolvePreviewShot(Player.FirearmController firearm, ref Vector3 position, ref Vector3 direction)
-    {
-        bool alreadyCarried = _shotFireport.HasValue && (firearm.CurrentFireport?.Original?.position - _shotFireport.Value)?.sqrMagnitude < 0.000001f;
-        if (NewCameraSwitch.Enabled && _hasLaserDisplacement && Time.frameCount - _shotFrame <= 2 && !alreadyCarried)
-        {
-            position = _laserPivot + _laserDisplacement + _laserTurn * (position - _laserPivot);
-            direction = _laserTurn * direction;
-        }
-        position -= direction * firearm.WeaponLn / 5f;
-        Player? local = Singleton<GameWorld>.Instance?.MainPlayer;
-        if (local?.ProceduralWeaponAnimation?.ShotNeedsFovAdjustments == true && local.RibcageScaleCurrent < 1f)
-        {
-            // Match native AdjustShotVectors after the muzzle-length position correction.
-            Transform space = firearm.HandsHierarchy.Self;
-            Vector3 point = space.InverseTransformPoint(position);
-            Vector3 axis = space.InverseTransformDirection(direction);
-            point.z *= local.RibcageScaleCurrent;
-            axis.z *= local.RibcageScaleCurrent;
-            position = space.TransformPoint(point);
-            direction = space.TransformDirection(axis).normalized;
-        }
-    }
-
     internal static void CarryOptic(Camera camera)
     {
         if (!_hasLaserDisplacement || _opticFrame == Time.frameCount)
