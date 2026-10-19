@@ -27,7 +27,9 @@ internal static class OpticElevation
         "57ac965c24597706be5f975c", "57aca93d2459771f2c7e26db",
         "5a1eaa87fcdbcb001865f75e", "5d1b5e94d7ad1a2b865a96b0", "63fc44e2429a8a166c7f61e6",
         "6478641c19d732620e045e17", "67641b461c2eb66ade05dba6", "609bab8b455afd752b2e6138",
-        "606f2696f2cb2e02a42aceb1"
+        "606f2696f2cb2e02a42aceb1",
+        "5d0a3a58d7ad1a669c15ca14", // KMZ 1P59 3-10x (user-selected B behaviour)
+        "5d0a3e8cd7ad1a6f6a3d35bd"  // KMZ 1P69 3-10x (user-selected B behaviour)
     };
     private static readonly Dictionary<string, float> Offsets = new();
     private static readonly HashSet<string> ReticleMoving = new()
