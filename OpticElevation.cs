@@ -162,7 +162,7 @@ internal static class OpticElevation
 
     internal static void DrawStatus()
     {
-        if (_show == null || !_show.Value || !TryTarget(out SightComponent? mod)) return;
+        if (!OpticTest.Enabled || _show == null || !_show.Value || !TryTarget(out SightComponent? mod)) return;
         Offsets.TryGetValue(Key(mod!), out float offset);
         string kind = ReticleMoving.Contains(mod!.Item.TemplateId) ? "A类分划" : "B类画面";
         GUI.Box(new Rect(20f, 142f, 400f, 30f), $"{kind} {offset:+0.00;-0.00;0.00} mrad  |  每格 {_step.Value:0.00} mrad");

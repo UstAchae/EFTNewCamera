@@ -169,7 +169,7 @@ internal static class EquivalentZeroRange
 
     internal static void Draw()
     {
-        if (_show == null || !_show.Value || !NewCameraSwitch.Enabled || _frame < Time.frameCount - 1) return;
+        if (!OpticTest.Enabled || _show == null || !_show.Value || !NewCameraSwitch.Enabled || _frame < Time.frameCount - 1) return;
         if (Singleton<GameWorld>.Instance?.MainPlayer?.HandsController?.IsAiming != true) return;
         _readout ??= new GUIStyle(GUI.skin.label) { fontSize=15,alignment=TextAnchor.UpperLeft,wordWrap=false };
         _readout.normal.textColor=Color.white;
