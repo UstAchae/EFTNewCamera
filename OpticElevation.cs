@@ -61,9 +61,9 @@ internal static class OpticElevation
     {
         LegacyReticle.Install();
         _enableA = config.Bind("光学密位", "启用A类分划调节", true,
-            "PU及PSO-1系列：PageDown分划向下，PageUp调回初始位置；范围0至-50 mrad，不可高于初始位置。背景及实际弹道不变。使用相同的步长、连调速度和平滑设置。");
+            "PU及PSO-1系列：PageDown增加分划补偿，PageUp调回初始位置；范围0至-50 mrad，不可高于初始位置。背景及实际弹道不变。使用相同的步长、连调速度和平滑设置。");
         _enabled = config.Bind("光学密位", "启用B类画面调节", true,
-            "仅骨架镜头开启时生效。B类以及合并处理的C/D类接管原版归零上下命令（默认PageUp/PageDown）。分划不动，PageDown背景向下、PageUp调回初始位置；范围0至-50 mrad，不可高于初始位置；原版米数档位不再随之切换。A类和未确认型号不接管。");
+            "仅骨架镜头开启时生效。B类以及合并处理的C/D类接管原版归零上下命令（默认PageUp/PageDown）。分划不动，PageDown增加画面补偿、PageUp调回初始位置；范围0至-50 mrad，不可高于初始位置；原版米数档位不再随之切换。A类和未确认型号不接管。");
         _step = config.Bind("光学密位", "每格角度（mrad）", 0.05f,
             new ConfigDescription("暂用统一步长，可修改；不是各型号已核实的真实旋钮刻度。", new AcceptableValueRange<float>(0.01f, 1f)));
         _repeat = config.Bind("光学密位", "按住每秒步数", 60f,
@@ -221,9 +221,9 @@ internal static class OpticElevation
         _reticleNonJittered = _nonJittered;
         // Off-axis projection translates the scene vertically without rotating any geometry.
         Matrix4x4 shifted = _projection;
-        shifted.m12 -= Mathf.Tan(offset / 1000f) * shifted.m11;
+        shifted.m12 += Mathf.Tan(offset / 1000f) * shifted.m11;
         Matrix4x4 steady = _nonJittered;
-        steady.m12 -= Mathf.Tan(offset / 1000f) * steady.m11;
+        steady.m12 += Mathf.Tan(offset / 1000f) * steady.m11;
         if (ReticleMoving.Contains(mod!.Item.TemplateId))
         {
             // Shift only the reticle's clip-space projection. Never rotate/translate its mesh.

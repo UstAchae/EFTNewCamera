@@ -100,7 +100,7 @@ internal static class LegacyReticle
         if (float.IsNaN(_lastUv) || Mathf.Abs(uvShift - _lastUv) > 0.0000001f)
         {
             RenderTexture active = RenderTexture.active;
-            try { Graphics.Blit(_sourceMark, _shiftedMark, Vector2.one, new Vector2(0f, -uvShift)); }
+            try { Graphics.Blit(_sourceMark, _shiftedMark, Vector2.one, new Vector2(0f, uvShift)); }
             finally { RenderTexture.active = active; }
             _lastUv = uvShift;
         }
