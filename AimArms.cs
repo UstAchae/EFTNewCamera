@@ -1622,6 +1622,27 @@ internal static class AimArms
         if (animation.HandsContainer == null || animation.HandsContainer.Weapon == null)
             return 0f;
 
+        // Keep the correction scoped to the Mosin sniper platform under investigation.
+        // Optics use the native selected/far planes, not the iron-sight DefaultAimPlane.
+        var scope = animation.CurrentScope;
+        if (scope?.IsOptic == true
+            && Singleton<GameWorld>.Instance?.MainPlayer?.HandsController is Player.FirearmController firearm
+            && firearm.Weapon.TemplateId == "5ae08f0a5acfc408fb1398a1"
+            && animation.HandsContainer.FarPlane != null)
+        {
+            Transform weapon = animation.HandsContainer.Weapon;
+            float selected = animation._currentAimingPlane?.Depth ?? animation.HandsContainer.FarPlane.Depth;
+            float far = animation.HandsContainer.FarPlane.Depth;
+            // Mirror UpdateFarPlane using current attachment transforms and eyecup shifts;
+            // do not reuse a stale private cache from first-person animation.
+            if (animation.ScopeAimTransforms != null)
+                foreach (var candidate in animation.ScopeAimTransforms)
+                    if (candidate.Bone != null && candidate.ScopePrefabCache != null && candidate.IsOptic)
+                        far = Mathf.Min(far,-weapon.InverseTransformPoint(candidate.Bone.position).y-candidate.EyeGuardShift);
+            float depth = -weapon.InverseTransformPoint(bone.position).y;
+            return AimEyeReliefMath.Resolve(depth,selected,far,weapon.localPosition.y);
+        }
+
         WeaponPrefab.AimPlane? plane = animation._currentAimingPlane;
         if (animation.CurrentScope != null && animation.CurrentScope.IsOptic)
             plane = animation.HandsContainer.DefaultAimPlane;
