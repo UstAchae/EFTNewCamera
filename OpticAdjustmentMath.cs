@@ -4,7 +4,10 @@ namespace EFTNewCamera
 {
 internal static class OpticAdjustmentMath
 {
+    // Most compensation that can be dialled in, in mrad. Enough for the game's ranges (about 500 m for 7.62 mm).
+    internal const float MaxCompensation = 3f;
+
     internal static float Next(float current, float steps, float stepSize)
-        => Mathf.Clamp(current+steps*stepSize,-50f,0f);
+        => Mathf.Clamp(current+steps*stepSize,-MaxCompensation,0f);
 }
 }
