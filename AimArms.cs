@@ -130,7 +130,7 @@ internal static class AimArms
     private static int _opticFrame = -1;
     private static readonly AccessTools.FieldRef<ProceduralWeaponAnimation, float> LineOfSightAngle =
         AccessTools.FieldRefAccess<ProceduralWeaponAnimation, float>("_currentLineOfSightDeltaAngle");
-    internal static float RecoilKick = 1f;
+    internal static float RecoilKick = 0.25f;
     private static bool _mounted;
     private static Quaternion _viewKick = Quaternion.identity;
     private static int _shotFrame = -1;
@@ -610,8 +610,8 @@ internal static class AimArms
             ApplyLook(player, bones, _smoothedHead);
     }
 
-    internal static float RecoilChest = 0.5f;
-    internal static float RecoilHead = 0.5f;
+    internal static float RecoilChest = 2f;
+    internal static float RecoilHead = 1f;
 
     // The first-person camera kick of a shot goes into the chest and on into the head, which carries
     // the camera. The gun and hands keep their place in the world; only the body and view are pushed.

@@ -14,7 +14,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "justachae.thirdpersoncamera";
     public const string PluginName = "Justachae's Third-Person Skeleton and Camera";
-    public const string PluginVersion = "0.1.265";
+    public const string PluginVersion = "0.1.266";
 
     private void Awake()
     {
@@ -224,13 +224,13 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         ConfigEntry<float> followDelay = Config.Bind("瞄准摆动", "跟手延迟（秒）", 0.1f,
             new ConfigDescription("晃鼠标时枪落后画面的快慢，数越大越慢。开镜和退瞄后的腰射都用这个数。0 是不延迟。子弹跟着枪口。",
                 new AcceptableValueRange<float>(0f, 0.3f)));
-        ConfigEntry<float> recoilKick = Config.Bind("瞄准摆动", "后坐力上跳", 1f,
+        ConfigEntry<float> recoilKick = Config.Bind("瞄准摆动", "后坐力上跳", 0.25f,
             new ConfigDescription("瞄准开枪时枪口上跳的力度，1 是原版第一人称的力度，0 是不跳。子弹跟着枪口走。不受上面摆动滑条影响。",
                 new AcceptableValueRange<float>(0f, 2f)));
-        ConfigEntry<float> recoilChest = Config.Bind("瞄准摆动", "后坐力传到胸腔", 0.5f,
+        ConfigEntry<float> recoilChest = Config.Bind("瞄准摆动", "后坐力传到胸腔", 2f,
             new ConfigDescription("开枪时原版第一人称给镜头的那一下后坐力，有多少推到胸腔上。胸腔带着肩膀和头一起转，镜头跟着头走；枪和手留在原地。0 是不推。和下面一项加起来是 1 时，镜头受到的力度跟原版第一人称一样。",
                 new AcceptableValueRange<float>(0f, 2f)));
-        ConfigEntry<float> recoilHead = Config.Bind("瞄准摆动", "后坐力传到头部", 0.5f,
+        ConfigEntry<float> recoilHead = Config.Bind("瞄准摆动", "后坐力传到头部", 1f,
             new ConfigDescription("同一份后坐力，有多少再推到头上（绕脖子转），镜头跟着头走。0 是不推。",
                 new AcceptableValueRange<float>(0f, 2f)));
         void Refresh()
