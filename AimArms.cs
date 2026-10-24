@@ -1014,7 +1014,10 @@ internal static class AimArms
             up = Vector3.ProjectOnPlane(Vector3.up, forward);
         if (up.sqrMagnitude < 0.0001f)
             return false;
-        if (MachineGun(player))
+        // Sight bones do not agree on which axis is up: an "aim_camera" bone (such as a Mosin's iron sight)
+        // and the mounted machine guns come out upside down. A planted sight is never upside down, so up is
+        // whichever way faces the sky.
+        if (Vector3.Dot(up, Vector3.up) < 0f)
             up = -up;
 
         rotation = Quaternion.LookRotation(forward, up);
@@ -1026,12 +1029,6 @@ internal static class AimArms
     {
         return StationaryHeld(player, out StationaryWeapon? weapon)
             && weapon!.Animation == StationaryWeapon.EStationaryAnimationType.AGS_17;
-    }
-
-    private static bool MachineGun(Player player)
-    {
-        return StationaryHeld(player, out StationaryWeapon? weapon)
-            && weapon!.Animation != StationaryWeapon.EStationaryAnimationType.AGS_17;
     }
 
     private static bool StationaryHeld(Player player, out StationaryWeapon? weapon)
