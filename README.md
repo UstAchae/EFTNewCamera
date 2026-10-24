@@ -4,7 +4,7 @@
 
 ## 1.0.0：正式版
 
-- 与 0.1.278 的功能相同，版本号定为 1.0.0。
+- 在 0.1.278 的基础上，反转 A 类（PU、PSO-1 系列）旧式镜片分划的移动方向：PageDown 加补偿时分划往上走，与新式分划组件路径一致。版本号定为 1.0.0。
 - 安装：把压缩包解压到 SPT 文件夹（`EscapeFromTarkov.exe` 所在的那一层），得到 `BepInEx/plugins/JustachaeThirdPersonCamera/JustachaeThirdPersonCamera.dll`；启动游戏后在 F12 里打开插件名下方的总开关。
 
 ## 0.1.278：恢复前庭平衡的动态注视距离

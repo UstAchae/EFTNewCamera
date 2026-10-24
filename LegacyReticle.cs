@@ -96,7 +96,9 @@ internal static class LegacyReticle
         // Native mark UV is 10*uv-4.5; its virtual quad is Scales.x/Scales.y times the lens quad.
         // Translate the alpha image itself, preserving all native mark/mask geometry and alignment.
         float ratio = Mathf.Abs(scales.x) > 0.000001f ? Mathf.Abs(scales.y / scales.x) : 1f;
-        float uvShift = 0.5f * Mathf.Tan(mrad / 1000f) / Mathf.Tan(optic.fieldOfView * Mathf.Deg2Rad * 0.5f) * 10f * ratio;
+        // Negative: PageDown (more compensation, a negative mrad) moves the mark up, the same way the reticle moves
+        // on the OpticRetrice path and the picture moves for B scopes.
+        float uvShift = -0.5f * Mathf.Tan(mrad / 1000f) / Mathf.Tan(optic.fieldOfView * Mathf.Deg2Rad * 0.5f) * 10f * ratio;
         if (float.IsNaN(_lastUv) || Mathf.Abs(uvShift - _lastUv) > 0.0000001f)
         {
             RenderTexture active = RenderTexture.active;
