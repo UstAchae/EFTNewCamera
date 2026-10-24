@@ -578,9 +578,10 @@ internal static class AimArms
         Quaternion turn = CameraDirection.Unresolve(partialCamera) * Quaternion.Inverse(head.rotation);
         Vector3 displacement = partialCameraPosition - CameraPosition.Resolve(Vector3.zero, partialCamera) - head.position;
         Transform moved = FollowRoot(bones, head);
-        HeldPose[] planted = PlantedPoses(bones, moved);
         EnsureUpperarms(player);
         EnsureBodySkins(player);
+        HeldPose[] planted = PlantedPoses(bones, moved);
+        GripArms(bones, moved);
         Carry(moved, head.position, displacement, turn);
         CarryLoose(bones.Ribcage?.Original, moved, head.position, displacement, turn);
         CarryLoose(bones.Spine3?.Original, moved, head.position, displacement, turn);
@@ -591,6 +592,7 @@ internal static class AimArms
         }
         CarryLoose(bones.LeftShoulder?.Original, moved, head.position, displacement, turn);
         CarryLoose(bones.RightShoulder?.Original, moved, head.position, displacement, turn);
+        ReachArms(head.position, displacement, turn);
         for (int i = 0; i < planted.Length; i++)
             planted[i].Transform.SetPositionAndRotation(planted[i].Position, planted[i].Rotation);
         ApplyMountedLook(bones, head);
@@ -639,12 +641,11 @@ internal static class AimArms
         if (chest != null && !Settled(chestKick))
         {
             Transform upper = FollowRoot(bones, chest);
+            EnsureUpperarms(player);
             List<HeldPose> held = new();
             Hold(held, bones.Weapon_Root_Anim, upper);
             Hold(held, bones.Weapon_Root_Third, upper);
-            HoldAll(held, bones.Forearms, upper);
-            Hold(held, bones.LeftPalm, upper);
-            Hold(held, bones.RightPalm, upper);
+            GripArms(bones, upper);
             Vector3 pivot = chest.position;
             Carry(chest, pivot, Vector3.zero, chestKick);
             if (bones.Shoulders != null)
@@ -654,6 +655,7 @@ internal static class AimArms
             }
             CarryLoose(bones.LeftShoulder?.Original, chest, pivot, Vector3.zero, chestKick);
             CarryLoose(bones.RightShoulder?.Original, chest, pivot, Vector3.zero, chestKick);
+            ReachArms(pivot, Vector3.zero, chestKick);
             foreach (HeldPose pose in held)
                 pose.Transform.SetPositionAndRotation(pose.Position, pose.Rotation);
             if (neck == null || neck.IsChildOf(chest))
@@ -707,18 +709,98 @@ internal static class AimArms
         List<HeldPose> held = new();
         Hold(held, bones.Weapon_Root_Anim, moved);
         Hold(held, bones.Weapon_Root_Third, moved);
-        HoldAll(held, bones.Forearms, moved);
-        Hold(held, bones.LeftPalm, moved);
-        Hold(held, bones.RightPalm, moved);
         return held.ToArray();
     }
 
-    private static void HoldAll(List<HeldPose> held, Transform[]? transforms, Transform moved)
+    private struct ArmReach
     {
-        if (transforms == null)
+        internal Transform Upper;
+        internal Transform Lower;
+        internal Transform Hand;
+        internal float UpperLength;
+        internal float LowerLength;
+        internal Vector3 Elbow;
+        internal Vector3 HandPosition;
+        internal Quaternion HandRotation;
+    }
+
+    private static readonly List<ArmReach> Arms = new();
+
+    // Before the torso is moved: where each hand holds the gun, and the arm's two lengths and its elbow.
+    // Pinning the forearms in place instead pulls the elbow apart once the upper arm moves with the shoulder.
+    private static void GripArms(PlayerBones bones, Transform moved)
+    {
+        Arms.Clear();
+        AddArm(bones.LeftPalm, moved);
+        AddArm(bones.RightPalm, moved);
+    }
+
+    private static void AddArm(Transform? hand, Transform moved)
+    {
+        if (hand == null || !hand.IsChildOf(moved))
             return;
-        foreach (Transform transform in transforms)
-            Hold(held, transform, moved);
+        Transform? upper = null;
+        foreach (Transform arm in Upperarms)
+        {
+            if (arm != null && hand.IsChildOf(arm))
+            {
+                upper = arm;
+                break;
+            }
+        }
+        if (upper == null)
+            return;
+
+        Transform lower = hand;
+        while (lower.parent != null && lower.parent != upper)
+            lower = lower.parent;
+        if (lower.parent != upper || lower == hand)
+            return;
+
+        Arms.Add(new ArmReach
+        {
+            Upper = upper,
+            Lower = lower,
+            Hand = hand,
+            UpperLength = Vector3.Distance(upper.position, lower.position),
+            LowerLength = Vector3.Distance(lower.position, hand.position),
+            Elbow = lower.position,
+            HandPosition = hand.position,
+            HandRotation = hand.rotation
+        });
+    }
+
+    // After the torso moved by (pivot, displacement, turn): bend each arm so its hand reaches the grip again
+    // (two-bone IK by the law of cosines). The elbow keeps to the side it was on, carried with the torso.
+    private static void ReachArms(Vector3 pivot, Vector3 displacement, Quaternion turn)
+    {
+        foreach (ArmReach arm in Arms)
+        {
+            if (arm.Upper == null || arm.Lower == null || arm.Hand == null || arm.UpperLength < 0.001f || arm.LowerLength < 0.001f)
+                continue;
+
+            Vector3 shoulder = arm.Upper.position;
+            Vector3 toHand = arm.HandPosition - shoulder;
+            float reach = toHand.magnitude;
+            if (reach < 0.001f)
+                continue;
+            Vector3 along = toHand / reach;
+            float distance = Mathf.Clamp(reach, Mathf.Abs(arm.UpperLength - arm.LowerLength) + 0.001f, arm.UpperLength + arm.LowerLength - 0.001f);
+            Vector3 side = Vector3.ProjectOnPlane(pivot + displacement + turn * (arm.Elbow - pivot) - shoulder, along);
+            if (side.sqrMagnitude < 0.00000001f)
+                side = Vector3.ProjectOnPlane(arm.Lower.position - shoulder, along);
+            if (side.sqrMagnitude < 0.00000001f)
+                continue;
+            side.Normalize();
+
+            float cos = (arm.UpperLength * arm.UpperLength + distance * distance - arm.LowerLength * arm.LowerLength) / (2f * arm.UpperLength * distance);
+            float sin = Mathf.Sqrt(Mathf.Max(0f, 1f - cos * cos));
+            Vector3 elbow = shoulder + along * (arm.UpperLength * cos) + side * (arm.UpperLength * sin);
+            arm.Upper.rotation = Quaternion.FromToRotation(arm.Lower.position - shoulder, elbow - shoulder) * arm.Upper.rotation;
+            arm.Lower.rotation = Quaternion.FromToRotation(arm.Hand.position - arm.Lower.position, arm.HandPosition - arm.Lower.position) * arm.Lower.rotation;
+            arm.Hand.SetPositionAndRotation(arm.HandPosition, arm.HandRotation);
+        }
+        Arms.Clear();
     }
 
     private static void Hold(List<HeldPose> held, Transform? transform, Transform moved)
