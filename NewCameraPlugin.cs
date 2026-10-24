@@ -14,7 +14,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "justachae.thirdpersoncamera";
     public const string PluginName = "Justachae's Third-Person Skeleton and Camera";
-    public const string PluginVersion = "0.1.271";
+    public const string PluginVersion = "0.1.272";
 
     private void Awake()
     {
@@ -399,6 +399,7 @@ internal static class NewCameraSwitch
             Transform? head = player.PlayerBones?.Head?.Original;
             if (head != null)
             {
+                AimArms.FollowMountedGun(player);
                 _poseRotation = CameraDirection.Resolve(head.rotation);
                 _posePosition = CameraPosition.Resolve(head.position, _poseRotation);
                 AimArms.ObserveHead(player, _posePosition, _poseRotation);

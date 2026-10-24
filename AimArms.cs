@@ -580,6 +580,17 @@ internal static class AimArms
         Vector3 partialCameraPosition = Vector3.Lerp(CameraPosition.Resolve(head.position, fromCamera), cameraPosition, along);
         Quaternion turn = CameraDirection.Unresolve(partialCamera) * Quaternion.Inverse(head.rotation);
         Vector3 displacement = partialCameraPosition - CameraPosition.Resolve(Vector3.zero, partialCamera) - head.position;
+        MoveBody(player, bones, head, displacement, turn);
+        ApplyMountedLook(bones, head);
+        AimGrenadePicture(player);
+        return true;
+    }
+
+    // Moves the body so the head lands where (displacement, turn) puts it while the gun stays planted: the hips
+    // take the move and half the turn about the vertical, the upper body bends from its base for the rest, the legs
+    // bend to keep their feet and the hands keep their grip.
+    private static void MoveBody(Player player, PlayerBones bones, Transform head, Vector3 displacement, Quaternion turn)
+    {
         Transform moved = FollowRoot(bones, head);
         EnsureUpperarms(player);
         EnsureBodySkins(player);
@@ -619,9 +630,49 @@ internal static class AimArms
         ReachLimbs(bodyMove, hipsMove);
         for (int i = 0; i < planted.Length; i++)
             planted[i].Transform.SetPositionAndRotation(planted[i].Position, planted[i].Rotation);
-        ApplyMountedLook(bones, head);
-        AimGrenadePicture(player);
-        return true;
+    }
+
+    private static bool _hasMountYaw;
+    private static float _mountYaw;
+
+    // Hip-firing from a bipod or a mount: the game swings the gun about the mount point and leaves the body
+    // where it was. The body is swung about the same point by the gun's turn since mounting, so it stays behind it.
+    internal static void FollowMountedGun(Player player)
+    {
+        MovementContext? movement = player.MovementContext;
+        PlayerBones? bones = player.PlayerBones;
+        Transform? head = bones?.Head?.Original;
+        Transform? weapon = bones?.Weapon_Root_Anim;
+        ProceduralWeaponAnimation? animation = player.ProceduralWeaponAnimation;
+        if (movement == null || !movement.IsInMountedState || bones == null || head == null || weapon == null
+            || animation?.HandsContainer == null || player.HandsController is not Player.FirearmController firearm)
+        {
+            _hasMountYaw = false;
+            return;
+        }
+
+        Vector3 direction = Vector3.ProjectOnPlane(firearm.WeaponDirection, Vector3.up);
+        if (direction.sqrMagnitude < 0.0001f)
+            return;
+        float gunYaw = Mathf.Atan2(direction.x, direction.z) * Mathf.Rad2Deg;
+        float relative = Mathf.DeltaAngle(player.Transform.rotation.eulerAngles.y, gunYaw);
+        if (!_hasMountYaw)
+        {
+            _mountYaw = relative;
+            _hasMountYaw = true;
+        }
+        float swing = Mathf.DeltaAngle(_mountYaw, relative);
+        if (Mathf.Abs(swing) < 0.01f)
+            return;
+
+        Vector3 localPivot = animation.IsBipodUsed && !animation.IsVerticalMounting
+            ? animation.HandsContainer.MountingRotationCenterBipods
+            : animation.HandsContainer.MountingRotationCenter;
+        Vector3 pivot = weapon.position + weapon.rotation * localPivot;
+        Quaternion turn = Quaternion.AngleAxis(swing, Vector3.up);
+        Vector3 displacement = pivot + turn * (head.position - pivot) - head.position;
+        EnsureUpperarms(player);
+        MoveBody(player, bones, head, displacement, turn);
     }
 
     // The aim pose is applied after the game turns the head, so it would wipe a free look.
