@@ -1563,6 +1563,13 @@ internal static class AimArms
         return Quaternion.AngleAxis(yaw * _lookYawSign, axis) * Quaternion.AngleAxis(down, body * Vector3.right);
     }
 
+    // The mouse look the body bones (and so the head, the helmet on it and the gun) were posed with this frame.
+    // It trails the newest mouse by one movement update; see _bodyLook.
+    internal static Quaternion PosedLook(Player player)
+    {
+        return _turnFrame == Time.frameCount ? _bodyLook : player.HandsRotation;
+    }
+
     // The free look as a world turn on top of the mouse look, the same turn ApplyLook puts on the neck.
     internal static Quaternion FreeLookTurn(Player player)
     {

@@ -6,8 +6,9 @@ namespace EFTNewCamera;
 
 // Works like the vestibulo-ocular reflex: the camera stays where the head puts it, and only turns so it keeps
 // looking at one point on the line the player means to look along (the mouse look plus free look), the set
-// distance ahead of a steady eye. The head's bob and its turn from each step are turned out of view. Only yaw
-// and pitch are touched: the turn about the view axis (roll) stays exactly as the head has it.
+// distance ahead of a steady eye. The head's bob and its turn from each step are turned out of view. Yaw and
+// pitch are balanced fully; the turn about the view axis (roll) only by the torsion share, as real eyes counter-roll
+// only a small part of a head tilt.
 // Aiming, mounting, scene guns, vaulting, climbing and the BTR are left as they are.
 // With the dynamic distance on, the point is whatever that line hits, found the way a bullet finds its target.
 internal static class VestibularView
@@ -15,6 +16,7 @@ internal static class VestibularView
     internal static float Strength;
     internal static float FixationDistance = 5f;
     internal static bool DynamicDistance = true;
+    internal static float Torsion = 0.25f;
 
     private const float NearestDistance = 0.5f;
     private const float FarthestDistance = 100f;
@@ -51,7 +53,11 @@ internal static class VestibularView
             return cameraRotation;
         }
 
-        Quaternion intended = AimArms.FreeLookTurn(player) * player.HandsRotation;
+        // The bones, and the helmet seen at the edge of the view, are posed with the previous movement update's
+        // mouse. Balancing to the newest mouse would put the view a frame ahead of the head, and the helmet
+        // would step against it whenever the mouse input comes unevenly. The BTR keeps the game's own rotator.
+        Quaternion look = player.BtrState == EPlayerBtrState.Outside ? AimArms.PosedLook(player) : player.HandsRotation;
+        Quaternion intended = AimArms.FreeLookTurn(player) * look;
         Vector3 forward = intended * Vector3.forward;
         // The head sits on the body, so its steady place is kept in the body's own turn, not the mouse's.
         Quaternion yawFrame = Quaternion.Euler(0f, player.Transform.rotation.eulerAngles.y, 0f);
@@ -93,6 +99,11 @@ internal static class VestibularView
             toTarget = forward;
         // The shortest turn from where the camera looks to the point: it has no part about the view axis.
         Quaternion steady = Quaternion.FromToRotation(cameraRotation * Vector3.forward, toTarget) * cameraRotation;
+        if (Torsion > 0f)
+        {
+            float roll = Roll(Quaternion.Inverse(intended) * steady);
+            steady = Quaternion.AngleAxis(-roll * Torsion, steady * Vector3.forward) * steady;
+        }
         return Quaternion.Slerp(cameraRotation, steady, amount);
     }
 
@@ -130,5 +141,13 @@ internal static class VestibularView
             nearest = hit.distance;
         }
         return Mathf.Max(nearest, NearestDistance);
+    }
+
+    // Turn about the view axis, in degrees, of a rotation given against the intended look.
+    private static float Roll(Quaternion relative)
+    {
+        Vector3 forward = relative * Vector3.forward;
+        Vector3 up = Quaternion.Inverse(Quaternion.LookRotation(forward)) * (relative * Vector3.up);
+        return Mathf.Atan2(-up.x, up.y) * Mathf.Rad2Deg;
     }
 }
