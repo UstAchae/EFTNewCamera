@@ -104,11 +104,13 @@ internal static class AimArms
     private static float _headLock;
     private static bool _hasObserved;
     private static Quaternion _smoothLook = Quaternion.identity;
-    // The mouse the body animation was posed with. Mouse input can land after the player's movement
-    // update in a frame, so MovementContext.Rotation may already be newer than the pose.
+    // The mouse the body bones were posed with. The body animator poses from what the previous frame's
+    // movement update handed it, so the bones trail MovementContext.Rotation by one movement update.
     private static Quaternion _bodyLook = Quaternion.identity;
     private static Vector2 _posedMouse;
     private static int _posedFrame = -1;
+    private static Vector2 _previousPosedMouse;
+    private static int _previousPosedFrame = -1;
     private static Vector3 _neckPosition;
     private static Vector3 _headPositionNow;
     private static Vector3 _heldHeadPosition;
@@ -203,13 +205,18 @@ internal static class AimArms
         _patched = true;
     }
 
-    // The movement update turns the body and hands Aim_angle / DeltaRotation to the body animator,
-    // which poses the skeleton from them later this frame. Whatever arrives after this is not in the pose.
+    // The movement update hands Aim_angle / DeltaRotation to the body animator. Measured in game, the
+    // bones seen this frame follow the value handed over in the previous frame, so both are kept.
     private static void MovementUpdatePostfix(Player __instance)
     {
         if (!NewCameraSwitch.Enabled || !__instance.IsYourPlayer || __instance.MovementContext == null)
             return;
 
+        if (_posedFrame != Time.frameCount)
+        {
+            _previousPosedMouse = _posedMouse;
+            _previousPosedFrame = _posedFrame;
+        }
         _posedMouse = __instance.MovementContext.Rotation;
         _posedFrame = Time.frameCount;
     }
@@ -1328,8 +1335,8 @@ internal static class AimArms
 
         Quaternion look = Quaternion.Euler(mouse.y, mouse.x, 0f);
         bool continuous = _turnFrame == Time.frameCount - 1;
-        if (_posedFrame == Time.frameCount)
-            _bodyLook = Quaternion.Euler(_posedMouse.y, _posedMouse.x, 0f);
+        if (_posedFrame == Time.frameCount && _previousPosedFrame == Time.frameCount - 1)
+            _bodyLook = Quaternion.Euler(_previousPosedMouse.y, _previousPosedMouse.x, 0f);
         else
             _bodyLook = continuous ? _smoothLook : look;
         _turnFrame = Time.frameCount;
