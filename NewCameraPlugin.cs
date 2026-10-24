@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "justachae.thirdpersoncamera";
     public const string PluginName = "Justachae's Third-Person Skeleton and Camera";
-    public const string PluginVersion = "0.1.261";
+    public const string PluginVersion = "0.1.262";
 
     private void Awake()
     {
@@ -37,7 +37,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         BindSway();
         BindBody();
         BindVestibular();
-        OpticElevation.Initialize(Config);
+        OpticElevation.Initialize();
     }
 
     private void BindBody()
@@ -91,6 +91,8 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 
     private void BindVestibular()
     {
+        ConfigEntry<bool> balance = Config.Bind("前庭平衡", "总开关", true,
+            "打开后启用下面的前庭平衡；关闭后镜头完全按头部原样晃动。");
         ConfigEntry<float> strength = Config.Bind("前庭平衡", "强度", 0.8f,
             new ConfigDescription("像内耳前庭带着眼球那样，镜头位置不动，只把镜头转回玩家想看的方向，抵消走路、跑步时头的晃动。0 是不平衡（原样），1 是完全平衡。左右和上下完全按强度平衡；翻滚（绕视线的歪斜）只按下面的扭转补偿抵消一部分。开镜、架枪、固定武器、翻越、攀爬时不起作用；中键自由看和后坐力保留。",
                 new AcceptableValueRange<float>(0f, 1f)));
@@ -104,12 +106,14 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
                 new AcceptableValueRange<float>(0.5f, 100f)));
         void Refresh()
         {
+            VestibularView.Enabled = balance.Value;
             VestibularView.Strength = strength.Value;
             VestibularView.DynamicDistance = dynamic.Value;
             VestibularView.Torsion = torsion.Value;
             VestibularView.FixationDistance = distance.Value;
         }
 
+        balance.SettingChanged += (_, _) => Refresh();
         strength.SettingChanged += (_, _) => Refresh();
         dynamic.SettingChanged += (_, _) => Refresh();
         torsion.SettingChanged += (_, _) => Refresh();

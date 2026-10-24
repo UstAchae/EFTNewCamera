@@ -13,6 +13,7 @@ namespace EFTNewCamera;
 // With the dynamic distance on, the point is whatever that line hits, found the way a bullet finds its target.
 internal static class VestibularView
 {
+    internal static bool Enabled = true;
     internal static float Strength;
     internal static float FixationDistance = 5f;
     internal static bool DynamicDistance = true;
@@ -47,7 +48,7 @@ internal static class VestibularView
     internal static Quaternion Stabilize(Player player, Vector3 cameraPosition, Quaternion cameraRotation)
     {
         MovementContext? movement = player.MovementContext;
-        if (movement == null || Strength <= 0f)
+        if (movement == null || !Enabled || Strength <= 0f)
         {
             Reset();
             return cameraRotation;

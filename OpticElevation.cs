@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using BepInEx.Configuration;
 using Comfort.Common;
 using EFT;
 using EFT.Animations;
@@ -39,12 +38,11 @@ internal static class OpticElevation
         "5c82343a2e221644f31c0611", // PSO-1M2
         "576fd4ec2459777f0b518431"  // PSO-1M2-1
     };
-    private static ConfigEntry<bool> _enableA = null!;
     private static Matrix4x4 _reticleProjection, _reticleNonJittered;
-    private static ConfigEntry<bool> _enabled = null!;
-    private static ConfigEntry<float> _step = null!;
-    private static ConfigEntry<float> _repeat = null!;
-    private static ConfigEntry<float> _smooth = null!;
+    // Not offered as settings. One step is a uniform 0.05 mrad, not each sight's real turret click.
+    private const float StepMrad = 0.05f;
+    private const float RepeatPerSecond = 60f;
+    private const float SmoothSeconds = 0.04f;
     private static readonly Dictionary<string, float> Displayed = new();
     private static int _inputFrame = -1, _smoothFrame = -1;
     private static string _heldKey = "";
@@ -57,19 +55,9 @@ internal static class OpticElevation
     private static readonly AccessTools.FieldRef<OpticRetrice, float> ReticleScale = AccessTools.FieldRefAccess<OpticRetrice, float>("_scale");
     private static readonly AccessTools.FieldRef<FirearmHandsInputTranslator, IFirearmHandsController> Controller = AccessTools.FieldRefAccess<FirearmHandsInputTranslator, IFirearmHandsController>("_controller");
 
-    internal static void Initialize(ConfigFile config)
+    internal static void Initialize()
     {
         LegacyReticle.Install();
-        _enableA = config.Bind("光学密位", "启用A类分划调节", true,
-            "PU及PSO-1系列：PageDown增加分划补偿，PageUp调回初始位置；范围0至-50 mrad，不可高于初始位置。背景及实际弹道不变。使用相同的步长、连调速度和平滑设置。");
-        _enabled = config.Bind("光学密位", "启用B类画面调节", true,
-            "仅骨架镜头开启时生效。B类以及合并处理的C/D类接管原版归零上下命令（默认PageUp/PageDown）。分划不动，PageDown增加画面补偿、PageUp调回初始位置；范围0至-50 mrad，不可高于初始位置；原版米数档位不再随之切换。A类和未确认型号不接管。");
-        _step = config.Bind("光学密位", "每格角度（mrad）", 0.05f,
-            new ConfigDescription("暂用统一步长，可修改；不是各型号已核实的真实旋钮刻度。", new AcceptableValueRange<float>(0.01f, 1f)));
-        _repeat = config.Bind("光学密位", "按住每秒步数", 60f,
-            new ConfigDescription("按住PageUp/PageDown，首次单步后等待0.15秒，再按此速度连续调整。", new AcceptableValueRange<float>(1f, 200f)));
-        _smooth = config.Bind("光学密位", "画面平滑时间（秒）", 0.04f,
-            new ConfigDescription("镜内画面追随调节量的平滑时间，0立即变化。", new AcceptableValueRange<float>(0f, 0.2f)));
         Harmony harmony = new Harmony(NewCameraPlugin.PluginGuid + ".opticElevation");
         harmony.Patch(AccessTools.Method(typeof(FirearmHandsInputTranslator), "TranslateCommand"),
             prefix: new HarmonyMethod(typeof(OpticElevation), nameof(InputPrefix)));
@@ -109,7 +97,7 @@ internal static class OpticElevation
     {
         string key = Key(mod);
         Offsets.TryGetValue(key, out float offset);
-        Offsets[key] = OpticAdjustmentMath.Next(offset, sign, _step.Value);
+        Offsets[key] = OpticAdjustmentMath.Next(offset, sign, StepMrad);
     }
 
     private static bool Adjust(ProceduralWeaponAnimation animation, float sign)
@@ -147,16 +135,16 @@ internal static class OpticElevation
         }
         else if (now >= _repeatAt)
         {
-            int steps = 1 + Mathf.FloorToInt((now - _repeatAt) * _repeat.Value);
-            _repeatAt += steps / _repeat.Value;
+            int steps = 1 + Mathf.FloorToInt((now - _repeatAt) * RepeatPerSecond);
+            _repeatAt += steps / RepeatPerSecond;
             Change(mod!, sign * steps);
         }
     }
 
     private static bool Eligible(ProceduralWeaponAnimation.SightNBone scope, OpticSight? current)
     {
-        return scope.Mod != null && ((_enabled.Value && Supported.Contains(scope.Mod.Item.TemplateId))
-            || (_enableA.Value && ReticleMoving.Contains(scope.Mod.Item.TemplateId)))
+        return scope.Mod != null && (Supported.Contains(scope.Mod.Item.TemplateId)
+            || ReticleMoving.Contains(scope.Mod.Item.TemplateId))
             && scope.Mod.SelectedScope == 0
             && (scope.IsOptic || OpticPicture.ResolveForElevation(scope) != null);
     }
@@ -164,7 +152,7 @@ internal static class OpticElevation
     private static bool TryTarget(out SightComponent? mod)
     {
         mod = null;
-        if (_enabled == null || (!_enabled.Value && !_enableA.Value) || !NewCameraSwitch.Enabled) return false;
+        if (!NewCameraSwitch.Enabled) return false;
         Player? player = Singleton<GameWorld>.Instance?.MainPlayer;
         if (player == null || !player.IsYourPlayer || player.PointOfView == EPointOfView.FreeCamera
             || player.HandsController == null || !player.HandsController.IsAiming) return false;
@@ -203,7 +191,7 @@ internal static class OpticElevation
             Displayed.TryGetValue(key, out float shown);
             if (_smoothFrame != Time.frameCount)
             {
-                float blend = _smooth.Value <= 0f ? 1f : 1f - Mathf.Exp(-Time.unscaledDeltaTime / _smooth.Value);
+                float blend = 1f - Mathf.Exp(-Time.unscaledDeltaTime / SmoothSeconds);
                 shown = Mathf.Lerp(shown, offset, blend);
                 if (Mathf.Abs(shown - offset) < 0.00001f) shown = offset;
                 Displayed[key] = shown;
