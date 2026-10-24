@@ -2,6 +2,16 @@
 
 适用于 SPT 4.1.6 的客户端模组。玩的时候人物用第三人称的完整骨架和动画，游戏镜头挂在人物头上，画面看起来仍是第一人称视角。
 
+## 0.1.267：光学密位按型号使用真实旋钮刻度
+
+- 查到公开刻度的型号改用各自的每格角度（单位 mrad；1/4 MOA≈0.0727，1/2 MOA≈0.1454）：
+  - 0.1：Hensoldt FF 4-16x56、March 3-24x42 FFP、DEON March-F 1-8x24 Shorty、S&B PM II 3-20x50／5-25x56（含黑色版）。
+  - 0.2：EOTech Vudu 1-6x24（游戏内为 SR-1 MRAD 分划）、SIG TANGO6T 1-6x24。
+  - 1/4 MOA：Leupold Mark 4 LR/T 6.5-20x50（M1）、Nightforce NXS 2.5-10x24（游戏内分划沿用 Burris 的 MOA 弹道分划）。
+  - 1/2 MOA：Burris TAC30 1-4x24、Vortex Razor HD Gen II 1-6x24、NcSTAR ADO P4 3-9x42、ELCAN SpecterDR（两款）。
+- 其余保持 0.05 mrad：Nightforce ATACR 与 Leupold Mark 5HD（实物有 MOA／MIL 两版，游戏内分划是网格模型，未能确认单位）、S&B PM II 1-8x24 及其黑色版与 Leupold Mark 4 MR/T 2.5-8x36（未查到可靠数值）、KMZ 1P59／1P69、各热成像（菜单数字归零，无公开每步数值）、PU 与 PSO-1 系列（实物高低为距离刻度鼓轮）。
+- 资料多来自零售商规格页与评测，未逐款核对厂家说明书。
+
 ## 0.1.266：后坐力默认值
 
 - 后坐力上跳默认 0.25（原 1），后坐力传到胸腔默认 2（原 0.5），后坐力传到头部默认 1（原 0.5）。跟手延迟仍为 0.1 秒。

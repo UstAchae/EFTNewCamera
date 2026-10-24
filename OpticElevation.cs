@@ -39,8 +39,35 @@ internal static class OpticElevation
         "576fd4ec2459777f0b518431"  // PSO-1M2-1
     };
     private static Matrix4x4 _reticleProjection, _reticleNonJittered;
-    // Not offered as settings. One step is a uniform 0.05 mrad, not each sight's real turret click.
-    private const float StepMrad = 0.05f;
+    // Not offered as settings. One step is the real turret click where a published value was found, in mrad
+    // (1/4 MOA = 0.0727, 1/2 MOA = 0.1454). Where the game's reticle shows which of a scope's MOA / MIL versions
+    // it is, that version's click is used. Everything else (no reliable value, version unknown, digital thermal
+    // zeroing, the range-drum Russian scopes) keeps the uniform 0.05 mrad.
+    private const float DefaultStepMrad = 0.05f;
+    private const float QuarterMoa = 0.0727f;
+    private const float HalfMoa = 0.1454f;
+    private static readonly Dictionary<string, float> StepMrad = new()
+    {
+        ["56ea70acd2720b844b8b4594"] = 0.1f,       // Hensoldt FF 4-16x56: 1 cm / 100 m
+        ["57c5ac0824597754771e88a9"] = 0.1f,       // March Tactical 3-24x42 FFP: 0.1 mil
+        ["6a3ceaff7047a606b90f5321"] = 0.1f,       // DEON March-F 1-8x24 Shorty (WTT): 0.1 mil
+        ["5a37cb10c4a282329a73b4e7"] = QuarterMoa, // Leupold Mark 4 LR/T 6.5-20x50 M1: 1/4 MOA
+        ["61714eec290d254f5e6b2ffc"] = 0.1f,       // S&B PM II 3-20x50: 0.1 mrad
+        ["62850c28da09541f43158cca"] = 0.1f,       // S&B PM II 5-25x56: 0.1 mrad
+        ["67999c8251c50313d9e21910"] = 0.1f,       // S&B PM II 3-20x50 Black (WA2000): 0.1 mrad
+        ["67999c87c061e3d7f3b0ab61"] = 0.1f,       // S&B PM II 5-25x56 Black (WA2000): 0.1 mrad
+        ["5b2388675acfc4771e1be0be"] = HalfMoa,    // Burris FullField TAC30 1-4x24: 1/2 MOA
+        ["5b3b99475acfc432ff4dcbee"] = 0.2f,       // EOTech Vudu 1-6x24: SR-1 MRAD reticle, 0.2 mrad
+        ["618ba27d9008e4636a67f61d"] = HalfMoa,    // Vortex Razor HD Gen II 1-6x24 (JM-1): 1/2 MOA
+        ["6567e7681265c8a131069b0f"] = 0.2f,       // SIG TANGO6T 1-6x24: 0.2 mrad
+        ["5dfe6104585a0c3e995c7b82"] = HalfMoa,    // NcSTAR ADO P4 Sniper 3-9x42: 1/2 MOA
+        ["544a3d0a4bdc2d1b388b4567"] = QuarterMoa, // Nightforce NXS 2.5-10x24: MOA reticle (Burris BDC), 1/4 MOA
+        ["57ac965c24597706be5f975c"] = HalfMoa,    // ELCAN SpecterDR 1x/4x: 1/2 MOA
+        ["57aca93d2459771f2c7e26db"] = HalfMoa,    // ELCAN SpecterDR 1x/4x FDE: 1/2 MOA
+    };
+
+    private static float Step(SightComponent mod)
+        => StepMrad.TryGetValue(mod.Item.TemplateId, out float step) ? step : DefaultStepMrad;
     private const float RepeatPerSecond = 60f;
     private const float SmoothSeconds = 0.04f;
     private static readonly Dictionary<string, float> Displayed = new();
@@ -97,7 +124,7 @@ internal static class OpticElevation
     {
         string key = Key(mod);
         Offsets.TryGetValue(key, out float offset);
-        Offsets[key] = OpticAdjustmentMath.Next(offset, sign, StepMrad);
+        Offsets[key] = OpticAdjustmentMath.Next(offset, sign, Step(mod));
     }
 
     private static bool Adjust(ProceduralWeaponAnimation animation, float sign)
