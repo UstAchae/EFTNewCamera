@@ -1553,10 +1553,26 @@ internal static class AimArms
         float up = Vector3.Dot(pivot.rotation * Vector3.right, Vector3.up);
         if (Mathf.Abs(up) > 0.3f)
             _lookYawSign = Mathf.Sign(up);
-        Quaternion body = Quaternion.Euler(0f, player.MovementContext.Rotation.x, 0f);
+        pivot.rotation = LookTurn(player.MovementContext, yaw, down) * pivot.rotation;
+    }
+
+    private static Quaternion LookTurn(MovementContext movement, float yaw, float down)
+    {
+        Quaternion body = Quaternion.Euler(0f, movement.Rotation.x, 0f);
         Vector3 axis = body * (Quaternion.Euler(LookAxisForward, 0f, 0f) * Vector3.up);
-        Quaternion turn = Quaternion.AngleAxis(yaw * _lookYawSign, axis) * Quaternion.AngleAxis(down, body * Vector3.right);
-        pivot.rotation = turn * pivot.rotation;
+        return Quaternion.AngleAxis(yaw * _lookYawSign, axis) * Quaternion.AngleAxis(down, body * Vector3.right);
+    }
+
+    // The free look as a world turn on top of the mouse look, the same turn ApplyLook puts on the neck.
+    internal static Quaternion FreeLookTurn(Player player)
+    {
+        if (player.MovementContext == null || PlantedAim(player))
+            return Quaternion.identity;
+        float yaw = _smoothedHead.x;
+        float down = -_smoothedHead.z;
+        if (Mathf.Abs(yaw) < 0.01f && Mathf.Abs(down) < 0.01f)
+            return Quaternion.identity;
+        return LookTurn(player.MovementContext, yaw, down);
     }
 
     private static Quaternion Scale(Quaternion rotation, float amount)
