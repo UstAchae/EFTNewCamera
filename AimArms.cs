@@ -50,11 +50,8 @@ internal static class AimArms
     private static readonly SwayAmounts Now = new() { GunMove = 0.2f, GunTurn = 0.2f, ArmMove = 0.2f, ArmTurn = 0.2f, HeadFollow = 0.2f, Breath = 1f };
     internal static bool Chase = true;
     internal static float FollowDelay;
-    internal static float MouseSmoothSeconds = 0.05f;
     internal static float WalkHeadSway;
     internal static float HeadModelPitch;
-    private static Vector2 _pendingMouse;
-    private static bool _releasingMouse;
     private const float MaxDelayDegrees = 15f;
 
     private static bool _suppress;
@@ -107,8 +104,11 @@ internal static class AimArms
     private static float _headLock;
     private static bool _hasObserved;
     private static Quaternion _smoothLook = Quaternion.identity;
-    // The body is posed with the previous frame's mouse; MovementContext.Rotation is already the new one.
+    // The mouse the body animation was posed with. Mouse input can land after the player's movement
+    // update in a frame, so MovementContext.Rotation may already be newer than the pose.
     private static Quaternion _bodyLook = Quaternion.identity;
+    private static Vector2 _posedMouse;
+    private static int _posedFrame = -1;
     private static Vector3 _neckPosition;
     private static Vector3 _headPositionNow;
     private static Vector3 _heldHeadPosition;
@@ -186,10 +186,10 @@ internal static class AimArms
         MethodInfo? shotTranspiler = typeof(AimArms).GetMethod(nameof(SkipMountedBodyRecoil), BindingFlags.NonPublic | BindingFlags.Static);
         if (shot != null && shotTranspiler != null)
             harmony.Patch(shot, transpiler: new HarmonyMethod(shotTranspiler));
-        MethodInfo? rotate = AccessTools.Method(typeof(Player), nameof(Player.Rotate));
-        MethodInfo? rotatePrefix = typeof(AimArms).GetMethod(nameof(RotatePrefix), BindingFlags.NonPublic | BindingFlags.Static);
-        if (rotate != null && rotatePrefix != null)
-            harmony.Patch(rotate, prefix: new HarmonyMethod(rotatePrefix));
+        MethodInfo? movement = AccessTools.Method(typeof(Player), nameof(Player.MovementUpdate));
+        MethodInfo? movementPostfix = typeof(AimArms).GetMethod(nameof(MovementUpdatePostfix), BindingFlags.NonPublic | BindingFlags.Static);
+        if (movement != null && movementPostfix != null)
+            harmony.Patch(movement, postfix: new HarmonyMethod(movementPostfix));
         MethodInfo? look = AccessTools.Method(typeof(Player), nameof(Player.Look));
         MethodInfo? lookPrefix = typeof(AimArms).GetMethod(nameof(LookPrefix), BindingFlags.NonPublic | BindingFlags.Static);
         MethodInfo? lookPostfix = typeof(AimArms).GetMethod(nameof(LookPostfix), BindingFlags.NonPublic | BindingFlags.Static);
@@ -203,55 +203,23 @@ internal static class AimArms
         _patched = true;
     }
 
+    // The movement update turns the body and hands Aim_angle / DeltaRotation to the body animator,
+    // which poses the skeleton from them later this frame. Whatever arrives after this is not in the pose.
+    private static void MovementUpdatePostfix(Player __instance)
+    {
+        if (!NewCameraSwitch.Enabled || !__instance.IsYourPlayer || __instance.MovementContext == null)
+            return;
+
+        _posedMouse = __instance.MovementContext.Rotation;
+        _posedFrame = Time.frameCount;
+    }
+
     // Third-person VisualPass only places the weapon (sprint pose included) while the body
     // mesh is on screen. Looking up from the head camera takes the body out of view.
     private static void VisiblePostfix(Player __instance, ref bool __result)
     {
         if (!__result && NewCameraSwitch.Enabled && __instance.IsYourPlayer)
             __result = true;
-    }
-
-    private static bool RotatePrefix(Player __instance, Vector2 deltaRotation, bool ignoreClamp)
-    {
-        if (_releasingMouse || ignoreClamp || !NewCameraSwitch.Enabled || MouseSmoothSeconds <= 0f)
-            return true;
-        if (!ReferenceEquals(__instance, Singleton<GameWorld>.Instance?.MainPlayer))
-            return true;
-        if (deltaRotation.IsAnyComponentInfinity() || deltaRotation.IsAnyComponentNaN())
-            return true;
-
-        _pendingMouse += deltaRotation;
-        return false;
-    }
-
-    internal static void ReleaseMouse()
-    {
-        if (_pendingMouse == Vector2.zero)
-            return;
-
-        Player? player = Singleton<GameWorld>.Instance?.MainPlayer;
-        if (player == null)
-        {
-            _pendingMouse = Vector2.zero;
-            return;
-        }
-
-        bool smoothing = NewCameraSwitch.Enabled && MouseSmoothSeconds > 0f;
-        Vector2 step = smoothing
-            ? _pendingMouse * (1f - Mathf.Exp(-Time.deltaTime / MouseSmoothSeconds))
-            : _pendingMouse;
-        if ((_pendingMouse - step).sqrMagnitude < 0.00000001f)
-            step = _pendingMouse;
-        _pendingMouse -= step;
-        _releasingMouse = true;
-        try
-        {
-            player.Rotate(step);
-        }
-        finally
-        {
-            _releasingMouse = false;
-        }
     }
 
     private static void PatchLaser(Harmony harmony)
@@ -1360,7 +1328,10 @@ internal static class AimArms
 
         Quaternion look = Quaternion.Euler(mouse.y, mouse.x, 0f);
         bool continuous = _turnFrame == Time.frameCount - 1;
-        _bodyLook = continuous ? _smoothLook : look;
+        if (_posedFrame == Time.frameCount)
+            _bodyLook = Quaternion.Euler(_posedMouse.y, _posedMouse.x, 0f);
+        else
+            _bodyLook = continuous ? _smoothLook : look;
         _turnFrame = Time.frameCount;
         _smoothLook = look;
 
