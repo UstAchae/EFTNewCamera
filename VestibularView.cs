@@ -6,8 +6,9 @@ namespace EFTNewCamera;
 
 // Works like the vestibulo-ocular reflex: the camera stays where the head puts it, and only turns so it keeps
 // looking at one point on the line the player means to look along (the mouse look plus free look), the set
-// distance ahead of a steady eye. The head's bob, its turn and its tilt from each step are turned out of view.
-// Slow tilt (leaning) is kept. Aiming, mounting, scene guns, vaulting, climbing and the BTR are left as they are.
+// distance ahead of a steady eye. The head's bob and its turn from each step are turned out of view. Only yaw
+// and pitch are touched: the turn about the view axis (roll) stays exactly as the head has it.
+// Aiming, mounting, scene guns, vaulting, climbing and the BTR are left as they are.
 // With the dynamic distance on, the point is whatever that line hits, found the way a bullet finds its target.
 internal static class VestibularView
 {
@@ -25,7 +26,7 @@ internal static class VestibularView
     private static float _focus;
 
     private const float FadeSeconds = 0.2f;
-    // Two of these in a row separate a step (about two a second) from leaning or changing pose.
+    // Two of these in a row separate a step (about two a second) from changing pose.
     private const float StepSeconds = 0.25f;
 
     private static float _weight;
@@ -33,8 +34,6 @@ internal static class VestibularView
     private static int _owner;
     private static Vector3 _eyeFirst;
     private static Vector3 _eyeSteady;
-    private static float _rollFirst;
-    private static float _rollSteady;
 
     internal static void Reset()
     {
@@ -58,14 +57,12 @@ internal static class VestibularView
         Quaternion yawFrame = Quaternion.Euler(0f, player.Transform.rotation.eulerAngles.y, 0f);
         Vector3 root = player.Transform.position;
         Vector3 eye = Quaternion.Inverse(yawFrame) * (cameraPosition - root);
-        float roll = Roll(Quaternion.Inverse(intended) * cameraRotation);
 
         // The filters run every frame, also while the effect is off, so nothing jumps when it comes back.
         int owner = player.GetInstanceID();
         if (!_has || owner != _owner)
         {
             _eyeFirst = _eyeSteady = eye;
-            _rollFirst = _rollSteady = roll;
             _owner = owner;
             _has = true;
         }
@@ -74,8 +71,6 @@ internal static class VestibularView
             float follow = 1f - Mathf.Exp(-Time.deltaTime / StepSeconds);
             _eyeFirst = Vector3.Lerp(_eyeFirst, eye, follow);
             _eyeSteady = Vector3.Lerp(_eyeSteady, _eyeFirst, follow);
-            _rollFirst += Mathf.DeltaAngle(_rollFirst, roll) * follow;
-            _rollSteady += Mathf.DeltaAngle(_rollSteady, _rollFirst) * follow;
         }
 
         bool free = !(player.HandsController != null && player.HandsController.IsAiming)
@@ -96,8 +91,8 @@ internal static class VestibularView
         Vector3 toTarget = target - cameraPosition;
         if (toTarget.sqrMagnitude < 0.0001f)
             toTarget = forward;
-        Vector3 up = Quaternion.AngleAxis(_rollSteady, forward) * (intended * Vector3.up);
-        Quaternion steady = Quaternion.LookRotation(toTarget, up);
+        // The shortest turn from where the camera looks to the point: it has no part about the view axis.
+        Quaternion steady = Quaternion.FromToRotation(cameraRotation * Vector3.forward, toTarget) * cameraRotation;
         return Quaternion.Slerp(cameraRotation, steady, amount);
     }
 
@@ -135,15 +130,5 @@ internal static class VestibularView
             nearest = hit.distance;
         }
         return Mathf.Max(nearest, NearestDistance);
-    }
-
-    // Turn about the view axis, in degrees, of a rotation given against the intended look.
-    private static float Roll(Quaternion relative)
-    {
-        Vector3 forward = relative * Vector3.forward;
-        if (forward.sqrMagnitude < 0.0001f)
-            return 0f;
-        Vector3 up = Quaternion.Inverse(Quaternion.LookRotation(forward)) * (relative * Vector3.up);
-        return Mathf.Atan2(-up.x, up.y) * Mathf.Rad2Deg;
     }
 }
