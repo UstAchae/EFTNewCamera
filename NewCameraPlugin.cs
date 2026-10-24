@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+using System.Reflection;
 using BepInEx;
 using BepInEx.Configuration;
 using Comfort.Common;
@@ -12,17 +14,14 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "justachae.thirdpersoncamera";
     public const string PluginName = "Justachae's Third-Person Skeleton and Camera";
-    public const string PluginVersion = "0.1.264";
+    public const string PluginVersion = "0.1.265";
 
     private void Awake()
     {
-        ConfigEntry<bool> enabled = Config.Bind("新镜头", "总开关", false,
+        // No section: the F12 window shows the master switch right under the plugin's name, without a heading.
+        ConfigEntry<bool> enabled = Config.Bind("", "总开关", false,
             "打开后使用第三人称骨架，并把游戏镜头挂在人物头部。");
-        ConfigEntry<float> walkHead = Config.Bind("新镜头", "走路摇头", 0.2f,
-            new ConfigDescription("走路和跑步时，把头的左右转动收到平均朝向上。镜头仍按原来的固定位置挂在头上，和头一起转。0 是不摇头，1 是游戏原样。站着不动和中键扭头不受影响。",
-                new AcceptableValueRange<float>(0f, 1f)));
-        walkHead.SettingChanged += (_, _) => AimArms.WalkHeadSway = walkHead.Value;
-        AimArms.WalkHeadSway = walkHead.Value;
+        MoveFrom(enabled, "新镜头", "总开关");
         AimArms.Install();
         BodyVisibility.Install();
         VisorFilter.Install();
@@ -42,6 +41,12 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 
     private void BindBody()
     {
+        ConfigEntry<float> walkHead = Config.Bind("人物", "走路摇头", 0.2f,
+            new ConfigDescription("走路和跑步时，把头的左右转动收到平均朝向上。镜头仍按原来的固定位置挂在头上，和头一起转。0 是不摇头，1 是游戏原样。站着不动和中键扭头不受影响。",
+                new AcceptableValueRange<float>(0f, 1f), new ConfigurationManagerAttributes { Order = 1 }));
+        MoveFrom(walkHead, "新镜头", "走路摇头");
+        walkHead.SettingChanged += (_, _) => AimArms.WalkHeadSway = walkHead.Value;
+        AimArms.WalkHeadSway = walkHead.Value;
         ConfigEntry<bool> showHead = Config.Bind("人物", "显示头部", false,
             "画出自己的头。关掉时头只投阴影，画面里看不见。");
         ConfigEntry<bool> showHeadwear = Config.Bind("人物", "显示头部装备", true,
@@ -87,6 +92,21 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         freeLookDown.SettingChanged += (_, _) => Refresh();
         axisForward.SettingChanged += (_, _) => Refresh();
         Refresh();
+    }
+
+    // A setting that moved to another section takes over the value saved under its old place, once.
+    private void MoveFrom(ConfigEntryBase entry, string oldSection, string oldKey)
+    {
+        PropertyInfo? property = typeof(ConfigFile).GetProperty("OrphanedEntries", BindingFlags.Instance | BindingFlags.NonPublic);
+        if (property?.GetValue(Config) is not Dictionary<ConfigDefinition, string> orphans)
+            return;
+
+        ConfigDefinition old = new ConfigDefinition(oldSection, oldKey);
+        if (!orphans.TryGetValue(old, out string value))
+            return;
+        orphans.Remove(old);
+        entry.SetSerializedValue(value);
+        Config.Save();
     }
 
     private void BindVestibular()
