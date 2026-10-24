@@ -52,6 +52,8 @@ internal static class OpticElevation
         ["57c5ac0824597754771e88a9"] = 0.1f,       // March Tactical 3-24x42 FFP: 0.1 mil
         ["6a3ceaff7047a606b90f5321"] = 0.1f,       // DEON March-F 1-8x24 Shorty (WTT): 0.1 mil
         ["5a37cb10c4a282329a73b4e7"] = QuarterMoa, // Leupold Mark 4 LR/T 6.5-20x50 M1: 1/4 MOA
+        ["5aa66be6e5b5b0214e506e97"] = QuarterMoa, // Nightforce ATACR 7-35x56: in-game reticle is marked MOA (10/20/30/40), 1/4 MOA
+        ["676175789dcee773150c6925"] = 0.1f,       // Leupold Mark 5HD 5-25x56 FDE: in-game reticle is in mil (1-7), M5C3 0.1 mil
         ["61714eec290d254f5e6b2ffc"] = 0.1f,       // S&B PM II 3-20x50: 0.1 mrad
         ["62850c28da09541f43158cca"] = 0.1f,       // S&B PM II 5-25x56: 0.1 mrad
         ["67999c8251c50313d9e21910"] = 0.1f,       // S&B PM II 3-20x50 Black (WA2000): 0.1 mrad
