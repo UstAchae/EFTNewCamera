@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "justachae.thirdpersoncamera";
     public const string PluginName = "Justachae's Third-Person Skeleton and Camera";
-    public const string PluginVersion = "0.1.253";
+    public const string PluginVersion = "0.1.255";
 
     private void Awake()
     {
@@ -28,6 +28,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         VisorFilter.Install();
         FirstPersonAudio.Install();
         ReticleAfterTaa.Install();
+        AimFieldOfView.Install();
         NewCameraSwitch.Enabled = enabled.Value;
         enabled.SettingChanged += (_, _) => NewCameraSwitch.Enabled = enabled.Value;
         BindDirection();
@@ -252,7 +253,6 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
     private void OnEnable()
     {
         Camera.onPreCull += NewCameraSwitch.OnCameraPreCull;
-        Camera.onPreRender += NewCameraSwitch.OnCameraPreRender;
         Camera.onPostRender += ReticleAfterTaa.OnCameraPostRender;
         Camera.onPostRender += OpticElevation.Restore;
     }
@@ -260,7 +260,6 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
     private void OnDisable()
     {
         Camera.onPreCull -= NewCameraSwitch.OnCameraPreCull;
-        Camera.onPreRender -= NewCameraSwitch.OnCameraPreRender;
         Camera.onPostRender -= ReticleAfterTaa.OnCameraPostRender;
         Camera.onPostRender -= OpticElevation.Restore;
         OpticElevation.Shutdown();
@@ -323,6 +322,8 @@ internal static class NewCameraSwitch
 
         if (player.PointOfView != EPointOfView.ThirdPerson)
             player.PointOfView = EPointOfView.ThirdPerson;
+        if (!_applied)
+            AimFieldOfView.Reset();
         AimArms.Apply(player);
         BodyVisibility.Apply(player);
         _applied = true;
@@ -341,9 +342,6 @@ internal static class NewCameraSwitch
         Player? player = Singleton<GameWorld>.Instance?.MainPlayer;
         if (player != null && player.IsYourPlayer && player.PointOfView == EPointOfView.FreeCamera)
             return;
-
-        if (main)
-            HoldFieldOfView(camera);
 
         if (player == null || !player.IsYourPlayer)
         {
@@ -384,25 +382,5 @@ internal static class NewCameraSwitch
         AimArms.ReplayLasers(camera);
         if (optic)
             OpticElevation.Apply(camera);
-    }
-
-    internal static void OnCameraPreRender(Camera camera)
-    {
-        if (!Enabled || camera == null || !camera.CompareTag("MainCamera"))
-            return;
-
-        Player? player = Singleton<GameWorld>.Instance?.MainPlayer;
-        if (player != null && player.IsYourPlayer && player.PointOfView == EPointOfView.FreeCamera)
-            return;
-
-        HoldFieldOfView(camera);
-    }
-
-    private static void HoldFieldOfView(Camera camera)
-    {
-        if (!Singleton<SettingsManager>.Instantiated)
-            return;
-
-        camera.fieldOfView = Singleton<SettingsManager>.Instance.Game.Settings.FieldOfView.Value;
     }
 }

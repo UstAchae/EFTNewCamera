@@ -196,7 +196,6 @@ internal static class AimArms
         if (look != null && lookPrefix != null && lookPostfix != null)
             harmony.Patch(look, prefix: new HarmonyMethod(lookPrefix), postfix: new HarmonyMethod(lookPostfix));
         PatchLaser(harmony);
-        PatchFieldOfView(harmony);
         MethodInfo? visible = AccessTools.PropertyGetter(typeof(Player), nameof(Player.IsVisible));
         MethodInfo? visiblePostfix = typeof(AimArms).GetMethod(nameof(VisiblePostfix), BindingFlags.NonPublic | BindingFlags.Static);
         if (visible != null && visiblePostfix != null)
@@ -253,24 +252,6 @@ internal static class AimArms
         {
             _releasingMouse = false;
         }
-    }
-
-    private static void PatchFieldOfView(Harmony harmony)
-    {
-        MethodInfo? setFov = AccessTools.Method(typeof(CameraManager), nameof(CameraManager.SetFov), new[] { typeof(float), typeof(float), typeof(bool) });
-        MethodInfo? prefix = typeof(AimArms).GetMethod(nameof(SetFovPrefix), BindingFlags.NonPublic | BindingFlags.Static);
-        if (setFov == null || prefix == null)
-            return;
-
-        harmony.Patch(setFov, prefix: new HarmonyMethod(prefix));
-    }
-
-    private static void SetFovPrefix(ref float x)
-    {
-        if (!NewCameraSwitch.Enabled || !Singleton<SettingsManager>.Instantiated)
-            return;
-
-        x = Singleton<SettingsManager>.Instance.Game.Settings.FieldOfView.Value;
     }
 
     private static void PatchLaser(Harmony harmony)
