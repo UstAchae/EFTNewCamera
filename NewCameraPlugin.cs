@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "justachae.thirdpersoncamera";
     public const string PluginName = "Justachae's Third-Person Skeleton and Camera";
-    public const string PluginVersion = "0.1.258";
+    public const string PluginVersion = "0.1.259";
 
     private void Awake()
     {
@@ -94,16 +94,20 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         ConfigEntry<float> strength = Config.Bind("前庭平衡", "强度", 0.8f,
             new ConfigDescription("像内耳前庭带着眼球那样，镜头位置不动，只把镜头转回玩家想看的方向，抵消走路、跑步时头的晃动。0 是不平衡（原样），1 是完全平衡。开镜、架枪、固定武器、翻越、攀爬时不起作用；探头的歪斜、中键自由看和后坐力保留。",
                 new AcceptableValueRange<float>(0f, 1f)));
+        ConfigEntry<bool> dynamic = Config.Bind("前庭平衡", "动态注视距离", true,
+            "打开后，从稳定的眼睛位置沿玩家想看的方向射出一条直线，用子弹判定命中的碰撞层找到正在看的东西，实时用它的距离作注视距离（不算自己的身体；0.5–100 米，什么都没看到时按 100 米）。距离突变时像眼睛重新对焦一样在约 0.15 秒内过渡。关掉后用下面的固定距离。");
         ConfigEntry<float> distance = Config.Bind("前庭平衡", "注视距离（米）", 5f,
-            new ConfigDescription("镜头盯住视线上多远的那一点。头上下左右晃时，镜头会转一点来继续对准这一点：越近，抵消头部位移时转得越多；越远越接近只抵消头的转动。",
+            new ConfigDescription("动态注视距离关闭时，镜头盯住视线上多远的那一点。头上下左右晃时，镜头会转一点来继续对准这一点：越近，抵消头部位移时转得越多；越远越接近只抵消头的转动。",
                 new AcceptableValueRange<float>(0.5f, 100f)));
         void Refresh()
         {
             VestibularView.Strength = strength.Value;
+            VestibularView.DynamicDistance = dynamic.Value;
             VestibularView.FixationDistance = distance.Value;
         }
 
         strength.SettingChanged += (_, _) => Refresh();
+        dynamic.SettingChanged += (_, _) => Refresh();
         distance.SettingChanged += (_, _) => Refresh();
         Refresh();
     }

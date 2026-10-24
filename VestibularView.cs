@@ -1,4 +1,5 @@
 using EFT;
+using EFT.Ballistics;
 using UnityEngine;
 
 namespace EFTNewCamera;
@@ -7,10 +8,21 @@ namespace EFTNewCamera;
 // looking at one point on the line the player means to look along (the mouse look plus free look), the set
 // distance ahead of a steady eye. The head's bob, its turn and its tilt from each step are turned out of view.
 // Slow tilt (leaning) is kept. Aiming, mounting, scene guns, vaulting, climbing and the BTR are left as they are.
+// With the dynamic distance on, the point is whatever that line hits, found the way a bullet finds its target.
 internal static class VestibularView
 {
     internal static float Strength;
     internal static float FixationDistance = 5f;
+    internal static bool DynamicDistance = true;
+
+    private const float NearestDistance = 0.5f;
+    private const float FarthestDistance = 100f;
+    // How fast the eyes refocus when the line moves onto something nearer or farther, as eyes do in about 0.2 s.
+    // Smoothed as 1 / distance, so a wall edge in front of the sky does not swing the point.
+    private const float RefocusSeconds = 0.15f;
+    private static readonly RaycastHit[] Hits = new RaycastHit[16];
+    private static bool _hasFocus;
+    private static float _focus;
 
     private const float FadeSeconds = 0.2f;
     // Two of these in a row separate a step (about two a second) from leaning or changing pose.
@@ -27,6 +39,7 @@ internal static class VestibularView
     internal static void Reset()
     {
         _has = false;
+        _hasFocus = false;
         _weight = 0f;
     }
 
@@ -73,15 +86,55 @@ internal static class VestibularView
         _weight = Mathf.MoveTowards(_weight, free ? 1f : 0f, Time.deltaTime / FadeSeconds);
         float amount = Strength * _weight * _weight * (3f - 2f * _weight);
         if (amount <= 0.0001f)
+        {
+            _hasFocus = false;
             return cameraRotation;
+        }
 
-        Vector3 target = root + yawFrame * _eyeSteady + forward * FixationDistance;
+        Vector3 eyeSteady = root + yawFrame * _eyeSteady;
+        Vector3 target = eyeSteady + forward * Distance(player, eyeSteady, forward);
         Vector3 toTarget = target - cameraPosition;
         if (toTarget.sqrMagnitude < 0.0001f)
             toTarget = forward;
         Vector3 up = Quaternion.AngleAxis(_rollSteady, forward) * (intended * Vector3.up);
         Quaternion steady = Quaternion.LookRotation(toTarget, up);
         return Quaternion.Slerp(cameraRotation, steady, amount);
+    }
+
+    private static float Distance(Player player, Vector3 eye, Vector3 forward)
+    {
+        if (!DynamicDistance)
+            return FixationDistance;
+
+        float distance = Look(player, eye, forward);
+        if (!_hasFocus)
+        {
+            _focus = 1f / distance;
+            _hasFocus = true;
+        }
+        else
+            _focus += (1f / distance - _focus) * (1f - Mathf.Exp(-Time.deltaTime / RefocusSeconds));
+        return 1f / _focus;
+    }
+
+    // Distance to the first thing a bullet could hit along the line, leaving out the player's own body.
+    private static float Look(Player player, Vector3 eye, Vector3 forward)
+    {
+        int count = Physics.RaycastNonAlloc(eye, forward, Hits, FarthestDistance, BallisticsCalculatorConstants.HitMask, QueryTriggerInteraction.Ignore);
+        Transform self = ((Component)player).transform;
+        float nearest = FarthestDistance;
+        for (int i = 0; i < count; i++)
+        {
+            RaycastHit hit = Hits[i];
+            if (hit.collider == null || hit.distance >= nearest)
+                continue;
+            if (player.PlayerBones != null && player.PlayerBones.BodyPartCollidersHashSet.Contains(hit.collider))
+                continue;
+            if (hit.collider.transform.IsChildOf(self))
+                continue;
+            nearest = hit.distance;
+        }
+        return Mathf.Max(nearest, NearestDistance);
     }
 
     // Turn about the view axis, in degrees, of a rotation given against the intended look.
