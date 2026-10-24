@@ -10,17 +10,14 @@ namespace EFTNewCamera;
 // pitch are balanced fully; the turn about the view axis (roll) only by the torsion share, as real eyes counter-roll
 // only a small part of a head tilt.
 // Aiming, mounting, scene guns, vaulting, climbing and the BTR are left as they are.
-// With the dynamic distance on, the point is whatever that line hits, found the way a bullet finds its target.
+// The point is whatever that line hits, found the way a bullet finds its target.
 // While the hands or body are busy (switching or reloading, meds, inventory, looting, doors) the animation turns
 // the head on purpose, to look at the hands or the bag. That turn is then part of where the player looks.
 internal static class VestibularView
 {
     internal static bool Enabled = true;
     internal static float Strength;
-    internal static float FixationDistance = 5f;
-    internal static bool DynamicDistance = true;
     internal static float Torsion = 0.25f;
-    internal static bool KeepActionLook = true;
 
     // How quickly the view takes on the head turn of an action, and lets it go after.
     private const float ActionFadeSeconds = 0.25f;
@@ -76,7 +73,7 @@ internal static class VestibularView
         // The head's own turn against that look; kept, smoothed, while an action animation is turning it.
         _actionLook = Quaternion.Slerp(_actionLook, Quaternion.Inverse(intended) * cameraRotation,
             1f - Mathf.Exp(-Time.deltaTime / ActionLookSeconds)).normalized;
-        _action = Mathf.MoveTowards(_action, KeepActionLook && Busy(player) ? 1f : 0f, Time.deltaTime / ActionFadeSeconds);
+        _action = Mathf.MoveTowards(_action, Busy(player) ? 1f : 0f, Time.deltaTime / ActionFadeSeconds);
         if (_action > 0f)
             intended = intended * Quaternion.Slerp(Quaternion.identity, _actionLook, _action * _action * (3f - 2f * _action));
         Vector3 forward = intended * Vector3.forward;
@@ -130,9 +127,6 @@ internal static class VestibularView
 
     private static float Distance(Player player, Vector3 eye, Vector3 forward)
     {
-        if (!DynamicDistance)
-            return FixationDistance;
-
         float distance = Look(player, eye, forward);
         if (!_hasFocus)
         {

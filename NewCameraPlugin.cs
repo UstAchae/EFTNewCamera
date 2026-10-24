@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "justachae.thirdpersoncamera";
     public const string PluginName = "Justachae's Third-Person Skeleton and Camera";
-    public const string PluginVersion = "0.1.263";
+    public const string PluginVersion = "0.1.264";
 
     private void Awake()
     {
@@ -92,36 +92,24 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
     private void BindVestibular()
     {
         ConfigEntry<bool> balance = Config.Bind("前庭平衡", "总开关", true,
-            "打开后启用下面的前庭平衡；关闭后镜头完全按头部原样晃动。");
+            new ConfigDescription("像内耳前庭带着眼球那样，镜头位置不动，只把镜头转回玩家想看的方向，抵消走路、跑步时头的晃动。注视点取视线上实际看到的东西的距离；切枪、换弹、打药、翻背包、搜刮、开门等动作时，动画让头转去看手或包的部分会保留。开镜、架枪、固定武器、翻越、攀爬时不起作用；中键自由看和后坐力保留。关闭后镜头完全按头部原样晃动。",
+                null, new ConfigurationManagerAttributes { Order = 3 }));
         ConfigEntry<float> strength = Config.Bind("前庭平衡", "强度", 0.8f,
-            new ConfigDescription("像内耳前庭带着眼球那样，镜头位置不动，只把镜头转回玩家想看的方向，抵消走路、跑步时头的晃动。0 是不平衡（原样），1 是完全平衡。左右和上下完全按强度平衡；翻滚（绕视线的歪斜）只按下面的扭转补偿抵消一部分。开镜、架枪、固定武器、翻越、攀爬时不起作用；中键自由看和后坐力保留。",
-                new AcceptableValueRange<float>(0f, 1f)));
+            new ConfigDescription("左右和上下平衡多少。0 是不平衡（原样），1 是完全平衡。",
+                new AcceptableValueRange<float>(0f, 1f), new ConfigurationManagerAttributes { Order = 2 }));
         ConfigEntry<float> torsion = Config.Bind("前庭平衡", "扭转补偿", 0.25f,
             new ConfigDescription("头绕视线歪斜（翻滚）时，镜头反向扭回多少。人眼只能反向扭回头部歪斜的一小部分（约一到三成），所以默认 0.25。0 是完全不管翻滚，1 是歪斜全部扭回。探头的歪斜也按这个比例减小。最终效果再乘上强度。",
-                new AcceptableValueRange<float>(0f, 1f)));
-        ConfigEntry<bool> actionLook = Config.Bind("前庭平衡", "动作时保留头部转向", true,
-            "切枪、换弹、检查弹匣、打药、打开背包、搜刮、开门等动作时，动画会让头转去看手或包。打开后这段转头算作玩家想看的方向，不被平衡抹掉（只平滑掉走路的抖动）；动作结束后 0.25 秒内回到平常的平衡。");
-        ConfigEntry<bool> dynamic = Config.Bind("前庭平衡", "动态注视距离", true,
-            "打开后，从稳定的眼睛位置沿玩家想看的方向射出一条直线，用子弹判定命中的碰撞层找到正在看的东西，实时用它的距离作注视距离（不算自己的身体；0.5–100 米，什么都没看到时按 100 米）。距离突变时像眼睛重新对焦一样在约 0.15 秒内过渡。关掉后用下面的固定距离。");
-        ConfigEntry<float> distance = Config.Bind("前庭平衡", "注视距离（米）", 5f,
-            new ConfigDescription("动态注视距离关闭时，镜头盯住视线上多远的那一点。头上下左右晃时，镜头会转一点来继续对准这一点：越近，抵消头部位移时转得越多；越远越接近只抵消头的转动。",
-                new AcceptableValueRange<float>(0.5f, 100f)));
+                new AcceptableValueRange<float>(0f, 1f), new ConfigurationManagerAttributes { Order = 1 }));
         void Refresh()
         {
             VestibularView.Enabled = balance.Value;
             VestibularView.Strength = strength.Value;
-            VestibularView.DynamicDistance = dynamic.Value;
             VestibularView.Torsion = torsion.Value;
-            VestibularView.KeepActionLook = actionLook.Value;
-            VestibularView.FixationDistance = distance.Value;
         }
 
         balance.SettingChanged += (_, _) => Refresh();
         strength.SettingChanged += (_, _) => Refresh();
-        dynamic.SettingChanged += (_, _) => Refresh();
         torsion.SettingChanged += (_, _) => Refresh();
-        actionLook.SettingChanged += (_, _) => Refresh();
-        distance.SettingChanged += (_, _) => Refresh();
         Refresh();
     }
 
