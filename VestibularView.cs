@@ -11,6 +11,8 @@ namespace EFTNewCamera;
 // only a small part of a head tilt.
 // Aiming, mounting, scene guns, vaulting, climbing and the BTR are left as they are.
 // With the dynamic distance on, the point is whatever that line hits, found the way a bullet finds its target.
+// While the hands or body are busy (switching or reloading, meds, inventory, looting, doors) the animation turns
+// the head on purpose, to look at the hands or the bag. That turn is then part of where the player looks.
 internal static class VestibularView
 {
     internal static bool Enabled = true;
@@ -18,6 +20,15 @@ internal static class VestibularView
     internal static float FixationDistance = 5f;
     internal static bool DynamicDistance = true;
     internal static float Torsion = 0.25f;
+    internal static bool KeepActionLook = true;
+
+    // How quickly the view takes on the head turn of an action, and lets it go after.
+    private const float ActionFadeSeconds = 0.25f;
+    // The head turn kept during an action is smoothed by this much, which takes out most of a step's shake
+    // but follows the animation turning the head (about 0.3 s) closely.
+    private const float ActionLookSeconds = 0.15f;
+    private static float _action;
+    private static Quaternion _actionLook = Quaternion.identity;
 
     private const float NearestDistance = 0.5f;
     private const float FarthestDistance = 100f;
@@ -43,6 +54,8 @@ internal static class VestibularView
         _has = false;
         _hasFocus = false;
         _weight = 0f;
+        _action = 0f;
+        _actionLook = Quaternion.identity;
     }
 
     internal static Quaternion Stabilize(Player player, Vector3 cameraPosition, Quaternion cameraRotation)
@@ -59,6 +72,13 @@ internal static class VestibularView
         // would step against it whenever the mouse input comes unevenly. The BTR keeps the game's own rotator.
         Quaternion look = player.BtrState == EPlayerBtrState.Outside ? AimArms.PosedLook(player) : player.HandsRotation;
         Quaternion intended = AimArms.FreeLookTurn(player) * look;
+
+        // The head's own turn against that look; kept, smoothed, while an action animation is turning it.
+        _actionLook = Quaternion.Slerp(_actionLook, Quaternion.Inverse(intended) * cameraRotation,
+            1f - Mathf.Exp(-Time.deltaTime / ActionLookSeconds)).normalized;
+        _action = Mathf.MoveTowards(_action, KeepActionLook && Busy(player) ? 1f : 0f, Time.deltaTime / ActionFadeSeconds);
+        if (_action > 0f)
+            intended = intended * Quaternion.Slerp(Quaternion.identity, _actionLook, _action * _action * (3f - 2f * _action));
         Vector3 forward = intended * Vector3.forward;
         // The head sits on the body, so its steady place is kept in the body's own turn, not the mouse's.
         Quaternion yawFrame = Quaternion.Euler(0f, player.Transform.rotation.eulerAngles.y, 0f);
@@ -142,6 +162,43 @@ internal static class VestibularView
             nearest = hit.distance;
         }
         return Mathf.Max(nearest, NearestDistance);
+    }
+
+    // Hands or body in an action whose animation looks somewhere on its own.
+    private static bool Busy(Player player)
+    {
+        try
+        {
+            Player.AbstractHandsController? hands = player.HandsController as Player.AbstractHandsController;
+            if (hands != null && hands.IsInventoryOpen())
+                return true;
+            if (player.HandsController is Player.MedsController || player.HandsController is Player.QuickUseItemController)
+                return true;
+            // Sprinting is left out: actions stop a sprint, and the sprint pose may not count as the hands' idle.
+            if (player.MovementContext?.CurrentState?.Name != EPlayerState.Sprint
+                && player.HandsController is Player.FirearmController firearm && firearm.FirearmsAnimator != null
+                && (!firearm.FirearmsAnimator.IsIdling() || firearm.FirearmsAnimator.Animator.IsInTransition(FirearmsAnimator.HANDS_LAYER_INDEX)))
+                return true;
+        }
+        catch (System.Exception)
+        {
+        }
+
+        switch (player.MovementContext?.CurrentState?.Name)
+        {
+            case EPlayerState.Loot:
+            case EPlayerState.Pickup:
+            case EPlayerState.Open:
+            case EPlayerState.Close:
+            case EPlayerState.Unlock:
+            case EPlayerState.BreachDoor:
+            case EPlayerState.DoorInteraction:
+            case EPlayerState.Approach:
+            case EPlayerState.Plant:
+                return true;
+            default:
+                return false;
+        }
     }
 
     // Turn about the view axis, in degrees, of a rotation given against the intended look.

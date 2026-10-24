@@ -12,7 +12,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "justachae.thirdpersoncamera";
     public const string PluginName = "Justachae's Third-Person Skeleton and Camera";
-    public const string PluginVersion = "0.1.262";
+    public const string PluginVersion = "0.1.263";
 
     private void Awake()
     {
@@ -99,6 +99,8 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         ConfigEntry<float> torsion = Config.Bind("前庭平衡", "扭转补偿", 0.25f,
             new ConfigDescription("头绕视线歪斜（翻滚）时，镜头反向扭回多少。人眼只能反向扭回头部歪斜的一小部分（约一到三成），所以默认 0.25。0 是完全不管翻滚，1 是歪斜全部扭回。探头的歪斜也按这个比例减小。最终效果再乘上强度。",
                 new AcceptableValueRange<float>(0f, 1f)));
+        ConfigEntry<bool> actionLook = Config.Bind("前庭平衡", "动作时保留头部转向", true,
+            "切枪、换弹、检查弹匣、打药、打开背包、搜刮、开门等动作时，动画会让头转去看手或包。打开后这段转头算作玩家想看的方向，不被平衡抹掉（只平滑掉走路的抖动）；动作结束后 0.25 秒内回到平常的平衡。");
         ConfigEntry<bool> dynamic = Config.Bind("前庭平衡", "动态注视距离", true,
             "打开后，从稳定的眼睛位置沿玩家想看的方向射出一条直线，用子弹判定命中的碰撞层找到正在看的东西，实时用它的距离作注视距离（不算自己的身体；0.5–100 米，什么都没看到时按 100 米）。距离突变时像眼睛重新对焦一样在约 0.15 秒内过渡。关掉后用下面的固定距离。");
         ConfigEntry<float> distance = Config.Bind("前庭平衡", "注视距离（米）", 5f,
@@ -110,6 +112,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
             VestibularView.Strength = strength.Value;
             VestibularView.DynamicDistance = dynamic.Value;
             VestibularView.Torsion = torsion.Value;
+            VestibularView.KeepActionLook = actionLook.Value;
             VestibularView.FixationDistance = distance.Value;
         }
 
@@ -117,6 +120,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         strength.SettingChanged += (_, _) => Refresh();
         dynamic.SettingChanged += (_, _) => Refresh();
         torsion.SettingChanged += (_, _) => Refresh();
+        actionLook.SettingChanged += (_, _) => Refresh();
         distance.SettingChanged += (_, _) => Refresh();
         Refresh();
     }
