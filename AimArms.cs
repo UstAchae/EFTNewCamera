@@ -202,6 +202,10 @@ internal static class AimArms
         MethodInfo? visiblePostfix = typeof(AimArms).GetMethod(nameof(VisiblePostfix), BindingFlags.NonPublic | BindingFlags.Static);
         if (visible != null && visiblePostfix != null)
             harmony.Patch(visible, postfix: new HarmonyMethod(visiblePostfix));
+        MethodInfo? strategy = AccessTools.Method(typeof(ProceduralWeaponAnimation), nameof(ProceduralWeaponAnimation.SetStrategy), new[] { typeof(EPointOfView) });
+        MethodInfo? strategyPrefix = typeof(AimArms).GetMethod(nameof(SetStrategyPrefix), BindingFlags.NonPublic | BindingFlags.Static);
+        if (strategy != null && strategyPrefix != null)
+            harmony.Patch(strategy, prefix: new HarmonyMethod(strategyPrefix));
         _patched = true;
     }
 
@@ -227,6 +231,20 @@ internal static class AimArms
     {
         if (!__result && NewCameraSwitch.Enabled && __instance.IsYourPlayer)
             __result = true;
+    }
+
+    // Leaving a scene gun (AGS, mounted machine gun) sets the procedural animation strategy from the point of
+    // view the player was created with, which is first person. In third person that puts first-person weapon
+    // placement and FOV scaling on the third-person rig, and the gun floats off the arms. The player's current
+    // point of view is used instead.
+    private static void SetStrategyPrefix(ProceduralWeaponAnimation __instance, ref EPointOfView pointOfView)
+    {
+        if (!NewCameraSwitch.Enabled)
+            return;
+        Player? player = Singleton<GameWorld>.Instance?.MainPlayer;
+        if (player != null && player.IsYourPlayer && ReferenceEquals(player.ProceduralWeaponAnimation, __instance)
+            && player.PointOfView == EPointOfView.ThirdPerson)
+            pointOfView = EPointOfView.ThirdPerson;
     }
 
     private static void PatchLaser(Harmony harmony)
