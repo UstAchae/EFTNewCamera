@@ -637,6 +637,9 @@ internal static class AimArms
 
     // Hip-firing from a bipod or a mount: the game swings the gun about the mount point and leaves the body
     // where it was. The body is swung about the same point by the gun's turn since mounting, so it stays behind it.
+    // The turn is measured against the upper body as animated: mouse turns while mounted also reach the body
+    // animator (DeltaRotation), which already twists the chest part of the way. Measuring against the root
+    // turned that part a second time, swinging the far shoulder onto the left hand and folding the elbow.
     internal static void FollowMountedGun(Player player)
     {
         MovementContext? movement = player.MovementContext;
@@ -655,7 +658,7 @@ internal static class AimArms
         if (direction.sqrMagnitude < 0.0001f)
             return;
         float gunYaw = Mathf.Atan2(direction.x, direction.z) * Mathf.Rad2Deg;
-        float relative = Mathf.DeltaAngle(player.Transform.rotation.eulerAngles.y, gunYaw);
+        float relative = Mathf.DeltaAngle(ChestYaw(bones, player.Transform.rotation.eulerAngles.y), gunYaw);
         if (!_hasMountYaw)
         {
             _mountYaw = relative;
@@ -673,6 +676,19 @@ internal static class AimArms
         Vector3 displacement = pivot + turn * (head.position - pivot) - head.position;
         EnsureUpperarms(player);
         MoveBody(player, bones, head, displacement, turn);
+    }
+
+    // Facing of the upper body about the vertical, from the line across the shoulders.
+    private static float ChestYaw(PlayerBones bones, float fallback)
+    {
+        Transform? left = bones.LeftShoulder?.Original;
+        Transform? right = bones.RightShoulder?.Original;
+        if (left == null || right == null)
+            return fallback;
+        Vector3 facing = Vector3.Cross(Vector3.ProjectOnPlane(right.position - left.position, Vector3.up), Vector3.up);
+        if (facing.sqrMagnitude < 0.0001f)
+            return fallback;
+        return Mathf.Atan2(facing.x, facing.z) * Mathf.Rad2Deg;
     }
 
     // The aim pose is applied after the game turns the head, so it would wipe a free look.
