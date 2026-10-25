@@ -114,7 +114,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         ConfigEntry<bool> balance = Config.Bind("前庭平衡", "总开关", true,
             new ConfigDescription("像内耳前庭带着眼球那样，镜头位置不动，只把镜头转回玩家想看的方向，抵消走路、跑步时头的晃动。注视点取视线上实际看到的东西的距离；切枪、换弹、打药、翻背包、搜刮、开门等动作时，动画让头转去看手或包的部分会保留。开镜、架枪、固定武器、翻越、攀爬时不起作用；中键自由看和后坐力保留。关闭后镜头完全按头部原样晃动。",
                 null, new ConfigurationManagerAttributes { Order = 3 }));
-        ConfigEntry<float> strength = Config.Bind("前庭平衡", "强度", 0.7014084f,
+        ConfigEntry<float> strength = Config.Bind("前庭平衡", "强度", 0.7f,
             new ConfigDescription("左右和上下平衡多少。0 是不平衡（原样），1 是完全平衡。",
                 new AcceptableValueRange<float>(0f, 1f), new ConfigurationManagerAttributes { Order = 2 }));
         ConfigEntry<float> torsion = Config.Bind("前庭平衡", "扭转补偿", 0.25f,
@@ -217,7 +217,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 
     private void BindSway()
     {
-        BindSwaySet("瞄准摆动-平时", "平时（不屏息、手臂有体力）", AimArms.Normal, 0.0544601f, 0.09671362f, 1f);
+        BindSwaySet("瞄准摆动-平时", "平时（不屏息、手臂有体力）", AimArms.Normal, 0.05f, 0.1f, 1f);
         BindSwaySet("瞄准摆动-屏息", "按住左 Alt 屏息时", AimArms.Holding, 0f, 0f, 0f);
         BindSwaySet("瞄准摆动-没体力", "手臂没体力时（优先于屏息）", AimArms.Exhausted, 1f, 1f, 1f);
         AimArms.Chase = true;
