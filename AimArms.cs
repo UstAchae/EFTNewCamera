@@ -43,11 +43,11 @@ internal static class AimArms
         public float Breath;
     }
 
-    internal static readonly SwayAmounts Normal = new() { GunMove = 0.2f, GunTurn = 0.2f, ArmMove = 0.2f, ArmTurn = 0.2f, HeadFollow = 0.2f, Breath = 1f };
+    internal static readonly SwayAmounts Normal = new() { GunMove = 0.0544601f, GunTurn = 0.0544601f, ArmMove = 0.0544601f, ArmTurn = 0.0544601f, HeadFollow = 0.09671362f, Breath = 1f };
     internal static readonly SwayAmounts Holding = new();
     internal static readonly SwayAmounts Exhausted = new() { GunMove = 1f, GunTurn = 1f, ArmMove = 1f, ArmTurn = 1f, HeadFollow = 1f, Breath = 1f };
     private const float BreathCenterSeconds = 6f;
-    private static readonly SwayAmounts Now = new() { GunMove = 0.2f, GunTurn = 0.2f, ArmMove = 0.2f, ArmTurn = 0.2f, HeadFollow = 0.2f, Breath = 1f };
+    private static readonly SwayAmounts Now = new() { GunMove = 0.0544601f, GunTurn = 0.0544601f, ArmMove = 0.0544601f, ArmTurn = 0.0544601f, HeadFollow = 0.09671362f, Breath = 1f };
     internal static bool Chase = true;
     internal static float FollowDelay;
     internal static float WalkHeadSway;

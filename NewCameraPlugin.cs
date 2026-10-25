@@ -19,7 +19,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
     private void Awake()
     {
         // No section: the F12 window shows the master switch right under the plugin's name, without a heading.
-        ConfigEntry<bool> enabled = Config.Bind("", "总开关", false,
+        ConfigEntry<bool> enabled = Config.Bind("", "总开关", true,
             "打开后使用第三人称骨架，并把游戏镜头挂在人物头部。");
         MoveFrom(enabled, "新镜头", "总开关");
         AimArms.Install();
@@ -57,7 +57,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
             "画出眼镜和护目镜。关掉后整个眼部装备都不画。上面挂的夜视或热成像，同样等自己的滤镜亮起才藏。");
         ConfigEntry<bool> showVisor = Config.Bind("人物", "显示面罩滤镜", false,
             "画出面罩玻璃上的滤镜。关掉后玻璃还在，滤镜画面没有。");
-        ConfigEntry<float> headPitch = Config.Bind("人物", "头部仰俯", 28f,
+        ConfigEntry<float> headPitch = Config.Bind("人物", "头部仰俯", 17f,
             new ConfigDescription("只转头部模型，镜头保持原位。正值把脸往上抬，单位为度。",
                 new AcceptableValueRange<float>(-45f, 45f)));
         ConfigEntry<float> freeLookYaw = Config.Bind("人物", "中键扭头角度", 80f,
@@ -114,7 +114,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         ConfigEntry<bool> balance = Config.Bind("前庭平衡", "总开关", true,
             new ConfigDescription("像内耳前庭带着眼球那样，镜头位置不动，只把镜头转回玩家想看的方向，抵消走路、跑步时头的晃动。注视点取视线上实际看到的东西的距离；切枪、换弹、打药、翻背包、搜刮、开门等动作时，动画让头转去看手或包的部分会保留。开镜、架枪、固定武器、翻越、攀爬时不起作用；中键自由看和后坐力保留。关闭后镜头完全按头部原样晃动。",
                 null, new ConfigurationManagerAttributes { Order = 3 }));
-        ConfigEntry<float> strength = Config.Bind("前庭平衡", "强度", 0.8f,
+        ConfigEntry<float> strength = Config.Bind("前庭平衡", "强度", 0.7014084f,
             new ConfigDescription("左右和上下平衡多少。0 是不平衡（原样），1 是完全平衡。",
                 new AcceptableValueRange<float>(0f, 1f), new ConfigurationManagerAttributes { Order = 2 }));
         ConfigEntry<float> torsion = Config.Bind("前庭平衡", "扭转补偿", 0.25f,
@@ -154,7 +154,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
     private void BindPosition()
     {
         ConfigEntry<float> horizontal = BindMeters("镜头位置", "水平", 0f, "沿镜头右方向移动，单位为米。");
-        ConfigEntry<float> vertical = BindMeters("镜头位置", "垂直", 0.08f, "沿镜头上方向移动，单位为米。");
+        ConfigEntry<float> vertical = BindMeters("镜头位置", "垂直", 0.05f, "沿镜头上方向移动，单位为米。");
         ConfigEntry<float> forward = BindMeters("镜头位置", "前后", 0.08f, "沿镜头前方向移动，单位为米。");
         void Refresh()
         {
@@ -217,9 +217,9 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 
     private void BindSway()
     {
-        BindSwaySet("瞄准摆动-平时", "平时（不屏息、手臂有体力）", AimArms.Normal, 0.2f, 1f);
-        BindSwaySet("瞄准摆动-屏息", "按住左 Alt 屏息时", AimArms.Holding, 0f, 0f);
-        BindSwaySet("瞄准摆动-没体力", "手臂没体力时（优先于屏息）", AimArms.Exhausted, 1f, 1f);
+        BindSwaySet("瞄准摆动-平时", "平时（不屏息、手臂有体力）", AimArms.Normal, 0.0544601f, 0.09671362f, 1f);
+        BindSwaySet("瞄准摆动-屏息", "按住左 Alt 屏息时", AimArms.Holding, 0f, 0f, 0f);
+        BindSwaySet("瞄准摆动-没体力", "手臂没体力时（优先于屏息）", AimArms.Exhausted, 1f, 1f, 1f);
         AimArms.Chase = true;
         ConfigEntry<float> followDelay = Config.Bind("瞄准摆动", "跟手延迟（秒）", 0.1f,
             new ConfigDescription("晃鼠标时枪落后画面的快慢，数越大越慢。开镜和退瞄后的腰射都用这个数。0 是不延迟。子弹跟着枪口。",
@@ -248,11 +248,11 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         Refresh();
     }
 
-    private void BindSwaySet(string section, string when, AimArms.SwayAmounts target, float sway, float breathDefault)
+    private void BindSwaySet(string section, string when, AimArms.SwayAmounts target, float sway, float headFollowDefault, float breathDefault)
     {
         ConfigEntry<float> swayAmount = BindAmount(section, "摆动", sway,
             when + "：枪和手臂快的晃动（转视角时的甩动、走路、手上动作等）带来的平移和转动。0 是瞄具钉在眼前不动，1 是游戏原样。");
-        ConfigEntry<float> headFollow = BindAmount(section, "跟随头部", sway,
+        ConfigEntry<float> headFollow = BindAmount(section, "跟随头部", headFollowDefault,
             when + "：瞄准方向跟着头的晃动（呼吸、走路颠簸、姿势带来的偏角）走多少，镜头和枪一起跟。0 是只认鼠标方向（探头的歪斜照样保留），1 是完全跟着头。");
         ConfigEntry<float> breath = BindAmount(section, "呼吸", breathDefault,
             when + "：手臂和枪跟着慢晃（多半是呼吸）转多少。摆动滑条只管快的晃动，这个管更慢的那部分。0 是不跟着转，1 是游戏原样。");
