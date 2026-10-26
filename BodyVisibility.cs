@@ -80,10 +80,13 @@ internal static class BodyVisibility
             if (body.SlotViews.TryGetByKey(slot, out PlayerBody.SlotView? view) && view != null)
                 ApplySlot(player, view);
         }
+
+        FineArms.Apply(body);
     }
 
     internal static void Restore()
     {
+        FineArms.Restore();
         foreach (RendererState state in OriginalRenderers.Values)
         {
             if (state.Renderer == null)
