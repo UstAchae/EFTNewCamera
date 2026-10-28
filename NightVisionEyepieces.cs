@@ -26,10 +26,12 @@ namespace EFTNewCamera;
 // eyecup meet, where each side shows its own tube's field.
 //
 // Binocular view: one camera cannot sit behind both eyecups, so while the eyepieces show, the camera splits in
-// two where it is, like two eyes: each moved sideways to line up with its own eyecup's centre lens. The screen
-// is split down the middle: the left eye renders the left half of the main camera's view and the right eye the
-// right half, each from its own place, put in where the game's own night-vision
-// filter would run (the SSAA stage, in HDR before tone mapping), so the main camera's later effects apply to both.
+// two where it is, like two eyes: each moved sideways toward its own eyecup's centre lens. The screen is split
+// down the middle, the left half of the main camera's view seen by the left eye and the right half by the right.
+// Each half is drawn line by line of sight where the game's own night-vision filter would run (the SSAA stage, in
+// HDR before tone mapping, so the main camera's later effects apply): an eye focused far away sees what is a few
+// centimetres in front of it (housing, eyecups, helmet) only as darkness with pupil-soft edges, so all it draws is
+// the light through the lenses, and no scene is rendered for the eyes themselves.
 internal static class NightVisionEyepieces
 {
     internal static bool Enabled;
@@ -78,7 +80,10 @@ internal static class NightVisionEyepieces
     private static readonly int GlowId = Shader.PropertyToID("_Glow");
     private static readonly int OtherAxisId = Shader.PropertyToID("_OtherAxis");
     private static readonly int SoftId = Shader.PropertyToID("_Soft");
-    private static readonly int[] EyeIds = { Shader.PropertyToID("_LeftEye"), Shader.PropertyToID("_RightEye") };
+    private static readonly int[] EyeInvVpIds = { Shader.PropertyToID("_EyeInvVP0"), Shader.PropertyToID("_EyeInvVP1") };
+    private static readonly int[] EyePosIds = { Shader.PropertyToID("_EyePos0"), Shader.PropertyToID("_EyePos1") };
+    private static readonly int LensCentreId = Shader.PropertyToID("_LensCentre");
+    private static readonly int LensNormalId = Shader.PropertyToID("_LensNormal");
     private static readonly int SplitId = Shader.PropertyToID("_Split");
     private static readonly int CompositeId = Shader.PropertyToID("_JustachaeBinocularRT");
 
@@ -103,8 +108,7 @@ internal static class NightVisionEyepieces
     private static bool _pictureReady, _rendering;
     private static Behaviour? _hiddenMask;
 
-    private static readonly Camera?[] _eyeCameras = new Camera?[2];   // left, right
-    private static readonly RenderTexture?[] _eyeViews = new RenderTexture?[2];
+    private static readonly Vector4[] _lensCentres = new Vector4[4], _lensNormals = new Vector4[4];
     private static bool BinocularOn => Active && Binocular && _binocularMaterial != null;
 
     internal static void Install()
@@ -166,17 +170,11 @@ internal static class NightVisionEyepieces
             _picture.Release();
             _picture = null;
         }
-        for (int i = 0; i < 2; i++)
-        {
-            if (_eyeViews[i] == null)
-                continue;
-            _eyeViews[i]!.Release();
-            _eyeViews[i] = null;
-        }
     }
 
     // After the camera is placed for the frame (NewCameraSwitch, and anything patched onto it, runs first): the
-    // picture over the whole screen from where the camera is, then each eye from its own place.
+    // picture over the whole screen from where the camera is, and what the SSAA stage needs to draw each eye's
+    // half from that eye's place.
     internal static void OnCameraPreCull(Camera camera)
     {
         if (!BinocularOn || _rendering || _body == null || _lensNodes.Length == 0 || camera != Camera.main)
@@ -191,60 +189,45 @@ internal static class NightVisionEyepieces
             return;
         }
 
+        _pictureFrame = Time.frameCount;
+        _pictureReady = RenderPicture(camera, true);
+        if (!_pictureReady)
+        {
+            binocular.SetVector(SplitId, Vector4.zero);
+            return;
+        }
+
         Vector3 right = view.right;
         float a = Vector3.Dot(_lensNodes[CentreLensA].position - position, right);
         float b = Vector3.Dot(_lensNodes[CentreLensB].position - position, right);
+        Matrix4x4 projection = camera.nonJitteredProjectionMatrix;
+        for (int side = 0; side < 2; side++)
+        {
+            Vector3 eye = position + right * ((side == 0 ? Mathf.Min(a, b) : Mathf.Max(a, b)) * EyeShift);
+            // The main camera's own view cut to this eye's half (normalised device x of that half rescaled to fill
+            // it), seen from the eye.
+            Matrix4x4 crop = Matrix4x4.identity;
+            crop.m00 = 2f;
+            crop.m03 = side == 0 ? 1f : -1f;
+            Matrix4x4 eyeView = camera.worldToCameraMatrix * Matrix4x4.Translate(position - eye);
+            binocular.SetMatrix(EyeInvVpIds[side], (crop * projection * eyeView).inverse);
+            binocular.SetVector(EyePosIds[side], eye);
+        }
 
-        _pictureFrame = Time.frameCount;
-        _pictureReady = RenderPicture(camera, true);
-        RenderEye(0, camera, position + right * (Mathf.Min(a, b) * EyeShift));
-        RenderEye(1, camera, position + right * (Mathf.Max(a, b) * EyeShift));
+        for (int i = 0; i < _lensNodes.Length; i++)
+        {
+            Transform node = _lensNodes[i];
+            Vector3 centre = node.position, normal = node.forward;
+            _lensCentres[i] = new Vector4(centre.x, centre.y, centre.z, ClearRadius * node.lossyScale.x);
+            _lensNormals[i] = new Vector4(normal.x, normal.y, normal.z, HalfField);
+        }
+        binocular.SetVectorArray(LensCentreId, _lensCentres);
+        binocular.SetVectorArray(LensNormalId, _lensNormals);
+        binocular.SetTexture(PictureId, _picture);
+        binocular.SetMatrix(PictureVpId, _viewProjection);
+        binocular.SetVector(SoftId, new Vector4(Pupil * _lensNodes[0].lossyScale.x, FieldStopSoftness, 0f, 0f));
+        binocular.SetColor(GlowId, Glow);
         binocular.SetVector(SplitId, new Vector4(1f, 0f, 0f, 0f));
-    }
-
-    private static void RenderEye(int side, Camera main, Vector3 position)
-    {
-        // Half of the frame the game's SSAA stage puts it in.
-        int width = Mathf.Max(Screen.width / 2, 1), height = Mathf.Max(Screen.height, 1);
-        RenderTexture? target = _eyeViews[side];
-        if (target == null || target.width != width || target.height != height)
-        {
-            if (target != null)
-                target.Release();
-            target = new RenderTexture(width, height, 24, RenderTextureFormat.ARGBHalf) { name = side == 0 ? "Justachae NVG left eye" : "Justachae NVG right eye" };
-            _eyeViews[side] = target;
-        }
-
-        Camera? camera = _eyeCameras[side];
-        if (camera == null)
-        {
-            GameObject go = new GameObject(side == 0 ? "Justachae NVG left eye" : "Justachae NVG right eye");
-            UnityEngine.Object.DontDestroyOnLoad(go);
-            camera = go.AddComponent<Camera>();
-            camera.enabled = false;
-            _eyeCameras[side] = camera;
-        }
-
-        camera.CopyFrom(main);
-        camera.transform.position = position;
-        camera.targetTexture = target;
-        camera.rect = new Rect(0f, 0f, 1f, 1f);
-        // The main camera's own view, cut to this eye's half: normalised device x of that half rescaled to fill it.
-        Matrix4x4 crop = Matrix4x4.identity;
-        crop.m00 = 2f;
-        crop.m03 = side == 0 ? 1f : -1f;
-        camera.projectionMatrix = crop * main.nonJitteredProjectionMatrix;
-        try
-        {
-            camera.Render();
-        }
-        finally
-        {
-            camera.ResetProjectionMatrix();
-            camera.targetTexture = null;
-        }
-
-        _binocularMaterial!.SetTexture(EyeIds[side], target);
     }
 
     private static Transform? FindDevice(Player player)
@@ -358,7 +341,7 @@ internal static class NightVisionEyepieces
         if (_rendering || eye == null || _body == null)
             return;
 
-        bool on = eye == Camera.main || eye == _eyeCameras[0] || eye == _eyeCameras[1];
+        bool on = eye == Camera.main;
         if (on && _pictureFrame != Time.frameCount)
         {
             _pictureFrame = Time.frameCount;
