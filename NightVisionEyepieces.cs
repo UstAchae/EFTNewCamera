@@ -65,6 +65,7 @@ internal static class NightVisionEyepieces
     private const float AboveGlass = 0.0003f;
     private const float HalfField = 20f;          // 40-degree tubes
     private const float FieldStopSoftness = 1.5f; // degrees
+    private const float DarkRing = 4f;            // degrees of eyepiece body past each field, in the binocular view
     private const float Margin = 0.05f;
     private static readonly Color Glow = new Color(0.012f, 0.017f, 0.02f);   // the screen's light past the field stop
     private const float OpenScale = 10f;          // BRNVG's (empty) lens texture spread well past the picture
@@ -82,6 +83,7 @@ internal static class NightVisionEyepieces
     private static readonly int SoftId = Shader.PropertyToID("_Soft");
     private static readonly int[] EyeInvVpIds = { Shader.PropertyToID("_EyeInvVP0"), Shader.PropertyToID("_EyeInvVP1") };
     private static readonly int[] EyePosIds = { Shader.PropertyToID("_EyePos0"), Shader.PropertyToID("_EyePos1") };
+    private static readonly int[] EyeSideIds = { Shader.PropertyToID("_EyeSide0"), Shader.PropertyToID("_EyeSide1") };
     private static readonly int LensCentreId = Shader.PropertyToID("_LensCentre");
     private static readonly int LensNormalId = Shader.PropertyToID("_LensNormal");
     private static readonly int SplitId = Shader.PropertyToID("_Split");
@@ -109,6 +111,7 @@ internal static class NightVisionEyepieces
     private static Behaviour? _hiddenMask;
 
     private static readonly Vector4[] _lensCentres = new Vector4[4], _lensNormals = new Vector4[4];
+    private static int _binocularFrame = -100;
     private static bool BinocularOn => Active && Binocular && _binocularMaterial != null;
 
     internal static void Install()
@@ -126,9 +129,10 @@ internal static class NightVisionEyepieces
     }
 
     // The night-vision device worn on the player's head, if it is one with measured eyepieces.
+    // In the binocular view the eyes see past the device, which is too close to them to be seen as such.
     internal static bool Shows(GameObject model)
     {
-        return Enabled && _body != null && _body.IsChildOf(model.transform);
+        return Enabled && _body != null && _body.IsChildOf(model.transform) && Time.frameCount - _binocularFrame > 2;
     }
 
     internal static void Update(Player player)
@@ -203,7 +207,10 @@ internal static class NightVisionEyepieces
         Matrix4x4 projection = camera.nonJitteredProjectionMatrix;
         for (int side = 0; side < 2; side++)
         {
-            Vector3 eye = position + right * ((side == 0 ? Mathf.Min(a, b) : Mathf.Max(a, b)) * EyeShift);
+            // Each eye looks through its own eyecup: its centre lens and that lens's neighbour.
+            bool aIsThisSide = side == 0 ? a <= b : a > b;
+            int centreLens = aIsThisSide ? CentreLensA : CentreLensB;
+            Vector3 eye = position + right * ((aIsThisSide ? a : b) * EyeShift);
             // The main camera's own view cut to this eye's half (normalised device x of that half rescaled to fill
             // it), seen from the eye.
             Matrix4x4 crop = Matrix4x4.identity;
@@ -211,8 +218,10 @@ internal static class NightVisionEyepieces
             crop.m03 = side == 0 ? 1f : -1f;
             Matrix4x4 eyeView = camera.worldToCameraMatrix * Matrix4x4.Translate(position - eye);
             binocular.SetMatrix(EyeInvVpIds[side], (crop * projection * eyeView).inverse);
-            binocular.SetVector(EyePosIds[side], eye);
+            binocular.SetVector(EyePosIds[side], new Vector4(eye.x, eye.y, eye.z, centreLens));
+            binocular.SetVector(EyeSideIds[side], new Vector4(Gpnvg[centreLens].Neighbour, 0f, 0f, 0f));
         }
+        _binocularFrame = Time.frameCount;
 
         for (int i = 0; i < _lensNodes.Length; i++)
         {
@@ -225,7 +234,7 @@ internal static class NightVisionEyepieces
         binocular.SetVectorArray(LensNormalId, _lensNormals);
         binocular.SetTexture(PictureId, _picture);
         binocular.SetMatrix(PictureVpId, _viewProjection);
-        binocular.SetVector(SoftId, new Vector4(Pupil * _lensNodes[0].lossyScale.x, FieldStopSoftness, 0f, 0f));
+        binocular.SetVector(SoftId, new Vector4(Pupil * _lensNodes[0].lossyScale.x, FieldStopSoftness, DarkRing, 0f));
         binocular.SetColor(GlowId, Glow);
         binocular.SetVector(SplitId, new Vector4(1f, 0f, 0f, 0f));
     }
