@@ -14,7 +14,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "justachae.thirdpersoncamera";
     public const string PluginName = "Justachae's Third-Person Skeleton and Camera";
-    public const string PluginVersion = "1.0.3";
+    public const string PluginVersion = "1.0.4";
 
     private void Awake()
     {
@@ -45,18 +45,28 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
     {
         ConfigEntry<bool> eyepieces = Config.Bind("夜视仪", "目镜成像", false,
             new ConfigDescription("打开后，头戴夜视仪的画面不再铺满整个屏幕，而是只在夜视仪的目镜里成像：从镜头看过去，每个目镜按视线方向显示外面的夜视画面，超出镜筒视场的部分是暗的。目镜以外是不带夜视的原样画面，夜视仪模型照常画出。目前只支持 GPNVG-18。",
-                null, new ConfigurationManagerAttributes { Order = 2 }));
+                null, new ConfigurationManagerAttributes { Order = 4 }));
         ConfigEntry<float> brightness = Config.Bind("夜视仪", "目镜亮度", 1f,
             new ConfigDescription("自动增益的目标亮度倍数。1 是默认，越大越亮。",
-                new AcceptableValueRange<float>(0.2f, 3f), new ConfigurationManagerAttributes { Order = 1 }));
+                new AcceptableValueRange<float>(0.2f, 3f), new ConfigurationManagerAttributes { Order = 3 }));
+        ConfigEntry<bool> binocular = Config.Bind("夜视仪", "双眼镜头", true,
+            new ConfigDescription("目镜成像时，镜头在原地分成左右两个，各自横移到对准自己那一侧“8”字目镜的中间镜片。左眼的画面占屏幕左边一部分，右眼的占右边一部分，重叠处取较亮的一方，两个中间镜片的圆合成一个。需要多渲染一次整个场景。镜头离夜视仪较远（比如自由镜头）时不分开。",
+                null, new ConfigurationManagerAttributes { Order = 2 }));
+        ConfigEntry<float> eyeShare = Config.Bind("夜视仪", "单眼画面宽度", 0.7f,
+            new ConfigDescription("双眼镜头时，每只眼的画面从自己那一侧起占屏幕宽度的多少。0.7 就是左眼占左边 70%，右眼占右边 70%，中间 40% 重叠。",
+                new AcceptableValueRange<float>(0.5f, 1f), new ConfigurationManagerAttributes { Order = 1 }));
         void Refresh()
         {
             NightVisionEyepieces.Enabled = eyepieces.Value;
             NightVisionEyepieces.Brightness = brightness.Value;
+            NightVisionEyepieces.Binocular = binocular.Value;
+            NightVisionEyepieces.EyeShare = eyeShare.Value;
         }
 
         eyepieces.SettingChanged += (_, _) => Refresh();
         brightness.SettingChanged += (_, _) => Refresh();
+        binocular.SettingChanged += (_, _) => Refresh();
+        eyeShare.SettingChanged += (_, _) => Refresh();
         Refresh();
     }
 
@@ -318,15 +328,19 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
     private void OnEnable()
     {
         Camera.onPreCull += NewCameraSwitch.OnCameraPreCull;
+        Camera.onPreCull += NightVisionEyepieces.OnCameraPreCull;
         Camera.onPostRender += ReticleAfterTaa.OnCameraPostRender;
         Camera.onPostRender += OpticElevation.Restore;
+        Camera.onPostRender += NightVisionEyepieces.OnCameraPostRender;
     }
 
     private void OnDisable()
     {
         Camera.onPreCull -= NewCameraSwitch.OnCameraPreCull;
+        Camera.onPreCull -= NightVisionEyepieces.OnCameraPreCull;
         Camera.onPostRender -= ReticleAfterTaa.OnCameraPostRender;
         Camera.onPostRender -= OpticElevation.Restore;
+        Camera.onPostRender -= NightVisionEyepieces.OnCameraPostRender;
         OpticElevation.Shutdown();
     }
 

@@ -18,10 +18,18 @@ namespace EFTNewCamera;
 // screen and run through an image-intensifier model; each lens shows it by the line's direction and goes dark
 // beyond half its tube's field of view (the field stop). While it shows, the screen-wide filter (BRNVG's or the
 // game's own) is skipped and the device stays drawn. Only the GPNVG-18 is measured so far.
+//
+// Binocular view: one camera cannot sit behind both eyecups, so while the eyepieces show, the camera splits in
+// two where it is, each moved sideways to line up with its own eyecup's centre lens. The main camera becomes the
+// left eye and a copy renders the right eye; the two are joined where the game's own night-vision filter would
+// run (the SSAA stage, in HDR before tone mapping), the left view on the left part of the screen, the right view
+// on the right part, the brighter of the two where they overlap.
 internal static class NightVisionEyepieces
 {
     internal static bool Enabled;
     internal static float Brightness = 1f;
+    internal static bool Binocular = true;
+    internal static float EyeShare = 0.7f;      // how much of the screen, from its own side, each eye's view covers
 
     internal static bool Active { get; private set; }
 
@@ -56,6 +64,9 @@ internal static class NightVisionEyepieces
     private const float LowestGain = 1f, HighestGain = 1000f;
     private const float BrighterRate = 30f, DarkerRate = 2f;   // per second, as BRNVG's GPNVG-18
     private const int MeanWidth = 128, MeanHeight = 64, MeanMip = 7;
+    private const int LeftCentreLens = 2, RightCentreLens = 0;   // by the mesh's x; checked against the camera
+    private const float MaxEyeDistance = 0.15f;   // the camera at the device, not a free camera elsewhere
+    private const float SplitSoftness = 0.1f;
 
     private static readonly int OnId = Shader.PropertyToID("_On");
     private static readonly int PictureId = Shader.PropertyToID("_Picture");
@@ -71,10 +82,13 @@ internal static class NightVisionEyepieces
     private static readonly int PreviousId = Shader.PropertyToID("_Previous");
     private static readonly int TubeTintId = Shader.PropertyToID("_TubeTint");
     private static readonly int TubeSpectralId = Shader.PropertyToID("_TubeSpectral");
+    private static readonly int RightEyeId = Shader.PropertyToID("_RightEye");
+    private static readonly int SplitId = Shader.PropertyToID("_Split");
+    private static readonly int CompositeId = Shader.PropertyToID("_JustachaeBinocularRT");
 
     private static bool _installed, _rendererPatched, _bundleTried;
-    private static Shader? _lensShader, _tubeShader;
-    private static Material? _lensMaterial, _tubeMaterial;
+    private static Shader? _lensShader, _tubeShader, _binocularShader;
+    private static Material? _lensMaterial, _tubeMaterial, _binocularMaterial;
     private static Mesh? _disc;
 
     private static Transform? _body;
@@ -91,6 +105,12 @@ internal static class NightVisionEyepieces
     private static int _pictureFrame = -1;
     private static bool _pictureReady, _rendering;
     private static Behaviour? _hiddenMask;
+
+    private static Camera? _rightCamera;
+    private static RenderTexture? _rightView;
+    private static Camera? _shiftedCamera;
+    private static Vector3 _unshiftedPosition;
+    private static bool BinocularOn => Active && Binocular && _binocularMaterial != null;
 
     internal static void Install()
     {
@@ -162,6 +182,91 @@ internal static class NightVisionEyepieces
                 _exposure[i] = null;
             }
         }
+        if (_rightView != null)
+        {
+            _rightView.Release();
+            _rightView = null;
+        }
+    }
+
+    // After the camera is placed for the frame (NewCameraSwitch, and anything patched onto it, runs first): the
+    // picture over the whole screen from where the camera is, the right eye rendered, the main camera moved to
+    // the left eye until it has rendered.
+    internal static void OnCameraPreCull(Camera camera)
+    {
+        if (!BinocularOn || _rendering || _body == null || _lensNodes.Length == 0 || camera != Camera.main)
+            return;
+
+        Material binocular = _binocularMaterial!;
+        Transform view = camera.transform;
+        Vector3 position = view.position;
+        if ((_lensNodes[0].position - position).sqrMagnitude > MaxEyeDistance * MaxEyeDistance)
+        {
+            binocular.SetVector(SplitId, new Vector4(2f, 2f, SplitSoftness, 0f));   // the left view everywhere
+            return;
+        }
+
+        Vector3 right = view.right;
+        float a = Vector3.Dot(_lensNodes[LeftCentreLens].position - position, right);
+        float b = Vector3.Dot(_lensNodes[RightCentreLens].position - position, right);
+        float leftShift = Mathf.Min(a, b), rightShift = Mathf.Max(a, b);
+
+        _pictureFrame = Time.frameCount;
+        _pictureReady = RenderPicture(camera, true);
+        bool rightEye = RenderRightEye(camera, position + right * rightShift);
+        binocular.SetVector(SplitId, rightEye ? new Vector4(EyeShare, 1f - EyeShare, SplitSoftness, 0f) : new Vector4(2f, 2f, SplitSoftness, 0f));
+
+        _shiftedCamera = camera;
+        _unshiftedPosition = position;
+        view.position = position + right * leftShift;
+    }
+
+    internal static void OnCameraPostRender(Camera camera)
+    {
+        if (camera != _shiftedCamera || camera == null)
+            return;
+
+        camera.transform.position = _unshiftedPosition;
+        _shiftedCamera = null;
+    }
+
+    private static bool RenderRightEye(Camera eye, Vector3 position)
+    {
+        // As big as the frame the game's SSAA stage joins it with.
+        int width = Screen.width, height = Screen.height;
+        if (_rightView == null || _rightView.width != width || _rightView.height != height)
+        {
+            if (_rightView != null)
+                _rightView.Release();
+            _rightView = new RenderTexture(width, height, 24, RenderTextureFormat.ARGBHalf) { name = "Justachae NVG right eye" };
+        }
+
+        if (_rightCamera == null)
+        {
+            GameObject go = new GameObject("Justachae NVG right eye");
+            UnityEngine.Object.DontDestroyOnLoad(go);
+            _rightCamera = go.AddComponent<Camera>();
+            _rightCamera.enabled = false;
+        }
+
+        Camera camera = _rightCamera;
+        camera.CopyFrom(eye);
+        camera.transform.position = position;
+        camera.targetTexture = _rightView;
+        camera.rect = new Rect(0f, 0f, 1f, 1f);
+        camera.projectionMatrix = eye.nonJitteredProjectionMatrix;
+        try
+        {
+            camera.Render();
+        }
+        finally
+        {
+            camera.ResetProjectionMatrix();
+            camera.targetTexture = null;
+        }
+
+        _binocularMaterial!.SetTexture(RightEyeId, _rightView);
+        return true;
     }
 
     private static Transform? FindDevice(Player player)
@@ -259,12 +364,16 @@ internal static class NightVisionEyepieces
                 _lensShader = shader;
             else if (shader.name == "Justachae/NVG/Tube")
                 _tubeShader = shader;
+            else if (shader.name == "Justachae/NVG/Binocular")
+                _binocularShader = shader;
         }
 
         if (_lensShader == null || _tubeShader == null)
             return false;
         _lensMaterial = new Material(_lensShader) { name = "Justachae NVG eyepiece", hideFlags = HideFlags.DontSave };
         _tubeMaterial = new Material(_tubeShader) { name = "Justachae NVG tube", hideFlags = HideFlags.DontSave };
+        if (_binocularShader != null)
+            _binocularMaterial = new Material(_binocularShader) { name = "Justachae NVG binocular", hideFlags = HideFlags.DontSave };
         return true;
     }
 
@@ -274,11 +383,11 @@ internal static class NightVisionEyepieces
         if (_rendering || eye == null || _body == null)
             return;
 
-        bool on = eye == Camera.main;
+        bool on = eye == Camera.main || (eye == _rightCamera && _rightCamera != null);
         if (on && _pictureFrame != Time.frameCount)
         {
             _pictureFrame = Time.frameCount;
-            _pictureReady = RenderPicture(eye);
+            _pictureReady = RenderPicture(eye, false);
         }
 
         on &= _pictureReady;
@@ -302,7 +411,8 @@ internal static class NightVisionEyepieces
         renderer.SetPropertyBlock(block);
     }
 
-    private static bool RenderPicture(Camera eye)
+    // wholeScreen: for both eyes, whose lines through the lenses span more than one eye's view of them.
+    private static bool RenderPicture(Camera eye, bool wholeScreen)
     {
         if (_body == null || _tubeMaterial == null)
             return false;
@@ -332,7 +442,7 @@ internal static class NightVisionEyepieces
                 hi = Vector2.Max(hi, v);
             }
         }
-        if (behindEye)
+        if (behindEye || wholeScreen)
         {
             lo = Vector2.zero;
             hi = Vector2.one;
@@ -437,16 +547,27 @@ internal static class NightVisionEyepieces
         return true;
     }
 
-    // While the eyepieces show the picture, the game's own filter adds nothing to the screen.
+    // While the eyepieces show the picture, the game's own filter adds nothing to the screen; in its place the two
+    // eyes' views are joined, on the main camera through the SSAA stage, otherwise by the filter's command buffer.
     private static void NightVisionPreCullPostfix(BSG.CameraEffects.NightVision __instance)
     {
         if (!Active)
             return;
 
+        Material? binocular = BinocularOn ? _binocularMaterial : null;
         if (AccessTools.Field(typeof(BSG.CameraEffects.NightVision), "_nightVisionCB")?.GetValue(__instance) is CommandBuffer buffer)
+        {
             buffer.Clear();
+            if (binocular != null)
+            {
+                buffer.GetTemporaryRT(CompositeId, -1, -1, 0, FilterMode.Bilinear, RenderTextureFormat.DefaultHDR);
+                buffer.Blit(BuiltinRenderTextureType.CameraTarget, CompositeId);
+                buffer.Blit(CompositeId, BuiltinRenderTextureType.CameraTarget, binocular);
+                buffer.ReleaseTemporaryRT(CompositeId);
+            }
+        }
         if (AccessTools.Field(typeof(BSG.CameraEffects.NightVision), "_ssaaPropagator")?.GetValue(__instance) is SSAAPropagator propagator && propagator != null)
-            propagator.SetNightVisionMaterial(null);
+            propagator.SetNightVisionMaterial(binocular);
         if (__instance.TextureMask != null && __instance.TextureMask.enabled)
         {
             __instance.TextureMask.enabled = false;
