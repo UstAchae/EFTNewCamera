@@ -1,1 +1,6 @@
 _build/
+Unity/Library/
+Unity/Temp/
+Unity/Logs/
+Unity/UserSettings/
+Unity/obj/

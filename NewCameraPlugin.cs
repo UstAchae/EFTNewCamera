@@ -14,7 +14,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "justachae.thirdpersoncamera";
     public const string PluginName = "Justachae's Third-Person Skeleton and Camera";
-    public const string PluginVersion = "1.0.1";
+    public const string PluginVersion = "1.0.2";
 
     private void Awake()
     {
@@ -28,6 +28,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         FirstPersonAudio.Install();
         ReticleAfterTaa.Install();
         AimFieldOfView.Install();
+        NightVisionEyepieces.Install();
         NewCameraSwitch.Enabled = enabled.Value;
         enabled.SettingChanged += (_, _) => NewCameraSwitch.Enabled = enabled.Value;
         BindDirection();
@@ -36,7 +37,27 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         BindSway();
         BindBody();
         BindVestibular();
+        BindNightVision();
         OpticElevation.Initialize();
+    }
+
+    private void BindNightVision()
+    {
+        ConfigEntry<bool> eyepieces = Config.Bind("夜视仪", "目镜成像", false,
+            new ConfigDescription("打开后，头戴夜视仪的画面不再铺满整个屏幕，而是只在夜视仪的目镜里成像：从镜头看过去，每个目镜按视线方向显示外面的夜视画面，超出镜筒视场的部分是暗的。目镜以外是不带夜视的原样画面，夜视仪模型照常画出。目前只支持 GPNVG-18。",
+                null, new ConfigurationManagerAttributes { Order = 2 }));
+        ConfigEntry<float> brightness = Config.Bind("夜视仪", "目镜亮度", 1f,
+            new ConfigDescription("自动增益的目标亮度倍数。1 是默认，越大越亮。",
+                new AcceptableValueRange<float>(0.2f, 3f), new ConfigurationManagerAttributes { Order = 1 }));
+        void Refresh()
+        {
+            NightVisionEyepieces.Enabled = eyepieces.Value;
+            NightVisionEyepieces.Brightness = brightness.Value;
+        }
+
+        eyepieces.SettingChanged += (_, _) => Refresh();
+        brightness.SettingChanged += (_, _) => Refresh();
+        Refresh();
     }
 
     private void BindBody()
@@ -337,6 +358,7 @@ internal static class NewCameraSwitch
         {
             if (_applied && player != null && player.IsYourPlayer)
             {
+                NightVisionEyepieces.Release();
                 OpticPicture.Release();
                 AimArms.Release(player);
                 BodyVisibility.Restore();
@@ -355,6 +377,7 @@ internal static class NewCameraSwitch
         {
             if (_applied)
             {
+                NightVisionEyepieces.Release();
                 OpticPicture.Release();
                 AimArms.Release(player);
                 BodyVisibility.Restore();
@@ -371,6 +394,7 @@ internal static class NewCameraSwitch
             VestibularView.Reset();
         }
         AimArms.Apply(player);
+        NightVisionEyepieces.Update(player);
         BodyVisibility.Apply(player);
         _applied = true;
     }

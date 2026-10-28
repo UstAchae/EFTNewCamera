@@ -225,7 +225,8 @@ internal static class BodyVisibility
         if (model == null || camera == null)
             return;
 
-        bool nightOn = NightFilterVisible(camera.NightVision);
+        // A device whose eyepieces show the picture stays drawn.
+        bool nightOn = NightFilterVisible(camera.NightVision) && !NightVisionEyepieces.Shows(model);
         bool thermalOn = camera.ThermalVision != null && camera.ThermalVision.On;
         if (!nightOn && !thermalOn)
             return;
@@ -281,7 +282,18 @@ internal static class BodyVisibility
         return found.ToArray();
     }
 
-    private static bool NightFilterVisible(BSG.CameraEffects.NightVision? nightVision)
+    internal static CameraManager? Cameras => CameraManagerInstance?.GetValue(null) as CameraManager;
+
+    internal static Type? NightRendererType
+    {
+        get
+        {
+            EnsureNightTypes();
+            return _nightRendererType;
+        }
+    }
+
+    internal static bool NightFilterVisible(BSG.CameraEffects.NightVision? nightVision)
     {
         if (nightVision == null)
             return false;
@@ -303,7 +315,7 @@ internal static class BodyVisibility
         return _opticReady == null || _opticReady.GetValue(renderer) is true;
     }
 
-    private static bool UsesNightPipeline(BSG.CameraEffects.NightVision nightVision)
+    internal static bool UsesNightPipeline(BSG.CameraEffects.NightVision nightVision)
     {
         EnsureNightTypes();
         if (_usesCustomPipeline == null)

@@ -35,6 +35,8 @@ Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
 $pluginDir = Join-Path $stage "BepInEx/plugins/$name"
 New-Item $pluginDir -ItemType Directory -Force | Out-Null
 Copy-Item $dll $pluginDir
+# The shaders come from the Unity project in Unity/ (BuildShaders.Build writes _build/bundle/nightvision.bundle).
+Copy-Item (Join-Path $output 'bundle/nightvision.bundle') $pluginDir
 $zip = Join-Path $output "$name-$version.zip"
 Remove-Item $zip -Force -ErrorAction SilentlyContinue
 Add-Type -AssemblyName System.IO.Compression.FileSystem
