@@ -20,9 +20,9 @@ namespace EFTNewCamera;
 // game's own) is skipped and the device stays drawn. Only the GPNVG-18 is measured so far.
 //
 // Binocular view: one camera cannot sit behind both eyecups, so while the eyepieces show, the camera splits in
-// two where it is, like two eyes: each moved sideways to line up with its own eyecup's centre lens, each with the
-// main camera's vertical field of view over half the screen's width. The screen is split down the middle, the
-// left eye's view on the left half and the right eye's on the right, put in where the game's own night-vision
+// two where it is, like two eyes: each moved sideways to line up with its own eyecup's centre lens. The screen
+// is split down the middle: the left eye renders the left half of the main camera's view and the right eye the
+// right half, each from its own place, put in where the game's own night-vision
 // filter would run (the SSAA stage, in HDR before tone mapping), so the main camera's later effects apply to both.
 internal static class NightVisionEyepieces
 {
@@ -241,8 +241,11 @@ internal static class NightVisionEyepieces
         camera.transform.position = position;
         camera.targetTexture = target;
         camera.rect = new Rect(0f, 0f, 1f, 1f);
-        // The main camera's vertical field of view over half the screen's width.
-        camera.projectionMatrix = Matrix4x4.Perspective(main.fieldOfView, (float)width / height, main.nearClipPlane, main.farClipPlane);
+        // The main camera's own view, cut to this eye's half: normalised device x of that half rescaled to fill it.
+        Matrix4x4 crop = Matrix4x4.identity;
+        crop.m00 = 2f;
+        crop.m03 = side == 0 ? 1f : -1f;
+        camera.projectionMatrix = crop * main.nonJitteredProjectionMatrix;
         try
         {
             camera.Render();

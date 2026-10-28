@@ -14,7 +14,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "justachae.thirdpersoncamera";
     public const string PluginName = "Justachae's Third-Person Skeleton and Camera";
-    public const string PluginVersion = "1.0.5";
+    public const string PluginVersion = "1.0.6";
 
     private void Awake()
     {
@@ -50,7 +50,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
             new ConfigDescription("自动增益的目标亮度倍数。1 是默认，越大越亮。",
                 new AcceptableValueRange<float>(0.2f, 3f), new ConfigurationManagerAttributes { Order = 3 }));
         ConfigEntry<bool> binocular = Config.Bind("夜视仪", "双眼镜头", true,
-            new ConfigDescription("目镜成像时，镜头在原地分成左右两个相机，像两只眼睛：各自横移到对准自己那一侧“8”字目镜的中间镜片。屏幕从中间分成左右两半，左半边是左眼相机的完整画面，右半边是右眼相机的。每个相机的上下视角和原镜头一样，左右视角按半个屏幕的宽度。每帧多渲染两次整个场景。镜头离夜视仪较远（比如自由镜头）时不分开。",
+            new ConfigDescription("目镜成像时，镜头在原地分成左右两个相机，像两只眼睛：各自横移到对准自己那一侧“8”字目镜的中间镜片。屏幕从中间分成左右两半：左眼相机从自己的位置渲染原画面的左半边，右眼相机渲染右半边。每帧多渲染两次整个场景。镜头离夜视仪较远（比如自由镜头）时不分开。",
                 null, new ConfigurationManagerAttributes { Order = 1 }));
         void Refresh()
         {
