@@ -54,6 +54,8 @@ internal static class NightVisionEyepieces
     private const float Glow = 0.02f;
     private const float TargetBrightness = 0.5f;
     private const float LowestGain = 1f, HighestGain = 1000f;
+    private const float BrighterRate = 30f, DarkerRate = 2f;   // per second, as BRNVG's GPNVG-18
+    private const int MeanWidth = 128, MeanHeight = 64, MeanMip = 7;
 
     private static readonly int OnId = Shader.PropertyToID("_On");
     private static readonly int PictureId = Shader.PropertyToID("_Picture");
@@ -64,6 +66,9 @@ internal static class NightVisionEyepieces
     private static readonly int GlowId = Shader.PropertyToID("_Glow");
     private static readonly int TubeGainId = Shader.PropertyToID("_TubeGain");
     private static readonly int TubeNoiseId = Shader.PropertyToID("_TubeNoise");
+    private static readonly int TubeAdaptId = Shader.PropertyToID("_TubeAdapt");
+    private static readonly int ExposureId = Shader.PropertyToID("_Exposure");
+    private static readonly int PreviousId = Shader.PropertyToID("_Previous");
     private static readonly int TubeTintId = Shader.PropertyToID("_TubeTint");
     private static readonly int TubeSpectralId = Shader.PropertyToID("_TubeSpectral");
 
@@ -79,7 +84,9 @@ internal static class NightVisionEyepieces
     private static int _searchedFrame = -100;
 
     private static Camera? _pictureCamera;
-    private static RenderTexture? _raw, _picture;
+    private static RenderTexture? _raw, _picture, _mean;
+    private static readonly RenderTexture?[] _exposure = new RenderTexture?[2];
+    private static int _exposureIndex;
     private static Matrix4x4 _viewProjection;
     private static int _pictureFrame = -1;
     private static bool _pictureReady, _rendering;
@@ -144,6 +151,16 @@ internal static class NightVisionEyepieces
             _picture!.Release();
             _raw = null;
             _picture = null;
+        }
+        if (_mean != null)
+        {
+            _mean.Release();
+            _mean = null;
+            for (int i = 0; i < 2; i++)
+            {
+                _exposure[i]!.Release();
+                _exposure[i] = null;
+            }
         }
     }
 
@@ -327,19 +344,37 @@ internal static class NightVisionEyepieces
         if (size.x <= 0f || size.y <= 0f)
             return false;
 
-        // The picture's pixels match the screen's, in steps of 64 so it is not reallocated every frame.
-        int width = Mathf.Clamp(Mathf.CeilToInt(size.x * eye.pixelWidth / 64f) * 64, 64, 4096);
-        int height = Mathf.Clamp(Mathf.CeilToInt(size.y * eye.pixelHeight / 64f) * 64, 64, 4096);
-        if (_raw == null || _raw.width != width || _raw.height != height)
+        // About as many pixels as the area has on screen. The area moves on screen whenever the camera turns
+        // against the head, so the picture is only reallocated when it is too small or far too big.
+        int width = Mathf.Clamp(Mathf.CeilToInt(size.x * eye.pixelWidth), 64, 4096);
+        int height = Mathf.Clamp(Mathf.CeilToInt(size.y * eye.pixelHeight), 64, 4096);
+        if (_raw == null || _raw.width < width || _raw.height < height || _raw.width > width * 1.6f || _raw.height > height * 1.6f)
         {
             if (_raw != null)
             {
                 _raw.Release();
                 _picture!.Release();
             }
-            // Mipmapped, so the tube's automatic gain can read the mean brightness from the smallest level.
-            _raw = new RenderTexture(width, height, 24, RenderTextureFormat.ARGBHalf) { name = "Justachae NVG scene", useMipMap = true, autoGenerateMips = true };
+            width = Mathf.Min(Mathf.CeilToInt(width * 1.2f / 64f) * 64, 4096);
+            height = Mathf.Min(Mathf.CeilToInt(height * 1.2f / 64f) * 64, 4096);
+            _raw = new RenderTexture(width, height, 24, RenderTextureFormat.ARGBHalf) { name = "Justachae NVG scene" };
             _picture = new RenderTexture(width, height, 0, RenderTextureFormat.ARGB32) { name = "Justachae NVG picture" };
+        }
+        width = _raw.width;
+        height = _raw.height;
+        if (_mean == null)
+        {
+            // A small mipmapped copy of the scene for its mean brightness, and the adapted mean, two 1x1 in turn.
+            _mean = new RenderTexture(MeanWidth, MeanHeight, 0, RenderTextureFormat.ARGBHalf) { name = "Justachae NVG mean", useMipMap = true, autoGenerateMips = false };
+            RenderTexture active = RenderTexture.active;
+            for (int i = 0; i < 2; i++)
+            {
+                // Cleared, so the first frame takes the scene's mean as it is.
+                _exposure[i] = new RenderTexture(1, 1, 0, RenderTextureFormat.RFloat) { name = "Justachae NVG exposure " + i };
+                RenderTexture.active = _exposure[i];
+                GL.Clear(false, true, Color.clear);
+            }
+            RenderTexture.active = active;
         }
 
         if (_pictureCamera == null)
@@ -385,13 +420,20 @@ internal static class NightVisionEyepieces
             camera.targetTexture = null;
         }
 
-        float lowestMip = Mathf.Floor(Mathf.Log(Mathf.Max(width, height), 2f));
-        _tubeMaterial.SetVector(TubeGainId, new Vector4(TargetBrightness * Brightness, LowestGain, HighestGain, lowestMip));
-        float grain = width / Mathf.Max(size.x * eye.pixelWidth, 1f);
-        _tubeMaterial.SetVector(TubeNoiseId, new Vector4(1f, grain, Time.time, 0f));
+        _tubeMaterial.SetVector(TubeGainId, new Vector4(TargetBrightness * Brightness, LowestGain, HighestGain, MeanMip));
         _tubeMaterial.SetColor(TubeTintId, Phosphor);
         _tubeMaterial.SetVector(TubeSpectralId, Spectral);
-        Graphics.Blit(_raw, _picture, _tubeMaterial);
+        Graphics.Blit(_raw, _mean);
+        _mean!.GenerateMips();
+        _tubeMaterial.SetTexture(PreviousId, _exposure[_exposureIndex]);
+        _tubeMaterial.SetVector(TubeAdaptId, new Vector4(Time.unscaledDeltaTime, BrighterRate, DarkerRate, 0f));
+        _exposureIndex ^= 1;
+        Graphics.Blit(_mean, _exposure[_exposureIndex], _tubeMaterial, 1);
+
+        float grain = width / Mathf.Max(size.x * eye.pixelWidth, 1f);
+        _tubeMaterial.SetVector(TubeNoiseId, new Vector4(1f, grain, Time.time, 0f));
+        _tubeMaterial.SetTexture(ExposureId, _exposure[_exposureIndex]);
+        Graphics.Blit(_raw, _picture, _tubeMaterial, 0);
         return true;
     }
 
