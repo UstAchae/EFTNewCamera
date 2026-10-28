@@ -35,6 +35,7 @@ internal static class NightVisionEyepieces
     internal static bool Enabled;
     internal static float Pupil = 0.005f;      // the eye's pupil at night, metres
     internal static bool Binocular = true;
+    internal static float EyeShift = 0.8f;      // how far each eye moves, as a share of the way to its centre lens
 
     internal static bool Active { get; private set; }
 
@@ -196,8 +197,8 @@ internal static class NightVisionEyepieces
 
         _pictureFrame = Time.frameCount;
         _pictureReady = RenderPicture(camera, true);
-        RenderEye(0, camera, position + right * Mathf.Min(a, b));
-        RenderEye(1, camera, position + right * Mathf.Max(a, b));
+        RenderEye(0, camera, position + right * (Mathf.Min(a, b) * EyeShift));
+        RenderEye(1, camera, position + right * (Mathf.Max(a, b) * EyeShift));
         binocular.SetVector(SplitId, new Vector4(1f, 0f, 0f, 0f));
     }
 
