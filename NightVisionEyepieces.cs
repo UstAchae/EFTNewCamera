@@ -20,16 +20,15 @@ namespace EFTNewCamera;
 // game's own) is skipped and the device stays drawn. Only the GPNVG-18 is measured so far.
 //
 // Binocular view: one camera cannot sit behind both eyecups, so while the eyepieces show, the camera splits in
-// two where it is, each moved sideways to line up with its own eyecup's centre lens. The main camera becomes the
-// left eye and a copy renders the right eye; the two are joined where the game's own night-vision filter would
-// run (the SSAA stage, in HDR before tone mapping), the left view on the left part of the screen, the right view
-// on the right part, the brighter of the two where they overlap.
+// two where it is, like two eyes: each moved sideways to line up with its own eyecup's centre lens, each with the
+// main camera's vertical field of view over half the screen's width. The screen is split down the middle, the
+// left eye's view on the left half and the right eye's on the right, put in where the game's own night-vision
+// filter would run (the SSAA stage, in HDR before tone mapping), so the main camera's later effects apply to both.
 internal static class NightVisionEyepieces
 {
     internal static bool Enabled;
     internal static float Brightness = 1f;
     internal static bool Binocular = true;
-    internal static float EyeShare = 0.7f;      // how much of the screen, from its own side, each eye's view covers
 
     internal static bool Active { get; private set; }
 
@@ -64,9 +63,8 @@ internal static class NightVisionEyepieces
     private const float LowestGain = 1f, HighestGain = 1000f;
     private const float BrighterRate = 30f, DarkerRate = 2f;   // per second, as BRNVG's GPNVG-18
     private const int MeanWidth = 128, MeanHeight = 64, MeanMip = 7;
-    private const int LeftCentreLens = 2, RightCentreLens = 0;   // by the mesh's x; checked against the camera
+    private const int CentreLensA = 0, CentreLensB = 2;   // which is left is decided against the camera
     private const float MaxEyeDistance = 0.15f;   // the camera at the device, not a free camera elsewhere
-    private const float SplitSoftness = 0.1f;
 
     private static readonly int OnId = Shader.PropertyToID("_On");
     private static readonly int PictureId = Shader.PropertyToID("_Picture");
@@ -82,7 +80,7 @@ internal static class NightVisionEyepieces
     private static readonly int PreviousId = Shader.PropertyToID("_Previous");
     private static readonly int TubeTintId = Shader.PropertyToID("_TubeTint");
     private static readonly int TubeSpectralId = Shader.PropertyToID("_TubeSpectral");
-    private static readonly int RightEyeId = Shader.PropertyToID("_RightEye");
+    private static readonly int[] EyeIds = { Shader.PropertyToID("_LeftEye"), Shader.PropertyToID("_RightEye") };
     private static readonly int SplitId = Shader.PropertyToID("_Split");
     private static readonly int CompositeId = Shader.PropertyToID("_JustachaeBinocularRT");
 
@@ -106,10 +104,8 @@ internal static class NightVisionEyepieces
     private static bool _pictureReady, _rendering;
     private static Behaviour? _hiddenMask;
 
-    private static Camera? _rightCamera;
-    private static RenderTexture? _rightView;
-    private static Camera? _shiftedCamera;
-    private static Vector3 _unshiftedPosition;
+    private static readonly Camera?[] _eyeCameras = new Camera?[2];   // left, right
+    private static readonly RenderTexture?[] _eyeViews = new RenderTexture?[2];
     private static bool BinocularOn => Active && Binocular && _binocularMaterial != null;
 
     internal static void Install()
@@ -182,16 +178,17 @@ internal static class NightVisionEyepieces
                 _exposure[i] = null;
             }
         }
-        if (_rightView != null)
+        for (int i = 0; i < 2; i++)
         {
-            _rightView.Release();
-            _rightView = null;
+            if (_eyeViews[i] == null)
+                continue;
+            _eyeViews[i]!.Release();
+            _eyeViews[i] = null;
         }
     }
 
     // After the camera is placed for the frame (NewCameraSwitch, and anything patched onto it, runs first): the
-    // picture over the whole screen from where the camera is, the right eye rendered, the main camera moved to
-    // the left eye until it has rendered.
+    // picture over the whole screen from where the camera is, then each eye from its own place.
     internal static void OnCameraPreCull(Camera camera)
     {
         if (!BinocularOn || _rendering || _body == null || _lensNodes.Length == 0 || camera != Camera.main)
@@ -202,59 +199,50 @@ internal static class NightVisionEyepieces
         Vector3 position = view.position;
         if ((_lensNodes[0].position - position).sqrMagnitude > MaxEyeDistance * MaxEyeDistance)
         {
-            binocular.SetVector(SplitId, new Vector4(2f, 2f, SplitSoftness, 0f));   // the left view everywhere
+            binocular.SetVector(SplitId, Vector4.zero);   // the main camera's own frame
             return;
         }
 
         Vector3 right = view.right;
-        float a = Vector3.Dot(_lensNodes[LeftCentreLens].position - position, right);
-        float b = Vector3.Dot(_lensNodes[RightCentreLens].position - position, right);
-        float leftShift = Mathf.Min(a, b), rightShift = Mathf.Max(a, b);
+        float a = Vector3.Dot(_lensNodes[CentreLensA].position - position, right);
+        float b = Vector3.Dot(_lensNodes[CentreLensB].position - position, right);
 
         _pictureFrame = Time.frameCount;
         _pictureReady = RenderPicture(camera, true);
-        bool rightEye = RenderRightEye(camera, position + right * rightShift);
-        binocular.SetVector(SplitId, rightEye ? new Vector4(EyeShare, 1f - EyeShare, SplitSoftness, 0f) : new Vector4(2f, 2f, SplitSoftness, 0f));
-
-        _shiftedCamera = camera;
-        _unshiftedPosition = position;
-        view.position = position + right * leftShift;
+        RenderEye(0, camera, position + right * Mathf.Min(a, b));
+        RenderEye(1, camera, position + right * Mathf.Max(a, b));
+        binocular.SetVector(SplitId, new Vector4(1f, 0f, 0f, 0f));
     }
 
-    internal static void OnCameraPostRender(Camera camera)
+    private static void RenderEye(int side, Camera main, Vector3 position)
     {
-        if (camera != _shiftedCamera || camera == null)
-            return;
-
-        camera.transform.position = _unshiftedPosition;
-        _shiftedCamera = null;
-    }
-
-    private static bool RenderRightEye(Camera eye, Vector3 position)
-    {
-        // As big as the frame the game's SSAA stage joins it with.
-        int width = Screen.width, height = Screen.height;
-        if (_rightView == null || _rightView.width != width || _rightView.height != height)
+        // Half of the frame the game's SSAA stage puts it in.
+        int width = Mathf.Max(Screen.width / 2, 1), height = Mathf.Max(Screen.height, 1);
+        RenderTexture? target = _eyeViews[side];
+        if (target == null || target.width != width || target.height != height)
         {
-            if (_rightView != null)
-                _rightView.Release();
-            _rightView = new RenderTexture(width, height, 24, RenderTextureFormat.ARGBHalf) { name = "Justachae NVG right eye" };
+            if (target != null)
+                target.Release();
+            target = new RenderTexture(width, height, 24, RenderTextureFormat.ARGBHalf) { name = side == 0 ? "Justachae NVG left eye" : "Justachae NVG right eye" };
+            _eyeViews[side] = target;
         }
 
-        if (_rightCamera == null)
+        Camera? camera = _eyeCameras[side];
+        if (camera == null)
         {
-            GameObject go = new GameObject("Justachae NVG right eye");
+            GameObject go = new GameObject(side == 0 ? "Justachae NVG left eye" : "Justachae NVG right eye");
             UnityEngine.Object.DontDestroyOnLoad(go);
-            _rightCamera = go.AddComponent<Camera>();
-            _rightCamera.enabled = false;
+            camera = go.AddComponent<Camera>();
+            camera.enabled = false;
+            _eyeCameras[side] = camera;
         }
 
-        Camera camera = _rightCamera;
-        camera.CopyFrom(eye);
+        camera.CopyFrom(main);
         camera.transform.position = position;
-        camera.targetTexture = _rightView;
+        camera.targetTexture = target;
         camera.rect = new Rect(0f, 0f, 1f, 1f);
-        camera.projectionMatrix = eye.nonJitteredProjectionMatrix;
+        // The main camera's vertical field of view over half the screen's width.
+        camera.projectionMatrix = Matrix4x4.Perspective(main.fieldOfView, (float)width / height, main.nearClipPlane, main.farClipPlane);
         try
         {
             camera.Render();
@@ -265,8 +253,7 @@ internal static class NightVisionEyepieces
             camera.targetTexture = null;
         }
 
-        _binocularMaterial!.SetTexture(RightEyeId, _rightView);
-        return true;
+        _binocularMaterial!.SetTexture(EyeIds[side], target);
     }
 
     private static Transform? FindDevice(Player player)
@@ -383,7 +370,7 @@ internal static class NightVisionEyepieces
         if (_rendering || eye == null || _body == null)
             return;
 
-        bool on = eye == Camera.main || (eye == _rightCamera && _rightCamera != null);
+        bool on = eye == Camera.main || eye == _eyeCameras[0] || eye == _eyeCameras[1];
         if (on && _pictureFrame != Time.frameCount)
         {
             _pictureFrame = Time.frameCount;
