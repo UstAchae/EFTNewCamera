@@ -14,7 +14,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "justachae.thirdpersoncamera";
     public const string PluginName = "Justachae's Third-Person Skeleton and Camera";
-    public const string PluginVersion = "1.0.0";
+    public const string PluginVersion = "1.0.1";
 
     private void Awake()
     {
@@ -57,6 +57,8 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
             "画出眼镜和护目镜。关掉后整个眼部装备都不画。上面挂的夜视或热成像，同样等自己的滤镜亮起才藏。");
         ConfigEntry<bool> showVisor = Config.Bind("人物", "显示面罩滤镜", false,
             "画出面罩玻璃上的滤镜。关掉后玻璃还在，滤镜画面没有。");
+        ConfigEntry<bool> fineHands = Config.Bind("人物", "原版细腻手部", false,
+            "打开后，自己的双手换成原版第一人称那套更细腻的手部模型（含手指细节），并戴上原版的手表，表针照常走。袖子仍是身上衣服自己的。动作完全由第三人称骨架和本模组驱动。关掉是第三人称骨架原来的手。");
         ConfigEntry<float> headPitch = Config.Bind("人物", "头部仰俯", 17f,
             new ConfigDescription("只转头部模型，镜头保持原位。正值把脸往上抬，单位为度。",
                 new AcceptableValueRange<float>(-45f, 45f)));
@@ -80,6 +82,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
             BodyVisibility.ShowEyewear = showEyewear.Value;
             VisorFilter.Show = showVisor.Value;
             AimArms.HeadModelPitch = headPitch.Value;
+            FineArms.Enabled = fineHands.Value;
         }
 
         showHead.SettingChanged += (_, _) => Refresh();
@@ -87,6 +90,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         showFaceCover.SettingChanged += (_, _) => Refresh();
         showEyewear.SettingChanged += (_, _) => Refresh();
         showVisor.SettingChanged += (_, _) => Refresh();
+        fineHands.SettingChanged += (_, _) => Refresh();
         headPitch.SettingChanged += (_, _) => Refresh();
         freeLookYaw.SettingChanged += (_, _) => Refresh();
         freeLookDown.SettingChanged += (_, _) => Refresh();
