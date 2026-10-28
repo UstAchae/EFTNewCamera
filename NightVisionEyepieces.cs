@@ -70,6 +70,7 @@ internal static class NightVisionEyepieces
     private static readonly Color Glow = new Color(0.012f, 0.017f, 0.02f);   // the screen's light past the field stop
     private const float OpenScale = 10f;          // BRNVG's (empty) lens texture spread well past the picture
     private const int CentreLensA = 0, CentreLensB = 2;   // which is left is decided against the camera
+    private const float Rebase = 0.03f;           // the camera moved this far on the device: a new design eye point
     private const float MaxEyeDistance = 0.15f;   // the camera at the device, not a free camera elsewhere
 
     private static readonly int OnId = Shader.PropertyToID("_On");
@@ -84,6 +85,7 @@ internal static class NightVisionEyepieces
     private static readonly int[] EyeInvVpIds = { Shader.PropertyToID("_EyeInvVP0"), Shader.PropertyToID("_EyeInvVP1") };
     private static readonly int[] EyePosIds = { Shader.PropertyToID("_EyePos0"), Shader.PropertyToID("_EyePos1") };
     private static readonly int[] EyeSideIds = { Shader.PropertyToID("_EyeSide0"), Shader.PropertyToID("_EyeSide1") };
+    private static readonly int[] DesignEyeIds = { Shader.PropertyToID("_DesignEye0"), Shader.PropertyToID("_DesignEye1") };
     private static readonly int LensCentreId = Shader.PropertyToID("_LensCentre");
     private static readonly int LensNormalId = Shader.PropertyToID("_LensNormal");
     private static readonly int SplitId = Shader.PropertyToID("_Split");
@@ -112,6 +114,7 @@ internal static class NightVisionEyepieces
 
     private static readonly Vector4[] _lensCentres = new Vector4[4], _lensNormals = new Vector4[4];
     private static int _binocularFrame = -100;
+    private static readonly Vector3[] _designEyes = new Vector3[2];   // on the device
     private static bool BinocularOn => Active && Binocular && _binocularMaterial != null;
 
     internal static void Install()
@@ -205,6 +208,7 @@ internal static class NightVisionEyepieces
         float a = Vector3.Dot(_lensNodes[CentreLensA].position - position, right);
         float b = Vector3.Dot(_lensNodes[CentreLensB].position - position, right);
         Matrix4x4 projection = camera.nonJitteredProjectionMatrix;
+        bool resumed = Time.frameCount - _binocularFrame > 2;
         for (int side = 0; side < 2; side++)
         {
             // Each eye looks through its own eyecup: its centre lens and that lens's neighbour.
@@ -220,6 +224,13 @@ internal static class NightVisionEyepieces
             binocular.SetMatrix(EyeInvVpIds[side], (crop * projection * eyeView).inverse);
             binocular.SetVector(EyePosIds[side], new Vector4(eye.x, eye.y, eye.z, centreLens));
             binocular.SetVector(EyeSideIds[side], new Vector4(Gpnvg[centreLens].Neighbour, 0f, 0f, 0f));
+
+            // The design eye point: where this eye sat on the device when the view came on (or after the camera
+            // was moved for good, a few centimetres), kept on the device from then on.
+            Vector3 onDevice = _body.InverseTransformPoint(eye);
+            if (resumed || (onDevice - _designEyes[side]).magnitude > Rebase)
+                _designEyes[side] = onDevice;
+            binocular.SetVector(DesignEyeIds[side], _body.TransformPoint(_designEyes[side]));
         }
         _binocularFrame = Time.frameCount;
 
