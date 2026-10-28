@@ -15,9 +15,15 @@ namespace EFTNewCamera;
 // the whole screen. The tubes are 1x and afocal: the line from the eye through any point of an eyepiece sees the
 // scene in that same direction. So the picture is the scene rendered from the camera, with an oblique near plane
 // just past the device's front (the device, helmet and head drop out), cropped to where the eyepieces are on
-// screen and run through an image-intensifier model; each lens shows it by the line's direction and goes dark
-// beyond half its tube's field of view (the field stop). While it shows, the screen-wide filter (BRNVG's or the
-// game's own) is skipped and the device stays drawn. Only the GPNVG-18 is measured so far.
+// screen; each lens shows it by the line's direction and goes dark beyond half its tube's field of view (the
+// field stop). This mod only places the picture: what the tube makes of it is BRNVG's. Its renderer sits on the
+// picture camera, set up from the device's own BRNVG settings, with an open lens and no mask, since the eyepieces
+// here are the aperture. While it shows, the screen-wide filter (BRNVG's or the game's own) is skipped and the
+// device stays drawn. Needs BRNVG; only the GPNVG-18 is measured so far.
+//
+// The lens edges are as soft as the eye's pupil makes them: with the eye focused far away, an edge near the eye
+// covers the pupil gradually over a band as wide as the pupil, both at a lens rim and where the two lenses of an
+// eyecup meet, where each side shows its own tube's field.
 //
 // Binocular view: one camera cannot sit behind both eyecups, so while the eyepieces show, the camera splits in
 // two where it is, like two eyes: each moved sideways to line up with its own eyecup's centre lens. The screen
@@ -27,7 +33,7 @@ namespace EFTNewCamera;
 internal static class NightVisionEyepieces
 {
     internal static bool Enabled;
-    internal static float Brightness = 1f;
+    internal static float Pupil = 0.005f;      // the eye's pupil at night, metres
     internal static bool Binocular = true;
 
     internal static bool Active { get; private set; }
@@ -52,17 +58,13 @@ internal static class NightVisionEyepieces
         new Tube { Centre = new Vector3(-0.0527f, 0.0469f, -0.0756f), Normal = new Vector3(0.451f, 0.893f, 0f), Neighbour = 2 },
     };
     private const float ClearRadius = 0.0155f;
-    private const float DiscRadius = 0.0175f;     // a dark ring around the clear lens, inside the eyecup
+    private const float DiscRadius = 0.0195f;     // room for the soft rim, the rest dark glass inside the eyecup
     private const float AboveGlass = 0.0003f;
     private const float HalfField = 20f;          // 40-degree tubes
+    private const float FieldStopSoftness = 1.5f; // degrees
     private const float Margin = 0.05f;
-    private static readonly Color Phosphor = new Color(0.603f, 0.849f, 1f);   // white phosphor (BRNVG's GPNVG-18)
-    private static readonly Vector4 Spectral = new Vector4(0.45f, 0.45f, 0.10f, 0f);
-    private const float Glow = 0.02f;
-    private const float TargetBrightness = 0.5f;
-    private const float LowestGain = 1f, HighestGain = 1000f;
-    private const float BrighterRate = 30f, DarkerRate = 2f;   // per second, as BRNVG's GPNVG-18
-    private const int MeanWidth = 128, MeanHeight = 64, MeanMip = 7;
+    private static readonly Color Glow = new Color(0.012f, 0.017f, 0.02f);   // the screen's light past the field stop
+    private const float OpenScale = 10f;          // BRNVG's (empty) lens texture spread well past the picture
     private const int CentreLensA = 0, CentreLensB = 2;   // which is left is decided against the camera
     private const float MaxEyeDistance = 0.15f;   // the camera at the device, not a free camera elsewhere
 
@@ -73,20 +75,15 @@ internal static class NightVisionEyepieces
     private static readonly int LensId = Shader.PropertyToID("_Lens");
     private static readonly int OtherId = Shader.PropertyToID("_Other");
     private static readonly int GlowId = Shader.PropertyToID("_Glow");
-    private static readonly int TubeGainId = Shader.PropertyToID("_TubeGain");
-    private static readonly int TubeNoiseId = Shader.PropertyToID("_TubeNoise");
-    private static readonly int TubeAdaptId = Shader.PropertyToID("_TubeAdapt");
-    private static readonly int ExposureId = Shader.PropertyToID("_Exposure");
-    private static readonly int PreviousId = Shader.PropertyToID("_Previous");
-    private static readonly int TubeTintId = Shader.PropertyToID("_TubeTint");
-    private static readonly int TubeSpectralId = Shader.PropertyToID("_TubeSpectral");
+    private static readonly int OtherAxisId = Shader.PropertyToID("_OtherAxis");
+    private static readonly int SoftId = Shader.PropertyToID("_Soft");
     private static readonly int[] EyeIds = { Shader.PropertyToID("_LeftEye"), Shader.PropertyToID("_RightEye") };
     private static readonly int SplitId = Shader.PropertyToID("_Split");
     private static readonly int CompositeId = Shader.PropertyToID("_JustachaeBinocularRT");
 
     private static bool _installed, _rendererPatched, _bundleTried;
-    private static Shader? _lensShader, _tubeShader, _binocularShader;
-    private static Material? _lensMaterial, _tubeMaterial, _binocularMaterial;
+    private static Shader? _lensShader, _binocularShader;
+    private static Material? _lensMaterial, _binocularMaterial;
     private static Mesh? _disc;
 
     private static Transform? _body;
@@ -96,10 +93,11 @@ internal static class NightVisionEyepieces
     private static int _searchedFrame = -100;
 
     private static Camera? _pictureCamera;
-    private static RenderTexture? _raw, _picture, _mean;
-    private static readonly RenderTexture?[] _exposure = new RenderTexture?[2];
-    private static int _exposureIndex;
+    private static RenderTexture? _picture;
     private static Matrix4x4 _viewProjection;
+    private static Behaviour? _tube;                   // BRNVG's renderer on the picture camera
+    private static object? _tubeSettings;              // the BRNVG settings it was set up from
+    private static Texture2D? _openTexture;
     private static int _pictureFrame = -1;
     private static bool _pictureReady, _rendering;
     private static Behaviour? _hiddenMask;
@@ -143,7 +141,8 @@ internal static class NightVisionEyepieces
         }
 
         CameraManager? cameras = BodyVisibility.Cameras;
-        bool on = _body != null && _body.gameObject.activeInHierarchy && cameras != null && BodyVisibility.NightFilterVisible(cameras.NightVision);
+        bool on = _body != null && _body.gameObject.activeInHierarchy && cameras != null && BodyVisibility.NightRendererType != null
+            && BodyVisibility.NightFilterVisible(cameras.NightVision);
         if (_lenses != null && _lenses.activeSelf != on)
             _lenses.SetActive(on);
         Active = on;
@@ -161,22 +160,10 @@ internal static class NightVisionEyepieces
         _lensNodes = Array.Empty<Transform>();
         _body = null;
         _searchedFrame = -100;
-        if (_raw != null)
+        if (_picture != null)
         {
-            _raw.Release();
-            _picture!.Release();
-            _raw = null;
+            _picture.Release();
             _picture = null;
-        }
-        if (_mean != null)
-        {
-            _mean.Release();
-            _mean = null;
-            for (int i = 0; i < 2; i++)
-            {
-                _exposure[i]!.Release();
-                _exposure[i] = null;
-            }
         }
         for (int i = 0; i < 2; i++)
         {
@@ -337,7 +324,7 @@ internal static class NightVisionEyepieces
 
     private static bool LoadShaders()
     {
-        if (_lensMaterial != null && _tubeMaterial != null)
+        if (_lensMaterial != null)
             return true;
         if (_bundleTried)
             return false;
@@ -352,16 +339,13 @@ internal static class NightVisionEyepieces
         {
             if (shader.name == "Justachae/NVG/Eyepiece")
                 _lensShader = shader;
-            else if (shader.name == "Justachae/NVG/Tube")
-                _tubeShader = shader;
             else if (shader.name == "Justachae/NVG/Binocular")
                 _binocularShader = shader;
         }
 
-        if (_lensShader == null || _tubeShader == null)
+        if (_lensShader == null)
             return false;
         _lensMaterial = new Material(_lensShader) { name = "Justachae NVG eyepiece", hideFlags = HideFlags.DontSave };
-        _tubeMaterial = new Material(_tubeShader) { name = "Justachae NVG tube", hideFlags = HideFlags.DontSave };
         if (_binocularShader != null)
             _binocularMaterial = new Material(_binocularShader) { name = "Justachae NVG binocular", hideFlags = HideFlags.DontSave };
         return true;
@@ -392,7 +376,10 @@ internal static class NightVisionEyepieces
         block.SetVector(LensId, new Vector4(centre.x, centre.y, centre.z, ClearRadius * node.lossyScale.x));
         Vector3 neighbour = other.position;
         block.SetVector(OtherId, new Vector4(neighbour.x, neighbour.y, neighbour.z, 1f));
-        block.SetColor(GlowId, Phosphor * Glow);
+        Vector3 otherAxis = -other.forward;
+        block.SetVector(OtherAxisId, new Vector4(otherAxis.x, otherAxis.y, otherAxis.z, 0f));
+        block.SetVector(SoftId, new Vector4(Pupil * node.lossyScale.x, FieldStopSoftness, 0f, 0f));
+        block.SetColor(GlowId, Glow);
         if (on)
         {
             block.SetTexture(PictureId, _picture);
@@ -404,7 +391,7 @@ internal static class NightVisionEyepieces
     // wholeScreen: for both eyes, whose lines through the lenses span more than one eye's view of them.
     private static bool RenderPicture(Camera eye, bool wholeScreen)
     {
-        if (_body == null || _tubeMaterial == null)
+        if (_body == null)
             return false;
 
         // Only from behind the device, looking through it.
@@ -448,33 +435,13 @@ internal static class NightVisionEyepieces
         // against the head, so the picture is only reallocated when it is too small or far too big.
         int width = Mathf.Clamp(Mathf.CeilToInt(size.x * eye.pixelWidth), 64, 4096);
         int height = Mathf.Clamp(Mathf.CeilToInt(size.y * eye.pixelHeight), 64, 4096);
-        if (_raw == null || _raw.width < width || _raw.height < height || _raw.width > width * 1.6f || _raw.height > height * 1.6f)
+        if (_picture == null || _picture.width < width || _picture.height < height || _picture.width > width * 1.6f || _picture.height > height * 1.6f)
         {
-            if (_raw != null)
-            {
-                _raw.Release();
-                _picture!.Release();
-            }
+            if (_picture != null)
+                _picture.Release();
             width = Mathf.Min(Mathf.CeilToInt(width * 1.2f / 64f) * 64, 4096);
             height = Mathf.Min(Mathf.CeilToInt(height * 1.2f / 64f) * 64, 4096);
-            _raw = new RenderTexture(width, height, 24, RenderTextureFormat.ARGBHalf) { name = "Justachae NVG scene" };
-            _picture = new RenderTexture(width, height, 0, RenderTextureFormat.ARGB32) { name = "Justachae NVG picture" };
-        }
-        width = _raw.width;
-        height = _raw.height;
-        if (_mean == null)
-        {
-            // A small mipmapped copy of the scene for its mean brightness, and the adapted mean, two 1x1 in turn.
-            _mean = new RenderTexture(MeanWidth, MeanHeight, 0, RenderTextureFormat.ARGBHalf) { name = "Justachae NVG mean", useMipMap = true, autoGenerateMips = false };
-            RenderTexture active = RenderTexture.active;
-            for (int i = 0; i < 2; i++)
-            {
-                // Cleared, so the first frame takes the scene's mean as it is.
-                _exposure[i] = new RenderTexture(1, 1, 0, RenderTextureFormat.RFloat) { name = "Justachae NVG exposure " + i };
-                RenderTexture.active = _exposure[i];
-                GL.Clear(false, true, Color.clear);
-            }
-            RenderTexture.active = active;
+            _picture = new RenderTexture(width, height, 24, RenderTextureFormat.ARGBHalf) { name = "Justachae NVG picture" };
         }
 
         if (_pictureCamera == null)
@@ -484,6 +451,8 @@ internal static class NightVisionEyepieces
             _pictureCamera = go.AddComponent<Camera>();
             _pictureCamera.enabled = false;
         }
+        if (!SetUpTube(_pictureCamera))
+            return false;
 
         // The eye's own projection cropped to that area: normalised device x and y rescaled so the area fills it.
         Matrix4x4 projection = eye.nonJitteredProjectionMatrix;
@@ -497,14 +466,15 @@ internal static class NightVisionEyepieces
 
         Camera camera = _pictureCamera;
         camera.CopyFrom(eye);
-        camera.targetTexture = _raw;
+        camera.targetTexture = _picture;
         camera.rect = new Rect(0f, 0f, 1f, 1f);
         camera.projectionMatrix = projection;
         Vector4 plane = new Vector4(forward.x, forward.y, forward.z, -Vector3.Dot(forward, front));
         camera.projectionMatrix = camera.CalculateObliqueMatrix(camera.worldToCameraMatrix.inverse.transpose * plane);
         _viewProjection = projection * camera.worldToCameraMatrix;
 
-        // No shadows in the picture: their maps are redrawn for every camera and were most of its cost.
+        // No shadows in the picture: their maps are redrawn for every camera and were most of its cost. BRNVG's
+        // renderer turns the scene into the tube's picture on the way out (OnRenderImage).
         float shadowDistance = QualitySettings.shadowDistance;
         QualitySettings.shadowDistance = 0f;
         _rendering = true;
@@ -519,21 +489,54 @@ internal static class NightVisionEyepieces
             camera.ResetProjectionMatrix();
             camera.targetTexture = null;
         }
+        return true;
+    }
 
-        _tubeMaterial.SetVector(TubeGainId, new Vector4(TargetBrightness * Brightness, LowestGain, HighestGain, MeanMip));
-        _tubeMaterial.SetColor(TubeTintId, Phosphor);
-        _tubeMaterial.SetVector(TubeSpectralId, Spectral);
-        Graphics.Blit(_raw, _mean);
-        _mean!.GenerateMips();
-        _tubeMaterial.SetTexture(PreviousId, _exposure[_exposureIndex]);
-        _tubeMaterial.SetVector(TubeAdaptId, new Vector4(Time.unscaledDeltaTime, BrighterRate, DarkerRate, 0f));
-        _exposureIndex ^= 1;
-        Graphics.Blit(_mean, _exposure[_exposureIndex], _tubeMaterial, 1);
+    // BRNVG's renderer on the picture camera, set up as BRNVG set up the main camera's for the device worn
+    // (phosphor, gain, noise, haze, bloom), but with an open lens, no mask and no tube layout.
+    private static bool SetUpTube(Camera camera)
+    {
+        Type? type = BodyVisibility.NightRendererType;
+        Component? main = type == null ? null : BodyVisibility.Cameras?.NightVision?.GetComponent(type);
+        if (type == null || main == null)
+            return false;
 
-        float grain = width / Mathf.Max(size.x * eye.pixelWidth, 1f);
-        _tubeMaterial.SetVector(TubeNoiseId, new Vector4(1f, grain, Time.time, 0f));
-        _tubeMaterial.SetTexture(ExposureId, _exposure[_exposureIndex]);
-        Graphics.Blit(_raw, _picture, _tubeMaterial, 0);
+        if (_tube == null)
+        {
+            _tube = camera.gameObject.GetComponent(type) as Behaviour ?? camera.gameObject.AddComponent(type) as Behaviour;
+            _tubeSettings = null;
+            if (_tube == null)
+                return false;
+        }
+
+        const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+        object? settings = type.GetField("runtimeSettings", flags)?.GetValue(main);
+        if (settings == null)
+            return false;
+        if (!ReferenceEquals(settings, _tubeSettings))
+        {
+            if (_openTexture == null)
+            {
+                // Alpha 0 is BRNVG's open lens, and an overlay that covers nothing.
+                _openTexture = new Texture2D(4, 4, TextureFormat.RGBA32, false) { name = "Justachae NVG open lens", hideFlags = HideFlags.DontSave };
+                _openTexture.SetPixels(new Color[16]);
+                _openTexture.Apply(false, true);
+            }
+
+            object? shader = type.GetField("effectShader", flags)?.GetValue(main);
+            object? gain = type.GetField("globalGainMultiplier", flags)?.GetValue(main);
+            MethodInfo? configure = AccessTools.Method(type, "ConfigureRuntime");
+            if (configure == null)
+                return false;
+            configure.Invoke(_tube, new[] { shader, _openTexture, _openTexture, settings, null, null, gain ?? 1f, OpenScale });
+            AccessTools.Method(type, "ConfigureMultiLensVignette")?.Invoke(_tube, new object[] { false, 0f, 0f, 1f });
+            AccessTools.Method(type, "ConfigureLensEdgeDistortion")?.Invoke(_tube, new object[] { false, 0f, 0f, 1f });
+            _tubeSettings = settings;
+        }
+
+        type.GetProperty("NightVisionEnabled", flags)?.SetValue(_tube, true);
+        if (!_tube.enabled)
+            _tube.enabled = true;
         return true;
     }
 
@@ -590,9 +593,10 @@ internal static class NightVisionEyepieces
             new Harmony(NewCameraPlugin.PluginGuid + ".eyepieces.brnvg").Patch(render, prefix: new HarmonyMethod(prefix));
     }
 
-    private static bool RenderImagePrefix(RenderTexture source, RenderTexture destination)
+    private static bool RenderImagePrefix(Behaviour __instance, RenderTexture source, RenderTexture destination)
     {
-        if (!Active)
+        // Ours, on the picture camera, does the work.
+        if (!Active || __instance == _tube)
             return true;
 
         Graphics.Blit(source, destination);

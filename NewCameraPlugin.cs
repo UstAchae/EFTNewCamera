@@ -10,11 +10,12 @@ using UnityEngine;
 namespace EFTNewCamera;
 
 [BepInPlugin(PluginGuid, PluginName, PluginVersion)]
+[BepInDependency("com.borkel.nvgmasks", BepInDependency.DependencyFlags.SoftDependency)]   // BRNVG makes the eyepiece picture
 public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "justachae.thirdpersoncamera";
     public const string PluginName = "Justachae's Third-Person Skeleton and Camera";
-    public const string PluginVersion = "1.0.6";
+    public const string PluginVersion = "1.0.7";
 
     private void Awake()
     {
@@ -44,23 +45,23 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
     private void BindNightVision()
     {
         ConfigEntry<bool> eyepieces = Config.Bind("夜视仪", "目镜成像", false,
-            new ConfigDescription("打开后，头戴夜视仪的画面不再铺满整个屏幕，而是只在夜视仪的目镜里成像：从镜头看过去，每个目镜按视线方向显示外面的夜视画面，超出镜筒视场的部分是暗的。目镜以外是不带夜视的原样画面，夜视仪模型照常画出。目前只支持 GPNVG-18。",
+            new ConfigDescription("打开后，头戴夜视仪的画面不再铺满整个屏幕，而是只在夜视仪的目镜里成像：从镜头看过去，每个目镜按视线方向显示外面的夜视画面，超出镜筒视场的部分是暗的。目镜以外是不带夜视的原样画面，夜视仪模型照常画出。夜视画面本身（荧光颜色、增益、噪点、光晕等）由 BRNVG 按这台夜视仪的设置生成，需要安装 BRNVG。目前只支持 GPNVG-18。",
                 null, new ConfigurationManagerAttributes { Order = 4 }));
-        ConfigEntry<float> brightness = Config.Bind("夜视仪", "目镜亮度", 1f,
-            new ConfigDescription("自动增益的目标亮度倍数。1 是默认，越大越亮。",
-                new AcceptableValueRange<float>(0.2f, 3f), new ConfigurationManagerAttributes { Order = 3 }));
+        ConfigEntry<float> pupil = Config.Bind("夜视仪", "瞳孔直径（毫米）", 5f,
+            new ConfigDescription("决定目镜边缘和“8”字两片镜片衔接处的柔和程度。眼睛看远处时，贴近眼睛的边缘会在瞳孔那么宽的一条带子里逐渐挡住视线，所以瞳孔越大边缘越柔。夜里人眼瞳孔约 5 到 7 毫米。",
+                new AcceptableValueRange<float>(1f, 8f), new ConfigurationManagerAttributes { Order = 3 }));
         ConfigEntry<bool> binocular = Config.Bind("夜视仪", "双眼镜头", true,
             new ConfigDescription("目镜成像时，镜头在原地分成左右两个相机，像两只眼睛：各自横移到对准自己那一侧“8”字目镜的中间镜片。屏幕从中间分成左右两半：左眼相机从自己的位置渲染原画面的左半边，右眼相机渲染右半边。每帧多渲染两次整个场景。镜头离夜视仪较远（比如自由镜头）时不分开。",
                 null, new ConfigurationManagerAttributes { Order = 1 }));
         void Refresh()
         {
             NightVisionEyepieces.Enabled = eyepieces.Value;
-            NightVisionEyepieces.Brightness = brightness.Value;
+            NightVisionEyepieces.Pupil = pupil.Value * 0.001f;
             NightVisionEyepieces.Binocular = binocular.Value;
         }
 
         eyepieces.SettingChanged += (_, _) => Refresh();
-        brightness.SettingChanged += (_, _) => Refresh();
+        pupil.SettingChanged += (_, _) => Refresh();
         binocular.SettingChanged += (_, _) => Refresh();
         Refresh();
     }

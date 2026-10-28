@@ -12,7 +12,7 @@ public static class BuildShaders
         var build = new AssetBundleBuild
         {
             assetBundleName = "nightvision.bundle",
-            assetNames = new[] { "Assets/Shaders/NvgEyepiece.shader", "Assets/Shaders/NvgTube.shader", "Assets/Shaders/NvgBinocular.shader" },
+            assetNames = new[] { "Assets/Shaders/NvgEyepiece.shader", "Assets/Shaders/NvgBinocular.shader" },
         };
         if (BuildPipeline.BuildAssetBundles(Out, new[] { build }, BuildAssetBundleOptions.ChunkBasedCompression | BuildAssetBundleOptions.StrictMode, BuildTarget.StandaloneWindows64) == null)
             throw new System.Exception("Build failed");
