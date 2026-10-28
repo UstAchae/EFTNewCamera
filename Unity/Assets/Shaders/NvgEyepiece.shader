@@ -23,7 +23,7 @@ Shader "Justachae/NVG/Eyepiece" {
  SubShader {
   // Drawn after the opaque queue: the game's screen-space effects read the G-buffer, which this forward shader
   // does not write, and in the opaque queue they painted whatever lies behind the lens onto it.
-  Tags { "Queue"="Transparent-1" "RenderType"="Opaque" }
+  Tags { "Queue"="Transparent-1" "RenderType"="NvgLens" }   // NvgLens: picked out by the eyes' lens map
   Cull Off
   Pass {
    CGPROGRAM

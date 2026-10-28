@@ -15,7 +15,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "justachae.thirdpersoncamera";
     public const string PluginName = "Justachae's Third-Person Skeleton and Camera";
-    public const string PluginVersion = "1.0.11";
+    public const string PluginVersion = "1.1.0";
 
     private void Awake()
     {
@@ -51,7 +51,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
             new ConfigDescription("决定目镜边缘和“8”字两片镜片衔接处的柔和程度。眼睛看远处时，贴近眼睛的边缘会在瞳孔那么宽的一条带子里逐渐挡住视线，所以瞳孔越大边缘越柔。夜里人眼瞳孔约 5 到 7 毫米。",
                 new AcceptableValueRange<float>(1f, 8f), new ConfigurationManagerAttributes { Order = 3 }));
         ConfigEntry<bool> binocular = Config.Bind("夜视仪", "双眼镜头", true,
-            new ConfigDescription("目镜成像时，镜头在原地分成左右两个相机，像两只眼睛：各自横移到对准自己那一侧“8”字目镜的中间镜片。屏幕从中间分成左右两半：左半边是左眼从自己的位置看原画面的左半边，右半边是右眼看右半边。每个目镜正对着眼睛，三个镜筒的视场紧挨着，交接处是一条按瞳孔柔化的细缝；目镜以外先是一圈柔和的暗边，再往外是不带夜视的原场景，夜视仪外壳不画。镜头离夜视仪较远（比如自由镜头）时不分开。",
+            new ConfigDescription("目镜成像时，镜头在原地分成左右两个相机，像两只眼睛：各自横移到对准自己那一侧“8”字目镜的中间镜片。两个相机各自从眼睛的位置渲染完整场景（包括夜视仪和头盔），屏幕从中间分成左右两半，左半边是左眼看到的原画面左半边，右半边是右眼看到的右半边。眼睛对焦在远处：离眼几厘米的外壳、眼罩按瞳孔直径失焦变糊；目镜里的像在无穷远，是清晰的，透过眼睛实际看到的镜片（被外壳挡住的部分没有）进来，镜片边缘按它自己的距离失焦。每帧多渲染两次完整场景。镜头离夜视仪较远（比如自由镜头）时不分开。",
                 null, new ConfigurationManagerAttributes { Order = 2 }));
         ConfigEntry<float> eyeShift = Config.Bind("夜视仪", "双眼平移比例", 0.8f,
             new ConfigDescription("双眼镜头时，两个相机各自往外平移多少：1 是正好对准自己那一侧的中间镜片，0 是不平移。画面里的景物始终完整，平移只改变目镜的圆在画面里的位置和被镜片边缘挡掉多少。",

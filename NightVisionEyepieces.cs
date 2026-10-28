@@ -26,13 +26,14 @@ namespace EFTNewCamera;
 // eyecup meet, where each side shows its own tube's field.
 //
 // Binocular view: one camera cannot sit behind both eyecups, so while the eyepieces show, the camera splits in
-// two where it is, like two eyes: each moved sideways toward its own eyecup's centre lens. The screen is split
-// down the middle, the left half of the main camera's view seen by the left eye and the right half by the right.
-// Each half is drawn line by line of sight where the game's own night-vision filter would run (the SSAA stage, in
-// HDR before tone mapping, so the main camera's later effects apply): an eye focused far away sees what is a few
-// centimetres in front of it (housing, eyecups, helmet) only as darkness with pupil-soft edges, so all it draws is
-// the light through the lenses, and no scene is rendered for the eyes themselves.
-internal static class NightVisionEyepieces
+// two where it is, like two eyes: two cameras, each moved sideways toward its own eyecup's centre lens, each
+// rendering the whole scene (device and helmet included) over its half of the main camera's view. The screen is
+// split down the middle, the left eye's view on the left half and the right eye's on the right, put in where the
+// game's own night-vision filter would run (the SSAA stage, in HDR before tone mapping). The eye focuses far away:
+// on each eye's image the near foreground is defocused by the pupil (EyeOptics), and the picture, which the
+// tubes form at infinity, comes in sharp through the lenses as that eye sees them past the housing (a lens map
+// rendered from the eye), blurred as much as the lenses' own distance blurs them.
+internal static partial class NightVisionEyepieces
 {
     internal static bool Enabled;
     internal static float Pupil = 0.005f;      // the eye's pupil at night, metres
@@ -65,12 +66,10 @@ internal static class NightVisionEyepieces
     private const float AboveGlass = 0.0003f;
     private const float HalfField = 20f;          // 40-degree tubes
     private const float FieldStopSoftness = 1.5f; // degrees
-    private const float DarkRing = 4f;            // degrees of eyepiece body past each field, in the binocular view
     private const float Margin = 0.05f;
     private static readonly Color Glow = new Color(0.012f, 0.017f, 0.02f);   // the screen's light past the field stop
     private const float OpenScale = 10f;          // BRNVG's (empty) lens texture spread well past the picture
     private const int CentreLensA = 0, CentreLensB = 2;   // which is left is decided against the camera
-    private const float Rebase = 0.03f;           // the camera moved this far on the device: a new design eye point
     private const float MaxEyeDistance = 0.15f;   // the camera at the device, not a free camera elsewhere
 
     private static readonly int OnId = Shader.PropertyToID("_On");
@@ -82,17 +81,12 @@ internal static class NightVisionEyepieces
     private static readonly int GlowId = Shader.PropertyToID("_Glow");
     private static readonly int OtherAxisId = Shader.PropertyToID("_OtherAxis");
     private static readonly int SoftId = Shader.PropertyToID("_Soft");
-    private static readonly int[] EyeInvVpIds = { Shader.PropertyToID("_EyeInvVP0"), Shader.PropertyToID("_EyeInvVP1") };
-    private static readonly int[] EyePosIds = { Shader.PropertyToID("_EyePos0"), Shader.PropertyToID("_EyePos1") };
-    private static readonly int[] EyeSideIds = { Shader.PropertyToID("_EyeSide0"), Shader.PropertyToID("_EyeSide1") };
-    private static readonly int[] DesignEyeIds = { Shader.PropertyToID("_DesignEye0"), Shader.PropertyToID("_DesignEye1") };
-    private static readonly int LensCentreId = Shader.PropertyToID("_LensCentre");
     private static readonly int LensNormalId = Shader.PropertyToID("_LensNormal");
     private static readonly int SplitId = Shader.PropertyToID("_Split");
     private static readonly int CompositeId = Shader.PropertyToID("_JustachaeBinocularRT");
 
     private static bool _installed, _rendererPatched, _bundleTried;
-    private static Shader? _lensShader, _binocularShader;
+    private static Shader? _lensShader, _binocularShader, _lensMaskShader, _eyeOpticsShader;
     private static Material? _lensMaterial, _binocularMaterial;
     private static Mesh? _disc;
 
@@ -112,9 +106,6 @@ internal static class NightVisionEyepieces
     private static bool _pictureReady, _rendering;
     private static Behaviour? _hiddenMask;
 
-    private static readonly Vector4[] _lensCentres = new Vector4[4], _lensNormals = new Vector4[4];
-    private static int _binocularFrame = -100;
-    private static readonly Vector3[] _designEyes = new Vector3[2];   // on the device
     private static bool BinocularOn => Active && Binocular && _binocularMaterial != null;
 
     internal static void Install()
@@ -132,10 +123,9 @@ internal static class NightVisionEyepieces
     }
 
     // The night-vision device worn on the player's head, if it is one with measured eyepieces.
-    // In the binocular view the eyes see past the device, which is too close to them to be seen as such.
     internal static bool Shows(GameObject model)
     {
-        return Enabled && _body != null && _body.IsChildOf(model.transform) && Time.frameCount - _binocularFrame > 2;
+        return Enabled && _body != null && _body.IsChildOf(model.transform);
     }
 
     internal static void Update(Player player)
@@ -177,77 +167,7 @@ internal static class NightVisionEyepieces
             _picture.Release();
             _picture = null;
         }
-    }
-
-    // After the camera is placed for the frame (NewCameraSwitch, and anything patched onto it, runs first): the
-    // picture over the whole screen from where the camera is, and what the SSAA stage needs to draw each eye's
-    // half from that eye's place.
-    internal static void OnCameraPreCull(Camera camera)
-    {
-        if (!BinocularOn || _rendering || _body == null || _lensNodes.Length == 0 || camera != Camera.main)
-            return;
-
-        Material binocular = _binocularMaterial!;
-        Transform view = camera.transform;
-        Vector3 position = view.position;
-        if ((_lensNodes[0].position - position).sqrMagnitude > MaxEyeDistance * MaxEyeDistance)
-        {
-            binocular.SetVector(SplitId, Vector4.zero);   // the main camera's own frame
-            return;
-        }
-
-        _pictureFrame = Time.frameCount;
-        _pictureReady = RenderPicture(camera, true);
-        if (!_pictureReady)
-        {
-            binocular.SetVector(SplitId, Vector4.zero);
-            return;
-        }
-
-        Vector3 right = view.right;
-        float a = Vector3.Dot(_lensNodes[CentreLensA].position - position, right);
-        float b = Vector3.Dot(_lensNodes[CentreLensB].position - position, right);
-        Matrix4x4 projection = camera.nonJitteredProjectionMatrix;
-        bool resumed = Time.frameCount - _binocularFrame > 2;
-        for (int side = 0; side < 2; side++)
-        {
-            // Each eye looks through its own eyecup: its centre lens and that lens's neighbour.
-            bool aIsThisSide = side == 0 ? a <= b : a > b;
-            int centreLens = aIsThisSide ? CentreLensA : CentreLensB;
-            Vector3 eye = position + right * ((aIsThisSide ? a : b) * EyeShift);
-            // The main camera's own view cut to this eye's half (normalised device x of that half rescaled to fill
-            // it), seen from the eye.
-            Matrix4x4 crop = Matrix4x4.identity;
-            crop.m00 = 2f;
-            crop.m03 = side == 0 ? 1f : -1f;
-            Matrix4x4 eyeView = camera.worldToCameraMatrix * Matrix4x4.Translate(position - eye);
-            binocular.SetMatrix(EyeInvVpIds[side], (crop * projection * eyeView).inverse);
-            binocular.SetVector(EyePosIds[side], new Vector4(eye.x, eye.y, eye.z, centreLens));
-            binocular.SetVector(EyeSideIds[side], new Vector4(Gpnvg[centreLens].Neighbour, 0f, 0f, 0f));
-
-            // The design eye point: where this eye sat on the device when the view came on (or after the camera
-            // was moved for good, a few centimetres), kept on the device from then on.
-            Vector3 onDevice = _body.InverseTransformPoint(eye);
-            if (resumed || (onDevice - _designEyes[side]).magnitude > Rebase)
-                _designEyes[side] = onDevice;
-            binocular.SetVector(DesignEyeIds[side], _body.TransformPoint(_designEyes[side]));
-        }
-        _binocularFrame = Time.frameCount;
-
-        for (int i = 0; i < _lensNodes.Length; i++)
-        {
-            Transform node = _lensNodes[i];
-            Vector3 centre = node.position, normal = node.forward;
-            _lensCentres[i] = new Vector4(centre.x, centre.y, centre.z, ClearRadius * node.lossyScale.x);
-            _lensNormals[i] = new Vector4(normal.x, normal.y, normal.z, HalfField);
-        }
-        binocular.SetVectorArray(LensCentreId, _lensCentres);
-        binocular.SetVectorArray(LensNormalId, _lensNormals);
-        binocular.SetTexture(PictureId, _picture);
-        binocular.SetMatrix(PictureVpId, _viewProjection);
-        binocular.SetVector(SoftId, new Vector4(Pupil * _lensNodes[0].lossyScale.x, FieldStopSoftness, DarkRing, 0f));
-        binocular.SetColor(GlowId, Glow);
-        binocular.SetVector(SplitId, new Vector4(1f, 0f, 0f, 0f));
+        ReleaseEyes();
     }
 
     private static Transform? FindDevice(Player player)
@@ -345,13 +265,20 @@ internal static class NightVisionEyepieces
                 _lensShader = shader;
             else if (shader.name == "Justachae/NVG/Binocular")
                 _binocularShader = shader;
+            else if (shader.name == "Justachae/NVG/LensMask")
+                _lensMaskShader = shader;
+            else if (shader.name == "Justachae/NVG/EyeOptics")
+                _eyeOpticsShader = shader;
         }
 
         if (_lensShader == null)
             return false;
         _lensMaterial = new Material(_lensShader) { name = "Justachae NVG eyepiece", hideFlags = HideFlags.DontSave };
-        if (_binocularShader != null)
+        if (_binocularShader != null && _lensMaskShader != null && _eyeOpticsShader != null)
+        {
             _binocularMaterial = new Material(_binocularShader) { name = "Justachae NVG binocular", hideFlags = HideFlags.DontSave };
+            _eyeOptics = new Material(_eyeOpticsShader) { name = "Justachae NVG eye optics", hideFlags = HideFlags.DontSave };
+        }
         return true;
     }
 
@@ -361,7 +288,8 @@ internal static class NightVisionEyepieces
         if (_rendering || eye == null || _body == null)
             return;
 
-        bool on = eye == Camera.main;
+        // The eyes' own cameras see the lens as dark glass: their picture comes in through the lens map.
+        bool on = eye == Camera.main && !EyesDrawn;
         if (on && _pictureFrame != Time.frameCount)
         {
             _pictureFrame = Time.frameCount;
@@ -384,6 +312,7 @@ internal static class NightVisionEyepieces
         block.SetVector(OtherAxisId, new Vector4(otherAxis.x, otherAxis.y, otherAxis.z, 0f));
         block.SetVector(SoftId, new Vector4(Pupil * node.lossyScale.x, FieldStopSoftness, 0f, 0f));
         block.SetColor(GlowId, Glow);
+        block.SetFloat(LensIndexId, lens.Index);
         if (on)
         {
             block.SetTexture(PictureId, _picture);
