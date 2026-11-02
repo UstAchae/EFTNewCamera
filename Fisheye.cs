@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using Comfort.Common;
 using EFT;
 using EFT.CameraControl;
@@ -13,14 +14,25 @@ namespace EFTNewCamera;
 // FPS camera's field as it renders, so it is laid out straight at the wide field like the rest, and bent with it.
 // The game's field is taken as it stands after its own frame (its zoom eases in coroutines, from the camera's field)
 // and handed back at the end of the frame, so the game never sees ours.
+// The fisheye magnifies the centre of the straight frame, which would leave it soft. So the frame is made that much
+// larger: the SSAA stage's buffers, which every image effect works in up to the last (SSAAImpl, drawing them onto the
+// screen), are made that many times the screen, and the camera renders that many times as many pixels (the game's
+// supersampling ratio, or its upscaler's render scale, multiplied); the upscalers make their picture at the size
+// they are handed. The centre then keeps a pixel of its own for each pixel on the screen.
 internal static class Fisheye
 {
     internal static bool Enabled;
     internal static float Field = 120f;   // degrees, across the screen
     internal static float Curve = 0.4f;    // 0 the straight picture at that field, 1 the stereographic fisheye
     internal static float Vignette = 0.6f; // 0 none, 1 the corners well into the lens barrel's dark
+    internal static float Detail = 1f;     // how much of the centre's magnification is rendered back: 0 none, 1 all
     private const float FadeSeconds = 0.25f;
     private const float MaxCornerDegrees = 85f;
+    private const float MaxSupersampling = 2.5f;
+
+    private static float _scale = 1f;       // the frame's size over the screen's, each way
+    private static SSAA? _ssaa;             // the FPS camera's, and the ratio the game last set on it
+    private static float _gameRatio = 1f;
 
     private static float _weight;          // 0 the straight picture, 1 the whole fisheye
     private static Camera? _widened;       // the camera given our field this frame
@@ -48,6 +60,93 @@ internal static class Fisheye
         }
         // After the eyepieces' own image effect, so the lens takes the frame with them in it.
         harmony.Patch(awake, postfix: new HarmonyMethod(AccessTools.Method(typeof(Fisheye), nameof(NightVisionAwakePostfix))) { priority = Priority.Low });
+        PatchOrLog(harmony, AccessTools.Method(typeof(SSAA), nameof(SSAA.Switch)), prefix: new HarmonyMethod(AccessTools.Method(typeof(Fisheye), nameof(SwitchPrefix))));
+        HarmonyMethod screen = new HarmonyMethod(AccessTools.Method(typeof(Fisheye), nameof(FrameSize)));
+        PatchOrLog(harmony, AccessTools.Method(typeof(SSAAPropagator), "OnRenderImage"), transpiler: screen);
+        PatchOrLog(harmony, AccessTools.Method(typeof(SSAAPropagator), nameof(SSAAPropagator.FillCommandBuffer)), transpiler: screen);
+    }
+
+    private static void PatchOrLog(Harmony harmony, System.Reflection.MethodInfo? target, HarmonyMethod? prefix = null, HarmonyMethod? transpiler = null)
+    {
+        if (target == null)
+        {
+            NewCameraPlugin.Log?.LogWarning("Not patched (fisheye detail): a method of the SSAA stage was not found.");
+            return;
+        }
+        harmony.Patch(target, prefix: prefix, transpiler: transpiler);
+    }
+
+    // The SSAA stage sizes its buffers from the screen: the frame's size instead.
+    private static IEnumerable<CodeInstruction> FrameSize(IEnumerable<CodeInstruction> instructions)
+    {
+        System.Reflection.MethodInfo width = AccessTools.PropertyGetter(typeof(Screen), nameof(Screen.width));
+        System.Reflection.MethodInfo height = AccessTools.PropertyGetter(typeof(Screen), nameof(Screen.height));
+        foreach (CodeInstruction instruction in instructions)
+        {
+            if (instruction.Calls(width))
+                instruction.operand = AccessTools.Method(typeof(Fisheye), nameof(FrameWidth));
+            else if (instruction.Calls(height))
+                instruction.operand = AccessTools.Method(typeof(Fisheye), nameof(FrameHeight));
+            yield return instruction;
+        }
+    }
+
+    private static int FrameWidth() => Mathf.Max(1, Mathf.RoundToInt(Screen.width * _scale));
+
+    private static int FrameHeight() => Mathf.Max(1, Mathf.RoundToInt(Screen.height * _scale));
+
+    // The game setting the FPS camera's ratio (its supersampling, or its upscaler's render scale): ours on top of it.
+    private static void SwitchPrefix(SSAA __instance, ref float superSamplingRatio)
+    {
+        if (!ReferenceEquals(__instance, CameraManager.Instance?.SSAA))
+            return;
+        _ssaa = __instance;
+        _gameRatio = superSamplingRatio;
+        superSamplingRatio = Scaled(superSamplingRatio);
+    }
+
+    // Under an upscaler the camera renders within its own frame, so no more than all of it.
+    private static float Scaled(float ratio)
+    {
+        if (_scale <= 1.0001f)
+            return ratio;
+        return ratio < 1f ? Mathf.Min(ratio * _scale, 0.99f) : Mathf.Min(ratio * _scale, MaxSupersampling);
+    }
+
+    // The frame made the size wanted: the buffers follow at once, the camera's ratio once the game applies it (after
+    // this frame's render).
+    private static void Resize(float scale)
+    {
+        if (Mathf.Abs(scale - _scale) < 0.001f)
+            return;
+        _scale = scale;
+        SSAA? ssaa = CameraManager.Instance?.SSAA;
+        if (ssaa == null)
+            return;
+        if (!ReferenceEquals(ssaa, _ssaa))
+        {
+            _ssaa = ssaa;
+            _gameRatio = ssaa.GetCurrentSSRatio();
+        }
+        ssaa.Switch(_gameRatio);
+    }
+
+    // How much the fisheye magnifies the centre of the straight frame (pixels on the screen to pixels rendered).
+    private static float CentreMagnification(float aspect)
+    {
+        float k = 1f - 0.5f * Curve;
+        Lens(aspect, Field * Mathf.Deg2Rad, k, out float f, out float halfHeight);
+        return f * halfHeight;
+    }
+
+    // The fisheye r = f tan(k theta) / k across the screen at across, and the straight frame's half height (as a
+    // tangent) that reaches just as far as its corners; its edges then reach past the fisheye's.
+    private static void Lens(float aspect, float across, float k, out float f, out float halfHeight)
+    {
+        f = aspect * k / Mathf.Tan(k * across * 0.5f);
+        float corner = Mathf.Sqrt(aspect * aspect + 1f);
+        float cornerAngle = Mathf.Min(Mathf.Atan(k * corner / f) / k, MaxCornerDegrees * Mathf.Deg2Rad);
+        halfHeight = Mathf.Tan(cornerAngle) / corner;
     }
 
     // The FPS camera (the one with SSAA) waking: the lens on it, off until wanted. Put on any later, it would come after
@@ -66,6 +165,11 @@ internal static class Fisheye
         Camera? camera = CameraManager.Instance?.Camera;
         bool ours = NewCameraSwitch.Enabled && player != null && player.IsYourPlayer;
         _weight = ours ? Mathf.MoveTowards(_weight, Enabled ? 1f : 0f, Time.unscaledDeltaTime / FadeSeconds) : 0f;
+        // In steps of 0.05, so dragging a slider does not make the frame anew every frame.
+        float scale = ours && Enabled && camera != null
+            ? Mathf.Round(Mathf.Lerp(1f, Mathf.Max(1f, CentreMagnification(camera.aspect)), Detail) * 20f) / 20f
+            : 1f;
+        Resize(scale);
         FisheyeImage? image = Image(camera);
         float t = _weight * _weight * (3f - 2f * _weight);
         if (camera == null || image == null || t <= 0.0001f || Material() == null)
@@ -83,11 +187,7 @@ internal static class Fisheye
         float gameAcross = 2f * Mathf.Atan(Mathf.Tan(_gameField * 0.5f * Mathf.Deg2Rad) * aspect);
         float across = Mathf.Lerp(gameAcross, Field * Mathf.Deg2Rad, t);
         float k = 1f - 0.5f * Curve * t;
-        float f = aspect * k / Mathf.Tan(k * across * 0.5f);
-        // The straight frame reaches just as far as the fisheye's corners; its edges then reach past the fisheye's.
-        float corner = Mathf.Sqrt(aspect * aspect + 1f);
-        float cornerAngle = Mathf.Min(Mathf.Atan(k * corner / f) / k, MaxCornerDegrees * Mathf.Deg2Rad);
-        float halfHeight = Mathf.Tan(cornerAngle) / corner;
+        Lens(aspect, across, k, out float f, out float halfHeight);
         _shape = new Vector4(k, f, halfHeight, aspect);
         // The image circle shrinks from past the corners (none of it seen) to within them.
         float shade = Vignette * t;
