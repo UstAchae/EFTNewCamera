@@ -231,8 +231,6 @@ internal static partial class NightVisionEyepieces
     private static readonly FieldInfo? RotatorProgress = AccessTools.Field(typeof(CurveRotator), "_t");
     private static bool BinocularOn => _split > 0.001f && Binocular && _binocularMaterial != null && _body != null;
     private static bool EyesOn => BinocularOn || Active && !Binocular && _binocularMaterial != null && _body != null;
-    // The eyepieces in view: the device on, or the eyes still apart as it flips.
-    internal static bool EyesShown => Active || BinocularOn;
     private static NightVisionDevice? _darkened;
     private static Behaviour? _woken;
     private static readonly FieldInfo? DeviceComponent = AccessTools.Field(typeof(NightVisionDevice), "_nightVision");
@@ -547,7 +545,7 @@ internal static partial class NightVisionEyepieces
         if (_body == null || !EyepieceImageReady(cameras) || __instance.gameObject != cameras!.NightVision.gameObject)
             return true;
 
-        EyepieceRenderImage(__instance, source, destination);
+        EyepieceRenderImage(__instance, source, destination, Fisheye.TakeLeft());
         return false;
     }
 

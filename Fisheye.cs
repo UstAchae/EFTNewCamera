@@ -8,8 +8,9 @@ namespace EFTNewCamera;
 
 // A fisheye lens on the view. The FPS camera renders straight (rectilinear) with a field wide enough for the fisheye's
 // corners, and an image effect of ours lays that frame out as the lens would, after the SSAA stage has upscaled it
-// (Justachae/Fisheye). The horizontal field across the screen is the one set. Aimed, or with the eyepieces showing, it
-// eases back to the game's own field and straight picture: the optic and the eyes are worked out for a straight view.
+// (Justachae/Fisheye). The horizontal field across the screen is the one set. It is on the whole frame, the optic and
+// the eyepieces in it: whatever is drawn for the frame (the eyes' cameras, the thermal camera, the reticles) takes the
+// FPS camera's field as it renders, so it is laid out straight at the wide field like the rest, and bent with it.
 // The game's field is taken as it stands after its own frame (its zoom eases in coroutines, from the camera's field)
 // and handed back at the end of the frame, so the game never sees ours.
 internal static class Fisheye
@@ -63,10 +64,8 @@ internal static class Fisheye
         GiveBack();
         Player? player = Singleton<GameWorld>.Instance?.MainPlayer;
         Camera? camera = CameraManager.Instance?.Camera;
-        bool ours = NewCameraSwitch.Enabled && player != null && player.IsYourPlayer && player.PointOfView == EPointOfView.ThirdPerson;
-        bool wanted = ours && Enabled && !(player!.HandsController != null && player.HandsController.IsAiming)
-            && !NightVisionEyepieces.EyesShown;
-        _weight = ours ? Mathf.MoveTowards(_weight, wanted ? 1f : 0f, Time.unscaledDeltaTime / FadeSeconds) : 0f;
+        bool ours = NewCameraSwitch.Enabled && player != null && player.IsYourPlayer;
+        _weight = ours ? Mathf.MoveTowards(_weight, Enabled ? 1f : 0f, Time.unscaledDeltaTime / FadeSeconds) : 0f;
         FisheyeImage? image = Image(camera);
         float t = _weight * _weight * (3f - 2f * _weight);
         if (camera == null || image == null || t <= 0.0001f || Material() == null)
@@ -134,17 +133,63 @@ internal static class Fisheye
             from = source;
             to = destination;
         }
-        if (_material != null && ReferenceEquals(_widened, camera.GetComponent<Camera>()))
-        {
-            _material.SetVector(ShapeId, _shape);
-            _material.SetVector(ShadeId, _shade);
-            Graphics.Blit(from, to, _material);
-        }
+        // BRNVG's renderer, further on, putting the eyepieces in: the lens goes on there, after them.
+        Behaviour? later = NightVisionEyepieces.EyepieceRenderer(camera);
+        bool widened = ReferenceEquals(_widened, camera.GetComponent<Camera>());
+        _left = widened && later != null && LeftTo(later);
+        if (widened && !_left)
+            Blit(from, to);
         else
             Graphics.Blit(from, to);
         if (staged)
             propagator!.ReleaseSourceDestination(from, to);
     }
+
+    // The lens laid over from into to.
+    internal static void Blit(RenderTexture from, RenderTexture to)
+    {
+        if (_material == null)
+        {
+            Graphics.Blit(from, to);
+            return;
+        }
+        _material.SetVector(ShapeId, _shape);
+        _material.SetVector(ShadeId, _shade);
+        Graphics.Blit(from, to, _material);
+    }
+
+    // The lens left by ours this frame to what comes after it: taken once, by that (NightVisionEyepieces.RenderImagePrefix).
+    internal static bool TakeLeft()
+    {
+        bool left = _left;
+        _left = false;
+        return left;
+    }
+
+    private static bool _left;
+
+    // An image effect coming after the lens on its camera, while the lens is on: what it puts in (the eyepieces, worked
+    // out for the straight frame) has to be bent too, so the lens is left to it.
+    private static bool LeftTo(Behaviour later)
+    {
+        if (_widened == null || later.gameObject != _widened.gameObject)
+            return false;
+        FisheyeImage? image = Image(_widened);
+        if (image == null || !image.enabled)
+            return false;
+        if (!ReferenceEquals(later, _orderedLater) || !ReferenceEquals(image, _orderedImage))
+        {
+            Component[] all = image.GetComponents<Component>();
+            _laterAfter = System.Array.IndexOf(all, later) > System.Array.IndexOf(all, image);
+            _orderedLater = later;
+            _orderedImage = image;
+        }
+        return _laterAfter;
+    }
+
+    private static Behaviour? _orderedLater;
+    private static FisheyeImage? _orderedImage;
+    private static bool _laterAfter;
 }
 
 // Ours, on the FPS camera: the fisheye lens over the frame.

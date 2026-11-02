@@ -74,11 +74,19 @@ internal static partial class NightVisionEyepieces
     // Ours on the FPS camera: it puts the eyepieces in unless BRNVG's renderer, further on, does (RenderImagePrefix).
     internal static void EyepieceImageRender(Component camera, RenderTexture source, RenderTexture destination)
     {
-        Behaviour? brnvg = NightRenderer(BodyVisibility.Cameras?.NightVision);
-        if (brnvg != null && brnvg.isActiveAndEnabled && brnvg.gameObject == camera.gameObject && _body != null)
+        if (EyepieceRenderer(camera) != null)
             PassThrough(camera, source, destination);
         else
             EyepieceRenderImage(camera, source, destination);
+    }
+
+    // BRNVG's renderer on this camera, when it is the one putting the eyepieces in (RenderImagePrefix).
+    internal static Behaviour? EyepieceRenderer(Component camera)
+    {
+        CameraManager? cameras = BodyVisibility.Cameras;
+        Behaviour? brnvg = NightRenderer(cameras?.NightVision);
+        return brnvg != null && brnvg.isActiveAndEnabled && brnvg.gameObject == camera.gameObject && _body != null
+            && EyepieceImageReady(cameras) ? brnvg : null;
     }
 
     private static void PassThrough(Component camera, RenderTexture source, RenderTexture destination)
@@ -96,7 +104,8 @@ internal static partial class NightVisionEyepieces
             propagator!.ReleaseSourceDestination(from, to);
     }
 
-    internal static void EyepieceRenderImage(Component camera, RenderTexture source, RenderTexture destination)
+    // lens: the fisheye laid over the frame after the eyepieces (it comes before this in the chain).
+    internal static void EyepieceRenderImage(Component camera, RenderTexture source, RenderTexture destination, bool lens = false)
     {
         Material? composite = _binocularMaterial, glow = _glowMaterial;
         SSAAPropagator? propagator = camera.GetComponent<SSAAPropagator>();
@@ -108,19 +117,26 @@ internal static partial class NightVisionEyepieces
             to = destination;
         }
 
+        RenderTexture? lensed = lens ? RenderTexture.GetTemporary(from.width, from.height, 0, from.format) : null;
+        RenderTexture into = lensed != null ? lensed : to;
         bool eyes = _eyesFrame == Time.frameCount;
         if (composite == null || glow == null || _body == null || !eyes)
-            Graphics.Blit(from, to);
+            Graphics.Blit(from, into);
         else
         {
             RenderTexture? made = null, withIr = null;
             // The lenses see IR, the naked eye around them does not.
             Texture picture = LensPicture(camera, WithIr(from, ref withIr), ref made);
-            Compose(composite, glow, from, to, picture);
+            Compose(composite, glow, from, into, picture);
             if (made != null)
                 RenderTexture.ReleaseTemporary(made);
             if (withIr != null)
                 RenderTexture.ReleaseTemporary(withIr);
+        }
+        if (lensed != null)
+        {
+            Fisheye.Blit(lensed, to);
+            RenderTexture.ReleaseTemporary(lensed);
         }
         if (staged)
             propagator!.ReleaseSourceDestination(from, to);

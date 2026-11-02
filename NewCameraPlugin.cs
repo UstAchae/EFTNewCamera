@@ -55,7 +55,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
     private void BindFisheye()
     {
         ConfigEntry<bool> fisheye = Config.Bind("", "鱼眼", false,
-            new ConfigDescription("画面像透过执法记录仪、运动相机那样的广角镜头看：视野更宽，直线往外弯，四角有镜头的暗角。瞄准时、头戴夜视仪或热成像的目镜在眼前时自动渐变回普通画面。画面中心是放大过的，视野和弯曲开得越大中心越糊；游戏图像设置里的超采样能减轻。",
+            new ConfigDescription("画面像透过执法记录仪、运动相机那样的广角镜头看：视野更宽，直线往外弯，四角有镜头的暗角。作用在整个游戏画面上，瞄准时的瞄具、头戴夜视仪和热成像的目镜也一起变形。画面中心是放大过的，视野和弯曲开得越大中心越糊；游戏图像设置里的超采样能减轻。",
                 null, new ConfigurationManagerAttributes { Order = 5 }));
         ConfigEntry<float> field = Config.Bind("", "鱼眼视野", 120f,
             new ConfigDescription("鱼眼开着时，屏幕左边缘到右边缘之间的角度（度）。游戏设置里的视野是上下方向的，75 在 16:9 屏幕上大约相当于这里的 107。",
