@@ -16,6 +16,8 @@ internal static class Fisheye
 {
     internal static bool Enabled;
     internal static float Field = 120f;   // degrees, across the screen
+    internal static float Curve = 0.4f;    // 0 the straight picture at that field, 1 the stereographic fisheye
+    internal static float Vignette = 0.6f; // 0 none, 1 the corners well into the lens barrel's dark
     private const float FadeSeconds = 0.25f;
     private const float MaxCornerDegrees = 85f;
 
@@ -23,11 +25,13 @@ internal static class Fisheye
     private static Camera? _widened;       // the camera given our field this frame
     private static float _gameField;       // its field as the game had it
     private static Vector4 _shape;         // k, f, the straight frame's half height, aspect (Justachae/Fisheye)
+    private static Vector4 _shade;         // the image circle's radius and soft edge, the light's falloff
     private static Camera? _imageCamera;
     private static FisheyeImage? _image;
     private static Material? _material;
     private static bool _installed;
     private static readonly int ShapeId = Shader.PropertyToID("_Fisheye");
+    private static readonly int ShadeId = Shader.PropertyToID("_FisheyeShade");
 
     internal static void Install()
     {
@@ -73,18 +77,22 @@ internal static class Fisheye
         }
 
         // r = f tan(k theta) / k, in half screen heights: k = 1 is the game's straight view at its own field, k = 1/2 the
-        // stereographic fisheye at the field set.
+        // stereographic fisheye; the curve set picks between, at the field set. The less curved, the less the centre is
+        // magnified and the more what is near the edges is stretched, as a body camera's wide lens has it.
         float aspect = camera.aspect;
         _gameField = camera.fieldOfView;
         float gameAcross = 2f * Mathf.Atan(Mathf.Tan(_gameField * 0.5f * Mathf.Deg2Rad) * aspect);
         float across = Mathf.Lerp(gameAcross, Field * Mathf.Deg2Rad, t);
-        float k = 1f - 0.5f * t;
+        float k = 1f - 0.5f * Curve * t;
         float f = aspect * k / Mathf.Tan(k * across * 0.5f);
         // The straight frame reaches just as far as the fisheye's corners; its edges then reach past the fisheye's.
         float corner = Mathf.Sqrt(aspect * aspect + 1f);
         float cornerAngle = Mathf.Min(Mathf.Atan(k * corner / f) / k, MaxCornerDegrees * Mathf.Deg2Rad);
         float halfHeight = Mathf.Tan(cornerAngle) / corner;
         _shape = new Vector4(k, f, halfHeight, aspect);
+        // The image circle shrinks from past the corners (none of it seen) to within them.
+        float shade = Vignette * t;
+        _shade = new Vector4(1.2f - 0.3f * shade, 0.15f, 0.35f * shade, 0f);
         camera.fieldOfView = 2f * Mathf.Atan(halfHeight) * Mathf.Rad2Deg;
         _widened = camera;
         if (!image.enabled)
@@ -129,6 +137,7 @@ internal static class Fisheye
         if (_material != null && ReferenceEquals(_widened, camera.GetComponent<Camera>()))
         {
             _material.SetVector(ShapeId, _shape);
+            _material.SetVector(ShadeId, _shade);
             Graphics.Blit(from, to, _material);
         }
         else
