@@ -199,7 +199,17 @@ internal static partial class NightVisionEyepieces
     private const float DistortionNear = 0.03f, DistortionFar = 0.15f;   // none at the eyecup; full well back from it
 
     private static bool _installed, _rendererPatched, _bundleTried;
-    private static Shader? _binocularShader, _lensMaskShader, _eyeOpticsShader, _glowShader, _meshReadShader;
+    private static Shader? _binocularShader, _lensMaskShader, _eyeOpticsShader, _glowShader, _meshReadShader, _fisheyeShader;
+
+    // The fisheye lens's shader, which comes in the same bundle.
+    internal static Shader? FisheyeShader
+    {
+        get
+        {
+            LoadShaders();
+            return _fisheyeShader;
+        }
+    }
     private static Material? _binocularMaterial, _glowMaterial;
     private static readonly float[] _warm = new float[4], _power = new float[4], _lag = new float[4];   // per tube
     private static bool _switched;
@@ -221,6 +231,8 @@ internal static partial class NightVisionEyepieces
     private static readonly FieldInfo? RotatorProgress = AccessTools.Field(typeof(CurveRotator), "_t");
     private static bool BinocularOn => _split > 0.001f && Binocular && _binocularMaterial != null && _body != null;
     private static bool EyesOn => BinocularOn || Active && !Binocular && _binocularMaterial != null && _body != null;
+    // The eyepieces in view: the device on, or the eyes still apart as it flips.
+    internal static bool EyesShown => Active || BinocularOn;
     private static NightVisionDevice? _darkened;
     private static Behaviour? _woken;
     private static readonly FieldInfo? DeviceComponent = AccessTools.Field(typeof(NightVisionDevice), "_nightVision");
@@ -450,6 +462,8 @@ internal static partial class NightVisionEyepieces
                 _meshReadShader = shader;
             else if (shader.name == "Justachae/NVG/IrLight")
                 _irLightShader = shader;
+            else if (shader.name == "Justachae/Fisheye")
+                _fisheyeShader = shader;
         }
 
         if (_binocularShader == null || _lensMaskShader == null || _eyeOpticsShader == null || _glowShader == null)

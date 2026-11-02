@@ -15,7 +15,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "justachae.thirdpersoncamera";
     public const string PluginName = "Justachae's Third-Person Skeleton and Camera";
-    public const string PluginVersion = "1.2.1";
+    public const string PluginVersion = "1.3.0";
 
     internal static BepInEx.Logging.ManualLogSource? Log;
     private const string SkeletonThird = "第三人称骨架", SkeletonFirst = "第一人称骨架";
@@ -25,12 +25,13 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         Log = Logger;
         // No section: the F12 window shows the master switch right under the plugin's name, without a heading.
         ConfigEntry<bool> enabled = Config.Bind("", "总开关", true,
-            new ConfigDescription("关掉后整个 mod 不起作用，一切按游戏原样。", null, new ConfigurationManagerAttributes { Order = 2 }));
+            new ConfigDescription("关掉后整个 mod 不起作用，一切按游戏原样。", null, new ConfigurationManagerAttributes { Order = 4 }));
         MoveFrom(enabled, "新镜头", "总开关");
         ConfigEntry<string> skeleton = Config.Bind("", "骨架", SkeletonThird,
             new ConfigDescription("第三人称骨架：用第三人称的身体动作（呼吸摆动、跑步转向时头部翻滚、换枪和翻背包的动作）。第一人称骨架：身体动作用游戏原版的第一人称（没有呼吸摆动和跑步转向时的头部翻滚，换枪、翻背包没有身体动作），晃得少，适合觉得第三人称骨架晕的玩家。除了身体动作，两种骨架的其他功能完全一样（镜头挂在头部、人物显示、瞄准等），只是第一人称骨架下瞄准时枪本身按原版第一人称的摆动晃（呼吸、手抖，屏息时由原版自己减弱），“瞄准摆动”那几组里的“摆动”只管手臂跟着身体动作的晃动，“呼吸”不起作用。局内可以随时切换。",
                 new AcceptableValueList<string>(SkeletonThird, SkeletonFirst), new ConfigurationManagerAttributes { Order = 1 }));
         AimPatches.Install();
+        Fisheye.Install();
         BodyVisibility.Install();
         VisorFilter.Install();
         FirstPersonAudio.Install();
@@ -40,6 +41,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         NewCameraSwitch.FirstPersonSkeleton = skeleton.Value == SkeletonFirst;
         enabled.SettingChanged += (_, _) => NewCameraSwitch.Enabled = enabled.Value;
         skeleton.SettingChanged += (_, _) => NewCameraSwitch.FirstPersonSkeleton = skeleton.Value == SkeletonFirst;
+        BindFisheye();
         BindDirection();
         BindPosition();
         BindAimDistance();
@@ -48,6 +50,25 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         BindVestibular();
         BindNightVision();
         OpticElevation.Initialize();
+    }
+
+    private void BindFisheye()
+    {
+        ConfigEntry<bool> fisheye = Config.Bind("", "鱼眼", false,
+            new ConfigDescription("画面像透过鱼眼镜头看：视野更宽，越往边缘压得越扁，直线往外弯。瞄准时、头戴夜视仪或热成像的目镜在眼前时自动渐变回普通画面。画面中心是放大过的，视野开得越大中心越糊；游戏图像设置里的超采样能减轻。",
+                null, new ConfigurationManagerAttributes { Order = 3 }));
+        ConfigEntry<float> field = Config.Bind("", "鱼眼视野", 120f,
+            new ConfigDescription("鱼眼开着时，屏幕左边缘到右边缘之间的角度（度）。游戏设置里的视野是上下方向的，75 在 16:9 屏幕上大约相当于这里的 107。",
+                new AcceptableValueRange<float>(100f, 140f), new ConfigurationManagerAttributes { Order = 2 }));
+        void Refresh()
+        {
+            Fisheye.Enabled = fisheye.Value;
+            Fisheye.Field = field.Value;
+        }
+
+        fisheye.SettingChanged += (_, _) => Refresh();
+        field.SettingChanged += (_, _) => Refresh();
+        Refresh();
     }
 
     private void BindNightVision()
@@ -415,13 +436,26 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 
     private void OnEnable()
     {
+        StartCoroutine(EndOfFrame());
         Camera.onPreCull += PreCull;
         Camera.onPreRender += PreRender;
         Camera.onPostRender += PostRender;
     }
 
+    // The fisheye's field handed back to the game once the frame is drawn, before its next frame's updates read it.
+    private static System.Collections.IEnumerator EndOfFrame()
+    {
+        WaitForEndOfFrame end = new WaitForEndOfFrame();
+        while (true)
+        {
+            yield return end;
+            Fisheye.GiveBack();
+        }
+    }
+
     private void OnDisable()
     {
+        Fisheye.GiveBack();
         Camera.onPreCull -= PreCull;
         Camera.onPreRender -= PreRender;
         Camera.onPostRender -= PostRender;
@@ -437,6 +471,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
     private void LateUpdate()
     {
         NewCameraSwitch.LateUpdate();
+        Fisheye.LateUpdate();
     }
 }
 
