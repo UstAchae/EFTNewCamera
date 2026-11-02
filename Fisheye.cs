@@ -29,6 +29,7 @@ internal static class Fisheye
     private const float FadeSeconds = 0.25f;
     private const float MaxCornerDegrees = 85f;
     private const float MaxSupersampling = 2.5f;
+    private const float MaxFrameScale = 1.5f;   // the frame's size over the screen's, each way, at most
 
     private static float _scale = 1f;       // the frame's size over the screen's, each way
     private static SSAA? _ssaa;             // the FPS camera's, and the ratio the game last set on it
@@ -165,9 +166,11 @@ internal static class Fisheye
         Camera? camera = CameraManager.Instance?.Camera;
         bool ours = NewCameraSwitch.Enabled && player != null && player.IsYourPlayer;
         _weight = ours ? Mathf.MoveTowards(_weight, Enabled ? 1f : 0f, Time.unscaledDeltaTime / FadeSeconds) : 0f;
-        // In steps of 0.05, so dragging a slider does not make the frame anew every frame.
+        // In steps of 0.05, so dragging a slider does not make the frame anew every frame. No more than MaxFrameScale:
+        // at the widest field and fullest curve the centre is magnified 2.8 times, and a frame that much larger (7168 by
+        // 4032 for 2560 by 1440) filled an 8 GB card's memory and stalled the game for seconds at a time.
         float scale = ours && Enabled && camera != null
-            ? Mathf.Round(Mathf.Lerp(1f, Mathf.Max(1f, CentreMagnification(camera.aspect)), Detail) * 20f) / 20f
+            ? Mathf.Round(Mathf.Min(Mathf.Lerp(1f, Mathf.Max(1f, CentreMagnification(camera.aspect)), Detail), MaxFrameScale) * 20f) / 20f
             : 1f;
         Resize(scale);
         FisheyeImage? image = Image(camera);

@@ -67,7 +67,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
             new ConfigDescription("镜头四角变暗：越往边缘越暗，开大后四角露出镜筒的黑色圆边。0 是没有暗角。",
                 new AcceptableValueRange<float>(0f, 1f), new ConfigurationManagerAttributes { Order = 3 }));
         ConfigEntry<float> detail = Config.Bind("", "鱼眼清晰度补偿", 1f,
-            new ConfigDescription("鱼眼把画面中心放大了，中心会变糊。这一项让游戏按更高的分辨率渲染，把中心的清晰度补回来。1：完全补回，中心和不开鱼眼时一样清楚，但渲染的像素更多（默认视野和弯曲下约 1.8 倍），帧数会明显下降；0：不补，没有额外开销。开了 DLSS 或 FSR 时，它们的渲染分辨率和输出分辨率一起提高。",
+            new ConfigDescription("鱼眼把画面中心放大了，中心会变糊。这一项让游戏按更高的分辨率渲染，把中心的清晰度补回来。1：完全补回，中心和不开鱼眼时一样清楚，但渲染的像素更多（默认视野和弯曲下约 1.8 倍），帧数会明显下降；0：不补，没有额外开销。最多按屏幕的 1.5 倍（像素 2.25 倍）渲染，以免显存不够：视野和弯曲开得很大时（比如 140 度、弯曲 1，中心放大约 2.8 倍）补不满，中心仍会有些糊。显存紧张时（8 GB 显卡、高画质贴图）建议把贴图画质调到中，或者把这一项调低。开了 DLSS 或 FSR 时，它们的渲染分辨率和输出分辨率一起提高。",
                 new AcceptableValueRange<float>(0f, 1f), new ConfigurationManagerAttributes { Order = 2 }));
         void Refresh()
         {
