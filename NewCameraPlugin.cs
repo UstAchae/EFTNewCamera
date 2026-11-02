@@ -56,13 +56,13 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
     private void BindFisheye()
     {
         ConfigEntry<bool> fisheye = Config.Bind("", "鱼眼", false,
-            new ConfigDescription("画面像透过执法记录仪、运动相机那样的广角镜头看：视野更宽，直线往外弯，四角有镜头的暗角。作用在整个游戏画面上，瞄准时的瞄具、头戴夜视仪和热成像的目镜也一起变形。画面中心是放大过的，由下面的“鱼眼清晰度方式”决定怎么补。",
+            new ConfigDescription("画面像透过执法记录仪、运动相机那样的广角镜头看：中心大小不变，边缘挤进更多景物，直线往外弯，四角有镜头的暗角。作用在整个游戏画面上，瞄准时的瞄具、头戴夜视仪和热成像的目镜也一起变形。画面中心是放大过的，由下面的“鱼眼清晰度方式”决定怎么补。",
                 null, new ConfigurationManagerAttributes { Order = 8 }));
-        ConfigEntry<float> field = Config.Bind("", "鱼眼视野", 120f,
-            new ConfigDescription("鱼眼开着时，屏幕左边缘到右边缘之间的角度（度）。游戏设置里的视野是上下方向的，75 在 16:9 屏幕上大约相当于这里的 107。",
-                new AcceptableValueRange<float>(100f, 140f), new ConfigurationManagerAttributes { Order = 7 }));
+        ConfigEntry<float> fov = Config.Bind("", "鱼眼 FOV", 75f,
+            new ConfigDescription("和游戏设置里的视野是同一个单位（上下方向的角度）。画面中心按这个视野显示：设成和游戏设置里一样，中心的远近大小就和不开鱼眼时一样。鱼眼弯曲再决定边缘额外多看到多少：16:9 屏幕上 FOV 75、弯曲 0.4 时左右一共约 119 度，弯曲 1 约 137 度；FOV 50、弯曲 0.4 约 84 度。最终视野越宽，中心越软、远处的树叶和细边越容易闪。",
+                new AcceptableValueRange<float>(50f, 90f), new ConfigurationManagerAttributes { Order = 7 }));
         ConfigEntry<float> curve = Config.Bind("", "鱼眼弯曲", 0.4f,
-            new ConfigDescription("0：不弯，是同样视野的普通广角画面，中心不放大，边缘的东西被拉得很大。1：完全的鱼眼，画面中间往外鼓，边缘压得扁。默认 0.4 接近执法记录仪、运动相机的感觉。",
+            new ConfigDescription("0：不弯，就是“鱼眼 FOV”下的普通画面。越大越弯：中心大小不变，边缘压得越扁、挤进来的景物越多，总视野越宽。1 是完全的鱼眼（立体投影）。默认 0.4 接近执法记录仪、运动相机的感觉。",
                 new AcceptableValueRange<float>(0f, 1f), new ConfigurationManagerAttributes { Order = 6 }));
         ConfigEntry<float> vignette = Config.Bind("", "鱼眼暗角", 0.6f,
             new ConfigDescription("镜头四角变暗：越往边缘越暗，开大后四角露出镜筒的黑色圆边。0 是没有暗角。",
@@ -74,12 +74,12 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
             new ConfigDescription("鱼眼之后把画面锐化多少，两种清晰度方式都起作用。0 是不锐化。锐化不会超过周围像素的明暗范围，所以不会出现白边。",
                 new AcceptableValueRange<float>(0f, 1f), new ConfigurationManagerAttributes { Order = 3 }));
         ConfigEntry<float> detail = Config.Bind("", "鱼眼清晰度补偿", 1f,
-            new ConfigDescription("只在清晰度方式为“高清”时起作用。鱼眼把画面中心放大了，中心会变糊。这一项让游戏按更高的分辨率渲染，把中心的清晰度补回来。1：完全补回，中心和不开鱼眼时一样清楚，但渲染的像素更多（默认视野和弯曲下约 1.8 倍），帧数会明显下降；0：不补，没有额外开销。最多按屏幕的 1.5 倍（像素 2.25 倍）渲染，以免显存不够：视野和弯曲开得很大时（比如 140 度、弯曲 1，中心放大约 2.8 倍）补不满，中心仍会有些糊。显存紧张时（8 GB 显卡、高画质贴图）建议把贴图画质调到中，或者把这一项调低。开了 DLSS 或 FSR 时，它们的渲染分辨率和输出分辨率一起提高。",
+            new ConfigDescription("只在清晰度方式为“高清”时起作用。鱼眼把画面中心放大了，中心会变糊。这一项让游戏按更高的分辨率渲染，把中心的清晰度补回来。1：完全补回，中心和不开鱼眼时一样清楚，但渲染的像素更多（默认 FOV 和弯曲下约 1.8 倍），帧数会明显下降；0：不补，没有额外开销。最多按屏幕的 1.5 倍（像素 2.25 倍）渲染，以免显存不够：FOV 和弯曲开得很大时（比如 FOV 75、弯曲 1，中心放大约 2.6 倍）补不满，中心仍会有些糊。显存紧张时（8 GB 显卡、高画质贴图）建议把贴图画质调到中，或者把这一项调低。开了 DLSS 或 FSR 时，它们的渲染分辨率和输出分辨率一起提高。",
                 new AcceptableValueRange<float>(0f, 1f), new ConfigurationManagerAttributes { Order = 2 }));
         void Refresh()
         {
             Fisheye.Enabled = fisheye.Value;
-            Fisheye.Field = field.Value;
+            Fisheye.Fov = fov.Value;
             Fisheye.Curve = curve.Value;
             Fisheye.Vignette = vignette.Value;
             Fisheye.Detail = detail.Value;
@@ -88,7 +88,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         }
 
         fisheye.SettingChanged += (_, _) => Refresh();
-        field.SettingChanged += (_, _) => Refresh();
+        fov.SettingChanged += (_, _) => Refresh();
         curve.SettingChanged += (_, _) => Refresh();
         vignette.SettingChanged += (_, _) => Refresh();
         detail.SettingChanged += (_, _) => Refresh();
