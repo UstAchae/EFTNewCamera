@@ -10,6 +10,9 @@ internal static class CameraPosition
 
     internal static Vector3 Resolve(Vector3 headPosition, Quaternion cameraRotation)
     {
-        return headPosition + cameraRotation * new Vector3(Horizontal, Vertical, Forward);
+        return headPosition + Offset(cameraRotation);
     }
+
+    // Where the camera stands from the head, along the world's axes.
+    internal static Vector3 Offset(Quaternion cameraRotation) => cameraRotation * new Vector3(Horizontal, Vertical, Forward);
 }

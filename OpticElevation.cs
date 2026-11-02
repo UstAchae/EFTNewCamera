@@ -187,9 +187,9 @@ internal static class OpticElevation
             || player.HandsController == null || !player.HandsController.IsAiming) return false;
         ProceduralWeaponAnimation? animation = player.ProceduralWeaponAnimation;
         OpticSight? current = CameraManager.Instance?.OpticCameraManager?.CurrentOpticSight;
-        if (animation?.ScopeAimTransforms != null && animation.ScopeAimTransforms.Count > 0 && Eligible(animation.CurrentScope, current))
+        if (Scopes.Current(animation) is { } aimed && Eligible(aimed, current))
         {
-            mod = animation.CurrentScope.Mod;
+            mod = aimed.Mod;
             return true;
         }
         // The Ultima screen is rendered separately from its iron-sight aiming channel.
@@ -278,13 +278,12 @@ internal static class OpticElevation
         if (_camera == camera) Release();
     }
 
+    // The optic camera's projection back to following its field of view: written back as a matrix it would stay at that
+    // field of view for good (a variable scope's zoom no longer changing the picture). The game never sets it itself.
     internal static void Release()
     {
         if (_camera != null)
-        {
-            _camera.projectionMatrix = _projection;
-            _camera.nonJitteredProjectionMatrix = _nonJittered;
-        }
+            _camera.ResetProjectionMatrix();
         _camera = null;
     }
 

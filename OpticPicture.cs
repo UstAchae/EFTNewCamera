@@ -9,6 +9,8 @@ internal static class OpticPicture
 {
     private static int _frame = -1;
     private static OpticSight? _held;
+    // The other sights' optics this turned off (QuietOthers), turned back on when it lets go.
+    private static readonly System.Collections.Generic.List<OpticSight> _quieted = new System.Collections.Generic.List<OpticSight>();
 
     internal static bool IsCamera(Camera camera)
     {
@@ -40,7 +42,7 @@ internal static class OpticPicture
             }
 
             bool aiming = player.HandsController != null && player.HandsController.IsAiming;
-            ProceduralWeaponAnimation.SightNBone? scope = animation.CurrentScope;
+            ProceduralWeaponAnimation.SightNBone? scope = Scopes.Current(animation);
             OpticSight? picture = null;
             if (aiming && scope != null)
             {
@@ -66,15 +68,24 @@ internal static class OpticPicture
         }
     }
 
-    internal static void Release()
+    // Handed back to the game: the sights this turned off on again, and the held one on only if the player still aims
+    // through it (the game switches it as the aim changes from then on).
+    internal static void Release(Player? player)
     {
         try
         {
+            foreach (OpticSight sight in _quieted)
+            {
+                if (sight != null && !sight.enabled)
+                    sight.enabled = true;
+            }
             if (_held != null)
             {
+                bool aimed = player?.HandsController != null && player.HandsController.IsAiming && player.ProceduralWeaponAnimation != null
+                    && Same(Resolve(player.ProceduralWeaponAnimation), _held);
                 OpticSight.OpticSightState.Value = new OpticSight.OpticSightStatus
                 {
-                    IsEnabled = true,
+                    IsEnabled = aimed,
                     OpticSight = _held
                 };
             }
@@ -83,6 +94,7 @@ internal static class OpticPicture
         {
         }
 
+        _quieted.Clear();
         _held = null;
         _frame = -1;
     }
@@ -197,6 +209,8 @@ internal static class OpticPicture
                 continue;
 
             sight.enabled = false;
+            if (!_quieted.Contains(sight))
+                _quieted.Add(sight);
         }
     }
 
@@ -241,7 +255,7 @@ internal static class OpticPicture
 
     private static OpticSight? Resolve(ProceduralWeaponAnimation animation)
     {
-        Transform? bone = animation.CurrentScope?.Bone;
+        Transform? bone = Scopes.Current(animation)?.Bone;
         if (bone == null)
             return null;
 

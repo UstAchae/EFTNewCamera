@@ -27,6 +27,9 @@ internal static class AimArms
     private const float MeanSeconds = 1f;
     private const float AimInSeconds = 0.7f;
     private const float AimInMeanSeconds = 0.08f;
+    private const float LeanCatchSeconds = 0.15f;
+    private static float _leanTilt;
+    private static float _leanCatchUntil;
     private const float GunSmoothSeconds = 0.04f;
     private const float HeadSmoothSeconds = 0.05f;
     private const float ReleaseSeconds = 0.3f;
@@ -63,6 +66,8 @@ internal static class AimArms
     private static Vector3 _blendFrom;
     private static Quaternion _turn = Quaternion.identity;
     private static Quaternion _turnFrom = Quaternion.identity;
+    private static Quaternion _viewTurnFrom = Quaternion.identity;
+    private static Transform? _viewTurnPart;
     private static bool _hasMean;
     private static int _meanSightId;
     private static Vector3 _armMoveMean;
@@ -206,6 +211,14 @@ internal static class AimArms
         MethodInfo? strategyPrefix = typeof(AimArms).GetMethod(nameof(SetStrategyPrefix), BindingFlags.NonPublic | BindingFlags.Static);
         if (strategy != null && strategyPrefix != null)
             harmony.Patch(strategy, prefix: new HarmonyMethod(strategyPrefix));
+        MethodInfo? thirdEffectors = AccessTools.Method(AccessTools.TypeByName("ThirdPersonStrategy"), "ProcessEffectors");
+        MethodInfo? breathePrefix = typeof(AimArms).GetMethod(nameof(BreatheAsFirstPerson), BindingFlags.NonPublic | BindingFlags.Static);
+        if (thirdEffectors != null && breathePrefix != null)
+            harmony.Patch(thirdEffectors, prefix: new HarmonyMethod(breathePrefix));
+        MethodInfo? effectors = AccessTools.Method(typeof(ProceduralWeaponAnimation), nameof(ProceduralWeaponAnimation.ProcessEffectors));
+        MethodInfo? effectorsPrefix = typeof(AimArms).GetMethod(nameof(EveryFramePrefix), BindingFlags.NonPublic | BindingFlags.Static);
+        if (effectors != null && effectorsPrefix != null)
+            harmony.Patch(effectors, prefix: new HarmonyMethod(effectorsPrefix));
         _patched = true;
     }
 
@@ -237,6 +250,42 @@ internal static class AimArms
     // view the player was created with, which is first person. In third person that puts first-person weapon
     // placement and FOV scaling on the third-person rig, and the gun floats off the arms. The player's current
     // point of view is used instead.
+    // The game steps the hands' springs only on frames that had a physics tick (about 60 a second): its first-person
+    // camera hangs on the same springs and steps with them, but ours follows the head every frame, so above 60 fps
+    // the gun moved on every other frame against the view. Our player's springs are stepped every frame, by the
+    // frame's own time, instead.
+    private static void EveryFramePrefix(ProceduralWeaponAnimation __instance, ref float deltaTime, ref int nFixedFrames)
+    {
+        if (!NewCameraSwitch.Enabled || nFixedFrames < 0 || Time.deltaTime <= 0f)
+            return;
+        Player? player = Singleton<GameWorld>.Instance?.MainPlayer;
+        if (player == null || !ReferenceEquals(player.ProceduralWeaponAnimation, __instance))
+            return;
+        deltaTime = Time.deltaTime;
+        nFixedFrames = 1;
+    }
+
+    // The third-person procedural animation leaves out the breath and the hands' shake that sway the gun in first
+    // person; with the first-person skeleton they are put back, as the first-person procedural animation runs them
+    // (into the hands' springs, which the third-person one then steps on).
+    private static void BreatheAsFirstPerson(ProceduralWeaponAnimation pwa, float deltaTime, int nFixedFrames)
+    {
+        if (!NewCameraSwitch.Enabled || !NewCameraSwitch.FirstPersonSkeleton || nFixedFrames <= 0 || pwa.HandsContainer?.WeaponRootAnim == null
+            || !pwa.enabled || Mathf.Approximately(deltaTime, 0f))
+            return;
+        Player? player = Singleton<GameWorld>.Instance?.MainPlayer;
+        if (player == null || !player.IsYourPlayer || !ReferenceEquals(player.ProceduralWeaponAnimation, pwa))
+            return;
+        float step = deltaTime / nFixedFrames;
+        for (int i = 0; i < nFixedFrames; i++)
+        {
+            if ((pwa.Mask & EProceduralAnimationMask.Breathing) != 0)
+                pwa.Breath.Process(step);
+            if ((pwa.Mask & EProceduralAnimationMask.HandShake) != 0)
+                pwa.HandShakeEffector.Process(step);
+        }
+    }
+
     private static void SetStrategyPrefix(ProceduralWeaponAnimation __instance, ref EPointOfView pointOfView)
     {
         if (!NewCameraSwitch.Enabled)
@@ -280,17 +329,21 @@ internal static class AimArms
         Vector3 target = Vector3.zero;
         Quaternion turn = Quaternion.identity;
         Vector3? sightPoint = null;
+        Transform? gunPart = bones?.Weapon_Root_Anim;
         if (bones != null)
         {
             ProceduralWeaponAnimation? animation = player.ProceduralWeaponAnimation;
             Transform? bone = animation != null && animation.ScopeAimTransforms != null && animation.ScopeAimTransforms.Count > 0
-                ? animation.CurrentScope?.Bone
+                ? Scopes.Current(animation)?.Bone
                 : null;
             Vector3 sightPosition = bone != null ? bone.position : Vector3.zero;
             Vector3 sightForward = Vector3.forward;
             bool ironAligned = bone != null && animation != null && ResolveIronSight(animation, bone, out sightPosition, out sightForward);
             if (bone != null)
+            {
                 sightPoint = sightPosition;
+                gunPart = bone;
+            }
             if (PlantedAim(player))
             {
                 // The mounted hip pose is already the aim pose. Leave the gun there.
@@ -318,7 +371,7 @@ internal static class AimArms
                 {
                     target = bodyPosition - sightPosition + bodyRotation * aimPoint;
                     if (ironAligned)
-                        turn = Quaternion.FromToRotation(sightForward, bodyRotation * Vector3.forward);
+                        turn = TurnFromTo(sightForward, bodyRotation * Vector3.forward);
                 }
 
                 Quaternion delay = _lagLook * Quaternion.Inverse(_bodyLook);
@@ -362,6 +415,8 @@ internal static class AimArms
         {
             _blendFrom = _offset;
             _turnFrom = _turn;
+            _viewTurnFrom = gunPart != null ? Quaternion.Inverse(cameraRotation) * (_turn * gunPart.rotation) : Quaternion.identity;
+            _viewTurnPart = gunPart;
             _blend = 0f;
             _blendAiming = aiming;
             _blendSightId = sightId;
@@ -372,7 +427,16 @@ internal static class AimArms
             _blend = Mathf.Min(1f, _blend + Time.deltaTime / BlendSeconds);
             float t = _blend * _blend * (3f - 2f * _blend);
             _offset = Vector3.Lerp(_blendFrom, target, t);
-            _turn = Quaternion.Slerp(_turnFrom, turn, t);
+            // The gun turns, as seen, along the same curve: from how it lay in view when the blend began to how it lies
+            // once there. The game's own aim-in turns it in steps (the first-person animation turns it fast and stops
+            // halfway), which would otherwise show as the gun halting mid-way.
+            if (gunPart != null && ReferenceEquals(gunPart, _viewTurnPart))
+            {
+                Quaternion there = Quaternion.Inverse(cameraRotation) * (turn * gunPart.rotation);
+                _turn = cameraRotation * Quaternion.Slerp(_viewTurnFrom, there, t) * Quaternion.Inverse(gunPart.rotation);
+            }
+            else
+                _turn = Quaternion.Slerp(_turnFrom, turn, t);
         }
         else
         {
@@ -512,6 +576,19 @@ internal static class AimArms
 
         _opticFrame = Time.frameCount;
         Carry(camera.transform, _laserPivot, _laserDisplacement, _laserTurn);
+    }
+
+    // The turn that takes one direction onto another, however small. Quaternion.FromToRotation calls anything under
+    // about 0.08 degrees parallel and returns no turn, then the whole of it at once past that: the sight's
+    // alignment set off a few pixels at once halfway through the aim-in.
+    internal static Quaternion TurnFromTo(Vector3 from, Vector3 to)
+    {
+        Vector3 axis = Vector3.Cross(from, to);
+        float sine = axis.magnitude;
+        float cosine = Vector3.Dot(from, to);
+        if (sine < 1e-12f)
+            return cosine >= 0f ? Quaternion.identity : Quaternion.FromToRotation(from, to);
+        return Quaternion.AngleAxis(Mathf.Atan2(sine, cosine) * Mathf.Rad2Deg, axis / sine);
     }
 
     // Quaternion.Angle and == treat anything under about 0.16 degrees as no turn at all,
@@ -953,8 +1030,8 @@ internal static class AimArms
             float cos = (limb.UpperLength * limb.UpperLength + distance * distance - limb.LowerLength * limb.LowerLength) / (2f * limb.UpperLength * distance);
             float sin = Mathf.Sqrt(Mathf.Max(0f, 1f - cos * cos));
             Vector3 bend = root + along * (limb.UpperLength * cos) + side * (limb.UpperLength * sin);
-            limb.Upper.rotation = Quaternion.FromToRotation(limb.Lower.position - root, bend - root) * limb.Upper.rotation;
-            limb.Lower.rotation = Quaternion.FromToRotation(limb.End.position - limb.Lower.position, limb.TargetPosition - limb.Lower.position) * limb.Lower.rotation;
+            limb.Upper.rotation = TurnFromTo(limb.Lower.position - root, bend - root) * limb.Upper.rotation;
+            limb.Lower.rotation = TurnFromTo(limb.End.position - limb.Lower.position, limb.TargetPosition - limb.Lower.position) * limb.Lower.rotation;
             limb.End.SetPositionAndRotation(limb.TargetPosition, limb.TargetRotation);
         }
         Limbs.Clear();
@@ -1004,7 +1081,7 @@ internal static class AimArms
         rotation = Quaternion.identity;
         ProceduralWeaponAnimation? animation = player.ProceduralWeaponAnimation;
         Transform? bone = animation != null && animation.ScopeAimTransforms != null && animation.ScopeAimTransforms.Count > 0
-            ? animation.CurrentScope?.Bone
+            ? Scopes.Current(animation)?.Bone
             : null;
         if (animation == null || bone == null)
             return false;
@@ -1078,7 +1155,7 @@ internal static class AimArms
             if (!GrenadeLanding(player, firearm, start, direction, out Vector3 landing))
                 return;
 
-            OpticSight? sight = animation.CurrentScope?.ScopePrefabCache?.CurrentModOpticSight;
+            OpticSight? sight = Scopes.Current(animation)?.ScopePrefabCache?.CurrentModOpticSight;
             Transform? pivot = sight?.ScopeData != null ? sight.ScopeData.transform : null;
             Camera? optic = CameraManager.Instance?.OpticCameraManager?.Camera;
             if (sight == null || pivot == null)
@@ -1206,6 +1283,17 @@ internal static class AimArms
         Vector3 gunMove = _gunMoveSmooth;
         Quaternion gunTurn = _gunTurnSmooth;
         float meanSeconds = Time.time - _meanStart < AimInSeconds ? AimInMeanSeconds : MeanSeconds;
+        // Leaning is a change of pose, not sway: while the lean changes, and a little after, the means and centres
+        // catch up at once, so the gun follows the lean instead of drifting there over a second or more.
+        float tilt = Singleton<GameWorld>.Instance?.MainPlayer?.MovementContext?.SmoothedTilt ?? 0f;
+        if (!sightChanged && Mathf.Abs(tilt - _leanTilt) > 0.001f)
+            _leanCatchUntil = Time.time + LeanCatchSeconds;
+        _leanTilt = tilt;
+        if (Time.time < _leanCatchUntil)
+        {
+            meanSeconds = AimInMeanSeconds;
+            _sightCatch = Mathf.Max(_sightCatch, Time.deltaTime);
+        }
         float follow = 1f - Mathf.Exp(-Time.deltaTime / meanSeconds);
         _armMoveMean = Vector3.Lerp(_armMoveMean, armMove, follow);
         _gunMoveMean = Vector3.Lerp(_gunMoveMean, gunMove, follow);
@@ -1300,7 +1388,7 @@ internal static class AimArms
         }
         if (Mathf.Abs(zeroing) > 0.0001f)
             sightInCamera = Quaternion.AngleAxis(-zeroing, weaponInCamera * Vector3.right) * sightInCamera;
-        return Quaternion.FromToRotation(sightInCamera, Vector3.forward);
+        return TurnFromTo(sightInCamera, Vector3.forward);
     }
 
     private static void VisualPassPostfix(Player __instance)
@@ -1313,7 +1401,14 @@ internal static class AimArms
         UpdateFreeLookReturn(__instance);
         SprintHeadPitch(__instance);
         CalmWalkHead(__instance);
+        Transform? head = __instance.PointOfView != EPointOfView.FreeCamera ? __instance.PlayerBones?.Head?.Original : null;
+        if (head != null)
+        {
+            LiftHead(head);
+            HeadwearTilt.Apply(__instance, head);
+        }
     }
+
 
     private static Vector3 _freeLookFrom;
     private static float _freeLookWeight;
@@ -1466,14 +1561,33 @@ internal static class AimArms
             head.rotation = Quaternion.AngleAxis(fix, Vector3.up) * head.rotation;
     }
 
+    // The head model lifted about the camera's right axis, as the bones are posed for the frame: lifted only as the
+    // cameras cull, with nothing in hand the face was drawn as the animation left it. The camera is placed from the
+    // head as it was before (UnliftHead), which the lift turns about the axis it keeps; lifted again after.
     internal static void LiftHead(Transform head)
     {
+        _lifted = null;
         if (Mathf.Abs(HeadModelPitch) < 0.01f)
             return;
 
         Vector3 axis = CameraDirection.Resolve(head.rotation) * Vector3.right;
         head.rotation = Quaternion.AngleAxis(-HeadModelPitch, axis) * head.rotation;
+        _lifted = head;
+        _liftedFrame = Time.frameCount;
     }
+
+    // The head as the animation left it, for the camera's placing.
+    internal static void UnliftHead(Transform head)
+    {
+        if (_lifted != head || _liftedFrame != Time.frameCount)
+            return;
+        _lifted = null;
+        Vector3 axis = CameraDirection.Resolve(head.rotation) * Vector3.right;
+        head.rotation = Quaternion.AngleAxis(HeadModelPitch, axis) * head.rotation;
+    }
+
+    private static Transform? _lifted;
+    private static int _liftedFrame = -1;
 
     internal static void ObserveHead(Player player, Vector3 cameraPosition, Quaternion cameraRotation)
     {
@@ -1514,11 +1628,19 @@ internal static class AimArms
         float hold = Smooth(_holdWeight);
         float tiredness = Smooth(_tiredWeight);
         float Mix(float normal, float held, float exhausted) => Mathf.Lerp(Mathf.Lerp(normal, held, hold), exhausted, tiredness);
-        Now.GunMove = Mix(Normal.GunMove, Holding.GunMove, Exhausted.GunMove);
-        Now.GunTurn = Mix(Normal.GunTurn, Holding.GunTurn, Exhausted.GunTurn);
+        Now.HeadFollow = Mix(Normal.HeadFollow, Holding.HeadFollow, Exhausted.HeadFollow);
         Now.ArmMove = Mix(Normal.ArmMove, Holding.ArmMove, Exhausted.ArmMove);
         Now.ArmTurn = Mix(Normal.ArmTurn, Holding.ArmTurn, Exhausted.ArmTurn);
-        Now.HeadFollow = Mix(Normal.HeadFollow, Holding.HeadFollow, Exhausted.HeadFollow);
+        // The first-person skeleton's gun sways against the arms as the game's first-person view has it (the
+        // procedural breath and hand shake, which the game itself calms while the breath is held); the arms, moved
+        // by the body, are held as set, as with the third-person skeleton.
+        if (NewCameraSwitch.FirstPersonSkeleton)
+        {
+            Now.GunMove = Now.GunTurn = Now.Breath = 1f;
+            return;
+        }
+        Now.GunMove = Mix(Normal.GunMove, Holding.GunMove, Exhausted.GunMove);
+        Now.GunTurn = Mix(Normal.GunTurn, Holding.GunTurn, Exhausted.GunTurn);
         Now.Breath = Mix(Normal.Breath, Holding.Breath, Exhausted.Breath);
     }
 
@@ -1848,7 +1970,7 @@ internal static class AimArms
     {
         position = bone.position;
         forward = bone.name == "aim_camera" ? -bone.up : -bone.forward;
-        var scope = animation.CurrentScope;
+        var scope = Scopes.Current(animation);
         Transform? weapon = animation.HandsContainer?.Weapon;
         return scope != null && weapon != null && IronSightAlignment.TryResolve(weapon, bone,
             scope.AlignIfAvailable, scope.IsOptic, out position, out forward);
@@ -1860,7 +1982,7 @@ internal static class AimArms
             return 0f;
 
         WeaponPrefab.AimPlane? plane = animation._currentAimingPlane;
-        if (animation.CurrentScope != null && animation.CurrentScope.IsOptic)
+        if (Scopes.Current(animation) is { IsOptic: true })
             plane = animation.HandsContainer.DefaultAimPlane;
         if (plane == null)
             plane = animation.HandsContainer.DefaultAimPlane;
@@ -1905,7 +2027,8 @@ internal static class AimArms
 
     public static Camera? GetDrawCamera()
     {
-        return _drawCamera;
+        // Under an upscaler the FPS camera's lasers are drawn apart and put in after the upscale (NightVisionIr.cs).
+        return NightVisionEyepieces.LaserDrawCamera(_drawCamera);
     }
 
     // First person returns before the body shot reaction. Mounting already shrinks the
@@ -2101,6 +2224,7 @@ internal static class AimArms
         _blendFrom = Vector3.zero;
         _turn = Quaternion.identity;
         _turnFrom = Quaternion.identity;
+        _viewTurnPart = null;
         _hasMean = false;
         _hasHeadMean = false;
         _hasChase = false;
@@ -2122,9 +2246,24 @@ internal static class AimArms
             player.MovementContext?.PlayerAnimator?.SetAiming(true);
     }
 
+    // Switched off: the aim stamina drain and the aim field of view worked out by the game's own rules again.
+    internal static void GiveBackAim(Player player)
+    {
+        try
+        {
+            if (player.Physical is Physical physical)
+                physical.Aim(physical._aimMass);
+            player.ProceduralWeaponAnimation?.OnAimOrPoseChanged(true);
+        }
+        catch (System.Exception e)
+        {
+            NewCameraPlugin.Log?.LogWarning("Giving the aim back to the game failed: " + e.Message);
+        }
+    }
+
     private static void SetAimingPrefix(PlayerAnimator __instance, ref bool isAiming)
     {
-        if (!_suppress || !isAiming)
+        if (!_suppress || !isAiming || !NewCameraSwitch.Enabled)
             return;
 
         Player? player = Comfort.Common.Singleton<GameWorld>.Instance?.MainPlayer;

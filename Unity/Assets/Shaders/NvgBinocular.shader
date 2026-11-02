@@ -1,20 +1,41 @@
-// Side by side: the left eye's camera fills the left half of the screen, the right eye's the right half, each
-// having rendered its own half of the main camera's view from its own place. With _Split.x 0 the main camera's
-// own frame passes through.
+// The eyepieces put together, right where BRNVG would draw its picture over the main camera's frame. _MainTex is
+// the frame as BRNVG got it (the naked eye's scene) and _NightVision what BRNVG made of it (open lens, no mask):
+// the tubes are 1x, so each line of sight through a lens shows the night-vision picture in its own direction.
+// On the left half of the screen the left eye's view, on the right half the right eye's (with one camera both are
+// where it is). Each eye drew its own half of the main view from its own place: the device alone (premultiplied,
+// its coverage in alpha) and its lens map; the scene is the main camera's wherever the device does not cover it.
+// A tube shows only its own field: a line of sight further off its axis than that finds no picture, so from the
+// side a lens is dark glass.
+// The eyepieces are lamps in the dark: their light, spread wide and soft (NvgGlow.shader), is laid back over
+// everything, a glow on the glass and the eyecups around the lenses. It all follows the tubes' power: rising over a
+// moment when switched on, mottled while the gain settles, and fading like phosphor when switched off.
+// One pass only: the game's SSAA stage blits with every pass of a material.
+// While the device flips with the filter off the eyes are put in at the SSAA stage instead, _NightVision black.
 Shader "Justachae/NVG/Binocular" {
- Properties { _MainTex ("main camera", 2D) = "black" {} }
+ Properties { _MainTex ("scene", 2D) = "black" {} }
+ CGINCLUDE
+ #include "NvgEyes.cginc"
+ ENDCG
  SubShader {
   Cull Off ZWrite Off ZTest Always
+  // 0: the eyepieces over the scene.
   Pass {
    CGPROGRAM
    #pragma vertex vert_img
    #pragma fragment frag
-   #include "UnityCG.cginc"
-   sampler2D _MainTex, _LeftEye, _RightEye;
-   float4 _Split;   // x 1 while both eyes have a view
+   #pragma target 3.0
    float4 frag (v2f_img i) : SV_Target {
-    if (_Split.x < 0.5) return tex2D(_MainTex, i.uv);
-    return i.uv.x < 0.5 ? tex2D(_LeftEye, float2(i.uv.x * 2, i.uv.y)) : tex2D(_RightEye, float2(i.uv.x * 2 - 1, i.uv.y));
+    float4 scene = tex2D(_MainTex, i.uv);
+    if (_Mode < 0.5) return scene;
+    float4 eye; float4 light; float cover;
+    eyeAt(i.uv, eye, light, cover);
+    // The glow falls on the eyecups and the housing about the lenses, not on the lenses' own picture (over it, it
+    // only greyed the picture).
+    float3 glow = tex2D(_Glow, i.uv).rgb * _Lamp.y * (1 - light.w);
+    // The lenses' own surface as the eye drew it (the room reflected in it, highlights) over their picture, unless left
+    // out: then all of the glass, to its rim, where the tube's field has faded the picture out.
+    float3 device = eye.rgb * (1 - cover * _LensClear);
+    return float4(device + light.rgb * _Lamp.x + glow + (1 - saturate(eye.a)) * scene.rgb, scene.a);
    }
    ENDCG
   }

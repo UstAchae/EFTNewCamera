@@ -15,23 +15,31 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "justachae.thirdpersoncamera";
     public const string PluginName = "Justachae's Third-Person Skeleton and Camera";
-    public const string PluginVersion = "1.1.0";
+    public const string PluginVersion = "1.2.0";
+
+    internal static BepInEx.Logging.ManualLogSource? Log;
+    private const string SkeletonThird = "第三人称骨架", SkeletonFirst = "第一人称骨架";
 
     private void Awake()
     {
+        Log = Logger;
         // No section: the F12 window shows the master switch right under the plugin's name, without a heading.
         ConfigEntry<bool> enabled = Config.Bind("", "总开关", true,
-            "打开后使用第三人称骨架，并把游戏镜头挂在人物头部。");
+            new ConfigDescription("关掉后整个 mod 不起作用，一切按游戏原样。", null, new ConfigurationManagerAttributes { Order = 2 }));
         MoveFrom(enabled, "新镜头", "总开关");
+        ConfigEntry<string> skeleton = Config.Bind("", "骨架", SkeletonThird,
+            new ConfigDescription("第三人称骨架：用第三人称的身体动作（呼吸摆动、跑步转向时头部翻滚、换枪和翻背包的动作）。第一人称骨架：身体动作用游戏原版的第一人称（没有呼吸摆动和跑步转向时的头部翻滚，换枪、翻背包没有身体动作），晃得少，适合觉得第三人称骨架晕的玩家。除了身体动作，两种骨架的其他功能完全一样（镜头挂在头部、人物显示、瞄准等），只是第一人称骨架下瞄准时枪本身按原版第一人称的摆动晃（呼吸、手抖，屏息时由原版自己减弱），“瞄准摆动”那几组里的“摆动”只管手臂跟着身体动作的晃动，“呼吸”不起作用。局内可以随时切换。",
+                new AcceptableValueList<string>(SkeletonThird, SkeletonFirst), new ConfigurationManagerAttributes { Order = 1 }));
         AimArms.Install();
         BodyVisibility.Install();
         VisorFilter.Install();
         FirstPersonAudio.Install();
-        ReticleAfterTaa.Install();
         AimFieldOfView.Install();
         NightVisionEyepieces.Install();
         NewCameraSwitch.Enabled = enabled.Value;
+        NewCameraSwitch.FirstPersonSkeleton = skeleton.Value == SkeletonFirst;
         enabled.SettingChanged += (_, _) => NewCameraSwitch.Enabled = enabled.Value;
+        skeleton.SettingChanged += (_, _) => NewCameraSwitch.FirstPersonSkeleton = skeleton.Value == SkeletonFirst;
         BindDirection();
         BindPosition();
         BindAimDistance();
@@ -44,30 +52,79 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 
     private void BindNightVision()
     {
-        ConfigEntry<bool> eyepieces = Config.Bind("夜视仪", "目镜成像", false,
-            new ConfigDescription("打开后，头戴夜视仪的画面不再铺满整个屏幕，而是只在夜视仪的目镜里成像：从镜头看过去，每个目镜按视线方向显示外面的夜视画面，超出镜筒视场的部分是暗的。目镜以外是不带夜视的原样画面，夜视仪模型照常画出。夜视画面本身（荧光颜色、增益、噪点、光晕等）由 BRNVG 按这台夜视仪的设置生成，需要安装 BRNVG。目前只支持 GPNVG-18。",
-                null, new ConfigurationManagerAttributes { Order = 4 }));
-        ConfigEntry<float> pupil = Config.Bind("夜视仪", "瞳孔直径（毫米）", 5f,
-            new ConfigDescription("决定目镜边缘和“8”字两片镜片衔接处的柔和程度。眼睛看远处时，贴近眼睛的边缘会在瞳孔那么宽的一条带子里逐渐挡住视线，所以瞳孔越大边缘越柔。夜里人眼瞳孔约 5 到 7 毫米。",
-                new AcceptableValueRange<float>(1f, 8f), new ConfigurationManagerAttributes { Order = 3 }));
-        ConfigEntry<bool> binocular = Config.Bind("夜视仪", "双眼镜头", true,
-            new ConfigDescription("目镜成像时，镜头在原地分成左右两个相机，像两只眼睛：各自横移到对准自己那一侧“8”字目镜的中间镜片。两个相机各自从眼睛的位置渲染完整场景（包括夜视仪和头盔），屏幕从中间分成左右两半，左半边是左眼看到的原画面左半边，右半边是右眼看到的右半边。眼睛对焦在远处：离眼几厘米的外壳、眼罩按瞳孔直径失焦变糊；目镜里的像在无穷远，是清晰的，透过眼睛实际看到的镜片（被外壳挡住的部分没有）进来，镜片边缘按它自己的距离失焦。每帧多渲染两次完整场景。镜头离夜视仪较远（比如自由镜头）时不分开。",
+        ConfigEntry<bool> binocular = Config.Bind("头戴式成像装备", "双眼镜头", true,
+            new ConfigDescription("头戴夜视仪和热成像开着时，镜头在原地分成左右两个相机，像两只眼睛：各自横移到对准自己那一侧的目镜，随夜视仪翻下的动画逐渐分开。屏幕从中间分成左右两半，左半边是左眼看到的，右半边是右眼看到的，中间平滑过渡。两个相机只画离眼半米以内的东西（夜视仪、头盔边缘），远处的景物仍是主镜头的。镜头离夜视仪较远（比如自由镜头）时不分开。",
                 null, new ConfigurationManagerAttributes { Order = 2 }));
-        ConfigEntry<float> eyeShift = Config.Bind("夜视仪", "双眼平移比例", 0.8f,
+        ConfigEntry<float> eyeShift = Config.Bind("头戴式成像装备", "双眼平移比例", 0.8f,
             new ConfigDescription("双眼镜头时，两个相机各自往外平移多少：1 是正好对准自己那一侧的中间镜片，0 是不平移。画面里的景物始终完整，平移只改变目镜的圆在画面里的位置和被镜片边缘挡掉多少。",
                 new AcceptableValueRange<float>(0f, 1.2f), new ConfigurationManagerAttributes { Order = 1 }));
+        ConfigEntry<KeyboardShortcut> raiseMount = Config.Bind("头戴式成像装备", "挂架升高", new KeyboardShortcut(KeyCode.Equals, KeyCode.LeftAlt),
+            new ConfigDescription("按住时把支架往上调（TATM 的滑块、G24 的托架）。只在夜视仪开着、并且处于腰射（没有瞄准）时有效。每个支架（每一件物品）各自记住自己调好的高度、仰俯和前后，存在配置文件夹里的 justachae.thirdpersoncamera.mounts.txt。", null, new ConfigurationManagerAttributes { Order = -1 }));
+        ConfigEntry<KeyboardShortcut> lowerMount = Config.Bind("头戴式成像装备", "挂架降低", new KeyboardShortcut(KeyCode.Minus, KeyCode.LeftAlt),
+            new ConfigDescription("按住时把支架往下调。只在夜视仪开着、并且处于腰射（没有瞄准）时有效。", null, new ConfigurationManagerAttributes { Order = -2 }));
+        ConfigEntry<KeyboardShortcut> tiltUp = Config.Bind("头戴式成像装备", "挂架仰起", new KeyboardShortcut(KeyCode.Equals, KeyCode.LeftShift),
+            new ConfigDescription("按住时把支架往上仰（目镜抬高）。只在夜视仪开着、并且处于腰射（没有瞄准）时有效。", null, new ConfigurationManagerAttributes { Order = -4 }));
+        ConfigEntry<KeyboardShortcut> tiltDown = Config.Bind("头戴式成像装备", "挂架俯下", new KeyboardShortcut(KeyCode.Minus, KeyCode.LeftShift),
+            new ConfigDescription("按住时把支架往下俯（目镜降低）。只在夜视仪开着、并且处于腰射（没有瞄准）时有效。", null, new ConfigurationManagerAttributes { Order = -5 }));
+        ConfigEntry<KeyboardShortcut> slideForward = Config.Bind("头戴式成像装备", "挂架往前", new KeyboardShortcut(KeyCode.Equals, KeyCode.LeftControl),
+            new ConfigDescription("按住时把夜视仪沿支架往前推（离眼睛远；G24 一格一格地走）。只在夜视仪开着、并且处于腰射（没有瞄准）时有效。", null, new ConfigurationManagerAttributes { Order = -7 }));
+        ConfigEntry<KeyboardShortcut> slideBack = Config.Bind("头戴式成像装备", "挂架往后", new KeyboardShortcut(KeyCode.Minus, KeyCode.LeftControl),
+            new ConfigDescription("按住时把夜视仪沿支架往后拉（离眼睛近）。只在夜视仪开着、并且处于腰射（没有瞄准）时有效。", null, new ConfigurationManagerAttributes { Order = -8 }));
+        ConfigEntry<float> headwearPitch = Config.Bind("头戴式成像装备", "头部装备仰俯", 0f,
+            new ConfigDescription("只转头盔（和挂在上面的夜视仪），头和镜头不动。把头盔前沿往上抬多少度，只能往上，不能往下压。也可以用下面两个快捷键按住调整。",
+                new AcceptableValueRange<float>(0f, HeadwearTilt.Range), new ConfigurationManagerAttributes { Order = -9 }));
+        ConfigEntry<KeyboardShortcut> headwearUp = Config.Bind("头戴式成像装备", "头部装备仰起", HeadwearTilt.Up,
+            new ConfigDescription("按住时把头盔前沿往上抬。只在腰射（没有瞄准）时有效，瞄准时同样的键调瞄准距离。", null, new ConfigurationManagerAttributes { Order = -10 }));
+        ConfigEntry<KeyboardShortcut> headwearDown = Config.Bind("头戴式成像装备", "头部装备俯下", HeadwearTilt.Down,
+            new ConfigDescription("按住时把头盔前沿往回放（最低回到原位）。", null, new ConfigurationManagerAttributes { Order = -11 }));
+        HeadwearTilt.Pitch = headwearPitch;
+        ConfigEntry<string> picture = Config.Bind("头戴式成像装备", "夜视画面来源", NightVisionEyepieces.PictureAuto,
+            new ConfigDescription("头戴夜视仪和热成像只在自己的目镜里成像，目镜以外是不带夜视的原样画面，设备模型照常画出。支持 GPNVG-18、PNV-10T、PNV-57E、Armasight N-15、AN/PVS-14（单筒）、模组物品 PVS-31A 和 T-7 热成像；其他型号仍是游戏原样的全屏滤镜。这一项选目镜里的夜视画面用谁做。自动：装了 BRNVG 就用 BRNVG，没装就用游戏原版的夜视滤镜。BRNVG：用 BRNVG 的画面，它的 F12 设置（增益、颜色、噪点、泛光、近处虚焦等）都会作用到目镜里；没装 BRNVG 时按原版。原版：用游戏自己的夜视滤镜（绿色、噪点），装了 BRNVG 也不用它的画面。热成像设备不受这个选项影响。",
+                new AcceptableValueList<string>(NightVisionEyepieces.PictureAuto, NightVisionEyepieces.PictureBrnvg, NightVisionEyepieces.PictureGame),
+                new ConfigurationManagerAttributes { Order = 3 }));
+        ConfigEntry<bool> glow = Config.Bind("头戴式成像装备", "目镜光晕", true,
+            new ConfigDescription("夜视开着时，镜片的光往四周晕开，照在镜片玻璃边缘和眼罩内侧的那一圈光。关掉后只剩镜片里的画面。热成像也一样。",
+                null, new ConfigurationManagerAttributes { Order = 0 }));
+        ConfigEntry<bool> reflections = Config.Bind("头戴式成像装备", "镜片反光", true,
+            new ConfigDescription("夜视仪翻下时，目镜镜片表面映出的周围环境和高光，叠在镜片里的夜视画面上。关掉后镜片里只剩夜视画面，设备上的玻璃部件也不画。",
+                null, new ConfigurationManagerAttributes { Order = 0 }));
+        ConfigEntry<float> monocularSeeThrough = Config.Bind("头戴式成像装备", "PVS-14 左眼透明度", 0.5f,
+            new ConfigDescription("AN/PVS-14 单筒夜视仪只挡在右眼前，左眼看过去时机身往画面边缘逐渐变透明。0：不变透明（两只眼都看到完整的机身）；0.5：默认；1：变透明得最快。",
+                new AcceptableValueRange<float>(0f, 1f), new ConfigurationManagerAttributes { Order = 0 }));
         void Refresh()
         {
-            NightVisionEyepieces.Enabled = eyepieces.Value;
-            NightVisionEyepieces.Pupil = pupil.Value * 0.001f;
+            NightVisionEyepieces.Picture = picture.Value;
+            HeadwearTilt.Degrees = headwearPitch.Value;
+            HeadwearTilt.Up = headwearUp.Value;
+            HeadwearTilt.Down = headwearDown.Value;
+            NightVisionEyepieces.EyepieceGlow = glow.Value;
+            NightVisionEyepieces.LensReflections = reflections.Value;
+            NightVisionEyepieces.MonocularSeeThrough = monocularSeeThrough.Value;
+            NightVisionEyepieces.RaiseMount = raiseMount.Value;
+            NightVisionEyepieces.LowerMount = lowerMount.Value;
+            NightVisionEyepieces.TiltUp = tiltUp.Value;
+            NightVisionEyepieces.TiltDown = tiltDown.Value;
+            NightVisionEyepieces.SlideForward = slideForward.Value;
+            NightVisionEyepieces.SlideBack = slideBack.Value;
             NightVisionEyepieces.Binocular = binocular.Value;
             NightVisionEyepieces.EyeShift = eyeShift.Value;
         }
 
-        eyepieces.SettingChanged += (_, _) => Refresh();
-        pupil.SettingChanged += (_, _) => Refresh();
+        picture.SettingChanged += (_, _) => Refresh();
+        headwearPitch.SettingChanged += (_, _) => Refresh();
+        headwearUp.SettingChanged += (_, _) => Refresh();
+        headwearDown.SettingChanged += (_, _) => Refresh();
+        glow.SettingChanged += (_, _) => Refresh();
+        reflections.SettingChanged += (_, _) => Refresh();
+        monocularSeeThrough.SettingChanged += (_, _) => Refresh();
         binocular.SettingChanged += (_, _) => Refresh();
         eyeShift.SettingChanged += (_, _) => Refresh();
+        raiseMount.SettingChanged += (_, _) => Refresh();
+        lowerMount.SettingChanged += (_, _) => Refresh();
+        tiltUp.SettingChanged += (_, _) => Refresh();
+        tiltDown.SettingChanged += (_, _) => Refresh();
+        slideForward.SettingChanged += (_, _) => Refresh();
+        slideBack.SettingChanged += (_, _) => Refresh();
         Refresh();
     }
 
@@ -82,15 +139,13 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         ConfigEntry<bool> showHead = Config.Bind("人物", "显示头部", false,
             "画出自己的头。关掉时头只投阴影，画面里看不见。");
         ConfigEntry<bool> showHeadwear = Config.Bind("人物", "显示头部装备", true,
-            "画出头盔和帽子。关掉后整个头部装备都不画。打开时，夜视和热成像要等自己的滤镜真正亮起，才把那一台设备藏起来，滤镜关掉就再画出来。");
+            "画出头盔和帽子。关掉后头部装备不画，但头盔上挂的夜视仪、热成像和它们的支架照常画出（用来对付全封闭头盔挡住视线）。");
         ConfigEntry<bool> showFaceCover = Config.Bind("人物", "显示面部装备", false,
-            "画出面罩和头套。关掉后整个面部装备都不画。上面挂的夜视或热成像，同样等自己的滤镜亮起才藏。");
+            "画出面罩和头套。关掉后整个面部装备都不画。");
         ConfigEntry<bool> showEyewear = Config.Bind("人物", "显示眼部装备", false,
-            "画出眼镜和护目镜。关掉后整个眼部装备都不画。上面挂的夜视或热成像，同样等自己的滤镜亮起才藏。");
+            "画出眼镜和护目镜。关掉后整个眼部装备都不画。");
         ConfigEntry<bool> showVisor = Config.Bind("人物", "显示面罩滤镜", false,
             "画出面罩玻璃上的滤镜。关掉后玻璃还在，滤镜画面没有。");
-        ConfigEntry<bool> fineHands = Config.Bind("人物", "原版细腻手部", false,
-            "打开后，自己的双手换成原版第一人称那套更细腻的手部模型（含手指细节），并戴上原版的手表，表针照常走。袖子仍是身上衣服自己的。动作完全由第三人称骨架和本模组驱动。关掉是第三人称骨架原来的手。");
         ConfigEntry<float> headPitch = Config.Bind("人物", "头部仰俯", 17f,
             new ConfigDescription("只转头部模型，镜头保持原位。正值把脸往上抬，单位为度。",
                 new AcceptableValueRange<float>(-45f, 45f)));
@@ -114,7 +169,6 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
             BodyVisibility.ShowEyewear = showEyewear.Value;
             VisorFilter.Show = showVisor.Value;
             AimArms.HeadModelPitch = headPitch.Value;
-            FineArms.Enabled = fineHands.Value;
         }
 
         showHead.SettingChanged += (_, _) => Refresh();
@@ -122,7 +176,6 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         showFaceCover.SettingChanged += (_, _) => Refresh();
         showEyewear.SettingChanged += (_, _) => Refresh();
         showVisor.SettingChanged += (_, _) => Refresh();
-        fineHands.SettingChanged += (_, _) => Refresh();
         headPitch.SettingChanged += (_, _) => Refresh();
         freeLookYaw.SettingChanged += (_, _) => Refresh();
         freeLookDown.SettingChanged += (_, _) => Refresh();
@@ -211,12 +264,11 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
             new ConfigDescription("瞄准后沿镜头前方向移动枪，单位为米。负值让枪离镜头更近。",
                 new AcceptableValueRange<float>(AimDistanceMin, AimDistanceMax)));
         _aimDistanceFarther = Config.Bind("瞄准", "前后距离调远快捷键", new KeyboardShortcut(KeyCode.Equals),
-            "按住时瞄准的前后距离慢慢变大，枪离镜头更远。");
+            "瞄准时按住，瞄准的前后距离慢慢变大，枪离镜头更远。不瞄准时这个键不起作用（腰射时同样的键调夜视仪挂架）。");
         _aimDistanceCloser = Config.Bind("瞄准", "前后距离调近快捷键", new KeyboardShortcut(KeyCode.Minus),
-            "按住时瞄准的前后距离慢慢变小，枪离镜头更近。");
+            "瞄准时按住，瞄准的前后距离慢慢变小，枪离镜头更近。不瞄准时这个键不起作用（腰射时同样的键调夜视仪挂架）。");
         _aimDistance.SettingChanged += (_, _) => AimArms.ForwardDistance = _aimDistance.Value;
         AimArms.ForwardDistance = _aimDistance.Value;
-        ReticleAfterTaa.Enabled = true;
     }
 
     private const float AimDistanceMin = -0.10f;
@@ -228,12 +280,14 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 
     private void AdjustAimDistance()
     {
-        if (_aimDistance == null || _aimDistanceFarther == null || _aimDistanceCloser == null)
+        if (_aimDistance == null || _aimDistanceFarther == null || _aimDistanceCloser == null || !NewCameraSwitch.Enabled)
             return;
+        // Only while aiming: the same keys set the helmet mount at the hip.
+        bool aiming = Comfort.Common.Singleton<GameWorld>.Instance?.MainPlayer?.ProceduralWeaponAnimation?.IsAiming == true;
         float step = 0f;
-        if (_aimDistanceFarther.Value.IsPressed())
+        if (aiming && _aimDistanceFarther.Value.IsPressed())
             step += AimDistanceSpeed * Time.deltaTime;
-        if (_aimDistanceCloser.Value.IsPressed())
+        if (aiming && _aimDistanceCloser.Value.IsPressed())
             step -= AimDistanceSpeed * Time.deltaTime;
 
         // Setting the config value saves the whole file, so it is written once when the key is let go.
@@ -326,20 +380,51 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
             new ConfigDescription(description, new AcceptableValueRange<float>(-0.05f, 1f)));
     }
 
+    // The camera callbacks are each one delegate among the game's: one that throws stops the rest for that camera (the
+    // game lights lights there, per camera), so each of ours is kept from throwing; a failure is logged once.
+    private static readonly Camera.CameraCallback PreCull = camera =>
+    {
+        Guarded(NewCameraSwitch.OnCameraPreCull, camera, "pre-cull (camera)");
+        Guarded(NightVisionEyepieces.OnCameraPreCull, camera, "pre-cull (eyepieces)");
+    };
+    private static readonly Camera.CameraCallback PreRender = camera =>
+    {
+        Guarded(NightVisionEyepieces.OnCameraPreRender, camera, "pre-render (eyepieces)");
+        Guarded(NightVisionEyepieces.OnCameraPreRenderIr, camera, "pre-render (IR)");
+    };
+    private static readonly Camera.CameraCallback PostRender = camera =>
+    {
+        Guarded(NightVisionEyepieces.OnCameraPostRender, camera, "post-render (eyepieces)");
+        Guarded(NightVisionEyepieces.OnCameraPostRenderIr, camera, "post-render (IR)");
+        Guarded(OpticElevation.Restore, camera, "post-render (optic)");
+    };
+    private static readonly System.Collections.Generic.HashSet<string> Reported = new System.Collections.Generic.HashSet<string>();
+
+    private static void Guarded(Camera.CameraCallback callback, Camera camera, string name)
+    {
+        try
+        {
+            callback(camera);
+        }
+        catch (System.Exception e)
+        {
+            if (Reported.Add(name + e.GetType().Name + e.TargetSite))
+                Log?.LogError($"Camera {name} failed (reported once): {e}");
+        }
+    }
+
     private void OnEnable()
     {
-        Camera.onPreCull += NewCameraSwitch.OnCameraPreCull;
-        Camera.onPreCull += NightVisionEyepieces.OnCameraPreCull;
-        Camera.onPostRender += ReticleAfterTaa.OnCameraPostRender;
-        Camera.onPostRender += OpticElevation.Restore;
+        Camera.onPreCull += PreCull;
+        Camera.onPreRender += PreRender;
+        Camera.onPostRender += PostRender;
     }
 
     private void OnDisable()
     {
-        Camera.onPreCull -= NewCameraSwitch.OnCameraPreCull;
-        Camera.onPreCull -= NightVisionEyepieces.OnCameraPreCull;
-        Camera.onPostRender -= ReticleAfterTaa.OnCameraPostRender;
-        Camera.onPostRender -= OpticElevation.Restore;
+        Camera.onPreCull -= PreCull;
+        Camera.onPreRender -= PreRender;
+        Camera.onPostRender -= PostRender;
         OpticElevation.Shutdown();
     }
 
@@ -358,58 +443,87 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 internal static class NewCameraSwitch
 {
     internal static bool Enabled;
-
+    internal static bool FirstPersonSkeleton;
     private static bool _applied;
     private static int _poseFrame = -1;
     private static Vector3 _posePosition;
+
+    // The camera is where this mod put it this frame, at the player's eyes, and has not been moved off since (a free
+    // camera places itself after this mod does).
+    internal static bool AtEyes(Camera camera) => _poseFrame == Time.frameCount && (camera.transform.position - _posePosition).sqrMagnitude < 1e-6f;
     private static Quaternion _poseRotation;
+
+    // Where the camera was put from the head this frame (along the world's axes), as it was worked out, not as the
+    // difference of the two places in the world: far out in a map those are rounded to tens of micrometres.
+    internal static Transform? PoseHead;
+    internal static Vector3 PoseFromHead;
 
     internal static void LateUpdate()
     {
         Player? player = Singleton<GameWorld>.Instance?.MainPlayer;
-        if (!Enabled)
-        {
-            if (_applied && player != null && player.IsYourPlayer)
-            {
-                NightVisionEyepieces.Release();
-                OpticPicture.Release();
-                AimArms.Release(player);
-                BodyVisibility.Restore();
-                if (player.PointOfView != EPointOfView.FirstPerson)
-                    player.PointOfView = EPointOfView.FirstPerson;
-            }
-            _applied = false;
-            return;
-        }
-
-        if (player == null || !player.IsYourPlayer)
-            return;
-
+        bool mine = player != null && player.IsYourPlayer;
         // The hideout overview (before walking in) and the gym use the game's free camera.
-        if (player.PointOfView == EPointOfView.FreeCamera)
+        bool wanted = Enabled && mine && player!.PointOfView != EPointOfView.FreeCamera;
+        // Let go of whenever this mod stops applying: switched off, the free camera, or the player gone or another
+        // one (a raid over), whether or not there is a player to hand things back to.
+        if (_applied && (!wanted || !ReferenceEquals(player, _appliedTo)))
         {
-            if (_applied)
-            {
-                NightVisionEyepieces.Release();
-                OpticPicture.Release();
-                AimArms.Release(player);
-                BodyVisibility.Restore();
-            }
+            ReleaseAll(ReferenceEquals(player, _appliedTo) ? player : null);
             _applied = false;
-            return;
+            _appliedTo = null;
         }
+        if (!wanted)
+            return;
 
-        if (player.PointOfView != EPointOfView.ThirdPerson)
+        if (player!.PointOfView != EPointOfView.ThirdPerson)
             player.PointOfView = EPointOfView.ThirdPerson;
         if (!_applied)
         {
             AimFieldOfView.Reset();
             VestibularView.Reset();
         }
+        ChooseSkeleton(player);
         AimArms.Apply(player);
         NightVisionEyepieces.Update(player);
         BodyVisibility.Apply(player);
         _applied = true;
+        _appliedTo = player;
+    }
+
+    // The body's animation, all else as the third-person view has it: the first-person skeleton is the game's
+    // first-person animator (no breathing sway, no roll of the head turning at a run, no body moves for changing the
+    // weapon or opening the backpack). The game sets it as it sets the point of view: the first-person one is set
+    // every frame, the third-person one again once chosen back.
+    private static void ChooseSkeleton(Player player)
+    {
+        bool first = FirstPersonSkeleton;
+        if (!first && !_firstSkeleton && ReferenceEquals(_skeletonOf, player))
+            return;
+        player.MovementContext?.PlayerAnimatorPointOfView(first ? EPointOfView.FirstPerson : EPointOfView.ThirdPerson);
+        _firstSkeleton = first;
+        _skeletonOf = player;
+    }
+
+    private static bool _firstSkeleton;
+    private static Player? _skeletonOf;
+    private static Player? _appliedTo;
+
+    // Everything this mod changed handed back, as the game had it; player: the one it was applied to, when still there.
+    private static void ReleaseAll(Player? player)
+    {
+        NightVisionEyepieces.Release();
+        CollimatorHandoff.Release();
+        OpticPicture.Release(player);
+        AimArms.Release(player);
+        BodyVisibility.Restore();
+        HeadwearTilt.Release();
+        _skeletonOf = null;
+        if (player == null || Enabled)
+            return;
+        // Switched off: the game's own view back at once, not at the next aim or pose change.
+        if (player.PointOfView != EPointOfView.FirstPerson)
+            player.PointOfView = EPointOfView.FirstPerson;
+        AimArms.GiveBackAim(player);
     }
 
     internal static void OnCameraPreCull(Camera camera)
@@ -440,20 +554,26 @@ internal static class NewCameraSwitch
             Transform? head = player.PlayerBones?.Head?.Original;
             if (head != null)
             {
+                AimArms.UnliftHead(head);
                 AimArms.FollowMountedGun(player);
                 _poseRotation = CameraDirection.Resolve(head.rotation);
                 _posePosition = CameraPosition.Resolve(head.position, _poseRotation);
+                PoseFromHead = CameraPosition.Offset(_poseRotation);
                 AimArms.ObserveHead(player, _posePosition, _poseRotation);
                 AimArms.AlignToCamera(player, _posePosition, _poseRotation);
                 if (AimArms.TrackMountedSight(player))
                 {
                     _poseRotation = CameraDirection.Resolve(head.rotation);
                     _posePosition = CameraPosition.Resolve(head.position, _poseRotation);
+                    PoseFromHead = CameraPosition.Offset(_poseRotation);
                 }
                 else
                     _poseRotation = AimArms.KickView(_poseRotation);
                 _poseRotation = VestibularView.Stabilize(player, _posePosition, _poseRotation);
+                Vector3 beforeRecoil = _posePosition;
                 AimArms.BodyRecoil(player, ref _posePosition, ref _poseRotation);
+                PoseFromHead += _posePosition - beforeRecoil;
+                PoseHead = head;
                 AimArms.LiftHead(head);
                 _poseFrame = Time.frameCount;
             }
@@ -467,5 +587,9 @@ internal static class NewCameraSwitch
         AimArms.ReplayLasers(camera);
         if (optic)
             OpticElevation.Apply(camera);
+        if (main)
+        {
+            CollimatorHandoff.Update(camera);
+        }
     }
 }

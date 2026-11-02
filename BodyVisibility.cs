@@ -34,7 +34,13 @@ internal static class BodyVisibility
     }
 
     private static readonly Dictionary<int, RendererState> OriginalRenderers = new();
+    // The head skin as the game had it before it was shown: active, and each renderer's layer and off-screen update.
+    private static LoddedSkin? _headSkin;
+    private static bool _headActive;
+    private static int _headLayer;
+    private static readonly List<(Renderer Renderer, int Layer, bool Offscreen)> HeadRenderers = new();
     private static readonly Dictionary<int, Renderer[]> EquipmentRenderers = new();
+    private static readonly Dictionary<int, bool> HeadDevices = new();   // by renderer: on a helmet's night-vision or thermal device
     private static Player? _trackedPlayer;
     private static int _nextCachePruneFrame;
     private static bool _installed;
@@ -80,13 +86,11 @@ internal static class BodyVisibility
             if (body.SlotViews.TryGetByKey(slot, out PlayerBody.SlotView? view) && view != null)
                 ApplySlot(player, view);
         }
-
-        FineArms.Apply(body);
     }
 
     internal static void Restore()
     {
-        FineArms.Restore();
+        RestoreHead();
         foreach (RendererState state in OriginalRenderers.Values)
         {
             if (state.Renderer == null)
@@ -98,7 +102,7 @@ internal static class BodyVisibility
 
         OriginalRenderers.Clear();
         EquipmentRenderers.Clear();
-        DeviceRenderers.Clear();
+        HeadDevices.Clear();
         _trackedPlayer = null;
         _nextCachePruneFrame = 0;
     }
@@ -134,6 +138,18 @@ internal static class BodyVisibility
 
         IEnumerable<Renderer> renderers = skin.GetRenderers();
         Snapshot(renderers);
+        if (!ReferenceEquals(_headSkin, skin))
+        {
+            RestoreHead();
+            _headSkin = skin;
+            _headActive = skin.gameObject.activeSelf;
+            _headLayer = skin.gameObject.layer;
+            foreach (Renderer renderer in renderers)
+            {
+                if (renderer != null)
+                    HeadRenderers.Add((renderer, renderer.gameObject.layer, renderer is SkinnedMeshRenderer s && s.updateWhenOffscreen));
+            }
+        }
         if (!skin.gameObject.activeSelf)
             skin.gameObject.SetActive(true);
 
@@ -169,14 +185,28 @@ internal static class BodyVisibility
         Snapshot(renderers);
         if (!ShownSlot(slotView.EquipmentSlot))
         {
-            Hide(slotView.Renderers);
-            Hide(renderers);
+            // A helmet hidden leaves the night vision or thermal goggles on it, with the mount they hang from: the
+            // player looks through them.
+            Transform? keep = slotView.EquipmentSlot == EquipmentSlot.Headwear && slotView.Model != null ? slotView.Model.transform : null;
+            Hide(slotView.Renderers, keep);
+            Hide(renderers, keep);
             return;
         }
 
         Show(slotView.Renderers);
         Show(renderers);
-        HideActiveDevices(player, slotView);
+    }
+
+    // Under the helmet's night-vision slot (its mount and the device on it), or part of a night-vision or thermal device.
+    private static bool OnHeadDevice(Transform t, Transform? model)
+    {
+        for (Transform? at = t; at != null && at != model; at = at.parent)
+        {
+            if (at.name.StartsWith("mod_nvg", StringComparison.Ordinal)
+                || at.GetComponent<NightVisionDevice>() != null || at.GetComponent<ThermalVisionDevice>() != null)
+                return true;
+        }
+        return false;
     }
 
     private static bool ShownSlot(EquipmentSlot slot)
@@ -211,76 +241,9 @@ internal static class BodyVisibility
 
     private static readonly FieldInfo? CameraManagerInstance = AccessTools.Field(typeof(CameraManager), "instance");
     private static Type? _nightRendererType;
-    private static PropertyInfo? _nightEnabled;
-    private static PropertyInfo? _opticReady;
     private static MethodInfo? _usesCustomPipeline;
     private static bool _nightResolved;
     private static readonly object?[] PipelineArgument = new object?[1];
-
-    // A mounted night or thermal device stays visible until its own filter is actually on.
-    private static void HideActiveDevices(Player player, PlayerBody.SlotView slotView)
-    {
-        GameObject? model = slotView.Model;
-        CameraManager? camera = CameraManagerInstance?.GetValue(null) as CameraManager;
-        if (model == null || camera == null)
-            return;
-
-        // A device whose eyepieces show the picture stays drawn.
-        bool nightOn = NightFilterVisible(camera.NightVision) && !NightVisionEyepieces.Shows(model);
-        bool thermalOn = camera.ThermalVision != null && camera.ThermalVision.On;
-        if (!nightOn && !thermalOn)
-            return;
-
-        // This runs every frame. The search walks the whole model and the inventory, so its result is kept
-        // until the filter state or the model changes.
-        int modelId = model.GetInstanceID();
-        if (!DeviceRenderers.TryGetValue(modelId, out DeviceHide cached) || cached.Night != nightOn
-            || cached.Thermal != thermalOn || Destroyed(cached.Renderers))
-        {
-            cached = new DeviceHide { Night = nightOn, Thermal = thermalOn, Renderers = FindDevices(player, slotView, model, nightOn, thermalOn) };
-            DeviceRenderers[modelId] = cached;
-        }
-
-        Hide(cached.Renderers);
-    }
-
-    private struct DeviceHide
-    {
-        internal bool Night;
-        internal bool Thermal;
-        internal Renderer[] Renderers;
-    }
-
-    private static readonly Dictionary<int, DeviceHide> DeviceRenderers = new();
-
-    private static Renderer[] FindDevices(Player player, PlayerBody.SlotView slotView, GameObject model, bool nightOn, bool thermalOn)
-    {
-        List<Renderer> found = new();
-        Transform root = model.transform;
-        if (nightOn)
-        {
-            foreach (NightVisionDevice device in model.GetComponentsInChildren<NightVisionDevice>(true))
-                HideBranch(device.transform, root, found);
-        }
-
-        if (thermalOn)
-        {
-            foreach (ThermalVisionDevice device in model.GetComponentsInChildren<ThermalVisionDevice>(true))
-                HideBranch(device.transform, root, found);
-        }
-
-        Item? worn = player.InventoryController?.Inventory?.Equipment?.GetSlot(slotView.EquipmentSlot)?.ContainedItem;
-        if (worn != null)
-        {
-            List<Item> carriers = new();
-            CollectCarriers(worn, worn, nightOn, thermalOn, carriers);
-            foreach (Item carrier in carriers)
-                HideNamed(root, PrefabKey(carrier), found);
-        }
-
-        Snapshot(found);
-        return found.ToArray();
-    }
 
     internal static CameraManager? Cameras => CameraManagerInstance?.GetValue(null) as CameraManager;
 
@@ -291,28 +254,6 @@ internal static class BodyVisibility
             EnsureNightTypes();
             return _nightRendererType;
         }
-    }
-
-    internal static bool NightFilterVisible(BSG.CameraEffects.NightVision? nightVision)
-    {
-        if (nightVision == null)
-            return false;
-
-        if (!UsesNightPipeline(nightVision))
-            return nightVision.On;
-
-        EnsureNightTypes();
-        if (_nightRendererType == null)
-            return false;
-
-        Component renderer = nightVision.GetComponent(_nightRendererType);
-        if (renderer is not Behaviour behaviour || !behaviour.isActiveAndEnabled)
-            return false;
-
-        if (_nightEnabled?.GetValue(renderer) is not true)
-            return false;
-
-        return _opticReady == null || _opticReady.GetValue(renderer) is true;
     }
 
     internal static bool UsesNightPipeline(BSG.CameraEffects.NightVision nightVision)
@@ -338,78 +279,9 @@ internal static class BodyVisibility
             _nightRendererType = assembly.GetType("BorkelRNVG.Controllers.RealisticNightVisionRenderer");
             Type? helper = assembly.GetType("BorkelRNVG.Helpers.NvgHelper");
             const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
-            _nightEnabled = _nightRendererType?.GetProperty("NightVisionEnabled", flags);
-            _opticReady = _nightRendererType?.GetProperty("OpticReady", flags);
             _usesCustomPipeline = helper?.GetMethod("UsesCustomPipeline", BindingFlags.Public | BindingFlags.Static);
             return;
         }
-    }
-
-    private static void CollectCarriers(Item worn, Item item, bool nightOn, bool thermalOn, List<Item> carriers)
-    {
-        bool nightDevice = item.GetItemComponent<NightVisionComponent>() != null;
-        bool thermalDevice = item.GetItemComponent<ThermalVisionComponent>() != null;
-        if ((nightOn && nightDevice) || (thermalOn && thermalDevice))
-        {
-            carriers.Add(item);
-            Item? parent = item.Parent?.Container?.ParentItem;
-            while (parent != null && !ReferenceEquals(parent, worn))
-            {
-                carriers.Add(parent);
-                parent = parent.Parent?.Container?.ParentItem;
-            }
-        }
-
-        if (item is not CompoundItem compound)
-            return;
-
-        foreach (Slot slot in compound.AllSlots)
-        {
-            Item? child = slot.ContainedItem;
-            if (child != null)
-                CollectCarriers(worn, child, nightOn, thermalOn, carriers);
-        }
-    }
-
-    private static string PrefabKey(Item item)
-    {
-        ResourceKey? prefab = item.Prefab;
-        if (prefab == null || prefab.IsEmpty())
-            return string.Empty;
-
-        string? path = prefab.path;
-        if (path == null || path.Length == 0)
-            return string.Empty;
-
-        string? file = prefab.FileName;
-        return file ?? string.Empty;
-    }
-
-    private static void HideNamed(Transform root, string prefabKey, List<Renderer> found)
-    {
-        if (prefabKey.Length == 0)
-            return;
-
-        foreach (Transform transform in root.GetComponentsInChildren<Transform>(true))
-        {
-            if (transform.name.IndexOf(prefabKey, StringComparison.OrdinalIgnoreCase) >= 0)
-                HideBranch(transform, root, found);
-        }
-    }
-
-    private static void HideBranch(Transform device, Transform root, List<Renderer> found)
-    {
-        Transform top = device;
-        Transform? cursor = device;
-        while (cursor.parent != null && cursor.parent != root)
-        {
-            cursor = cursor.parent;
-            top = cursor;
-        }
-
-        found.AddRange(top == root
-            ? device.GetComponentsInChildren<Renderer>(true)
-            : top.GetComponentsInChildren<Renderer>(true));
     }
 
     private static void Prune()
@@ -431,7 +303,10 @@ internal static class BodyVisibility
         if (dead != null)
         {
             foreach (int key in dead)
+            {
                 OriginalRenderers.Remove(key);
+                HeadDevices.Remove(key);
+            }
         }
 
         dead = null;
@@ -444,27 +319,11 @@ internal static class BodyVisibility
             dead.Add(pair.Key);
         }
 
-        if (dead != null)
-        {
-            foreach (int key in dead)
-                EquipmentRenderers.Remove(key);
-        }
-
-        dead = null;
-        foreach (KeyValuePair<int, DeviceHide> pair in DeviceRenderers)
-        {
-            if (!Destroyed(pair.Value.Renderers))
-                continue;
-
-            dead ??= new List<int>();
-            dead.Add(pair.Key);
-        }
-
         if (dead == null)
             return;
 
         foreach (int key in dead)
-            DeviceRenderers.Remove(key);
+            EquipmentRenderers.Remove(key);
     }
 
     private static bool Destroyed(Renderer[] renderers)
@@ -476,6 +335,26 @@ internal static class BodyVisibility
         }
 
         return false;
+    }
+
+    private static void RestoreHead()
+    {
+        foreach ((Renderer renderer, int layer, bool offscreen) in HeadRenderers)
+        {
+            if (renderer == null)
+                continue;
+            renderer.gameObject.layer = layer;
+            if (renderer is SkinnedMeshRenderer skinned)
+                skinned.updateWhenOffscreen = offscreen;
+        }
+        HeadRenderers.Clear();
+        if (_headSkin != null)
+        {
+            _headSkin.gameObject.layer = _headLayer;
+            if (_headSkin.gameObject.activeSelf != _headActive)
+                _headSkin.gameObject.SetActive(_headActive);
+        }
+        _headSkin = null;
     }
 
     private static void Snapshot(IEnumerable<Renderer> renderers)
@@ -491,24 +370,38 @@ internal static class BodyVisibility
     {
         foreach (Renderer renderer in renderers)
         {
-            if (renderer == null)
-                continue;
-
-            renderer.enabled = true;
-            if (renderer.shadowCastingMode == ShadowCastingMode.ShadowsOnly)
-                renderer.shadowCastingMode = ShadowCastingMode.On;
+            if (renderer != null)
+                Show(renderer);
         }
     }
 
-    private static void Hide(IEnumerable<Renderer> renderers)
+    private static void Show(Renderer renderer)
+    {
+        renderer.enabled = true;
+        if (renderer.shadowCastingMode == ShadowCastingMode.ShadowsOnly)
+            renderer.shadowCastingMode = ShadowCastingMode.On;
+    }
+
+    // keep: the helmet whose head-mounted devices stay shown.
+    private static void Hide(IEnumerable<Renderer> renderers, Transform? keep)
     {
         foreach (Renderer renderer in renderers)
         {
             if (renderer == null)
                 continue;
-
-            renderer.enabled = true;
-            renderer.shadowCastingMode = ShadowCastingMode.ShadowsOnly;
+            bool device = false;
+            if (keep != null && !HeadDevices.TryGetValue(renderer.GetInstanceID(), out device))
+                HeadDevices[renderer.GetInstanceID()] = device = OnHeadDevice(renderer.transform, keep);
+            if (device)
+                Show(renderer);
+            else
+                Hide(renderer);
         }
+    }
+
+    private static void Hide(Renderer renderer)
+    {
+        renderer.enabled = true;
+        renderer.shadowCastingMode = ShadowCastingMode.ShadowsOnly;
     }
 }
