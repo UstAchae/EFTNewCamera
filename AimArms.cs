@@ -4,25 +4,16 @@ using System.Reflection.Emit;
 using Comfort.Common;
 using EFT;
 using EFT.Animations;
-using EFT.Ballistics;
-using EFT.CameraControl;
-using EFT.Interactive;
 using EFT.InventoryLogic;
 using EFT.Settings;
 using HarmonyLib;
 using UnityEngine;
+using static EFTNewCamera.PoseMath;
 
 namespace EFTNewCamera;
 
 internal static class AimArms
 {
-    private struct SkinState
-    {
-        public SkinnedMeshRenderer Renderer;
-        public bool ForceMatrix;
-        public bool UpdateWhenOffscreen;
-    }
-
     private const float BlendSeconds = 0.2f;
     private const float MeanSeconds = 1f;
     private const float AimInSeconds = 0.7f;
@@ -98,8 +89,6 @@ internal static class AimArms
     private const float StateBlendSeconds = 0.3f;
     private static float _holdWeight;
     private static float _tiredWeight;
-    private static Physical? _drainOwner;
-    private static bool _aimDrain;
     private static int _turnFrame = -1;
     private static int _rotateHeadFrame = -1;
     private static Quaternion _headTurnRaw = Quaternion.identity;
@@ -123,15 +112,11 @@ internal static class AimArms
     private static float _release;
     private static Vector3 _smoothedHead;
     private static int _headSmoothFrame = -1;
-    private static bool _patched;
-    private static bool _replayingLaser;
-    private static bool _hasLaserDisplacement;
-    private static Vector3 _laserDisplacement;
-    private static Vector3 _laserPivot;
-    private static Quaternion _laserTurn = Quaternion.identity;
-    private static MethodInfo? _laserLateUpdate;
-    private static Camera? _drawCamera;
-    private static int _laserFrame = -1;
+    // How the gun was carried this frame (about the pivot), which the optic camera, the lasers and the shot take too.
+    private static bool _hasCarry;
+    private static Vector3 _carryDisplacement;
+    private static Vector3 _carryPivot;
+    private static Quaternion _carryTurn = Quaternion.identity;
     private static int _opticFrame = -1;
     private static readonly AccessTools.FieldRef<ProceduralWeaponAnimation, float> LineOfSightAngle =
         AccessTools.FieldRefAccess<ProceduralWeaponAnimation, float>("_currentLineOfSightDeltaAngle");
@@ -140,91 +125,10 @@ internal static class AimArms
     private static Quaternion _viewKick = Quaternion.identity;
     private static int _shotFrame = -1;
     private static Vector3? _shotFireport;
-    private static readonly List<MonoBehaviour> DeferredLasers = new();
-    private static int _skinOwnerId;
-    private static readonly List<Transform> Upperarms = new();
-    private static readonly List<SkinState> Skins = new();
-
-    internal static void Install()
-    {
-        if (_patched)
-            return;
-
-        MethodInfo? target = AccessTools.Method(typeof(PlayerAnimator), nameof(PlayerAnimator.SetAiming));
-        MethodInfo? prefix = typeof(AimArms).GetMethod(nameof(SetAimingPrefix), BindingFlags.NonPublic | BindingFlags.Static);
-        if (target == null || prefix == null)
-            return;
-
-        Harmony harmony = new Harmony(NewCameraPlugin.PluginGuid + ".aimarms");
-        harmony.Patch(target, prefix: new HarmonyMethod(prefix));
-        MethodInfo? findAim = AccessTools.Method(typeof(ProceduralWeaponAnimation), "FindAimTransforms");
-        if (findAim != null)
-            harmony.Patch(findAim, postfix: new HarmonyMethod(typeof(IronSightAlignment), nameof(IronSightAlignment.Invalidate)));
-        MethodInfo? rotateHead = AccessTools.Method(typeof(PlayerBones), nameof(PlayerBones.RotateHead));
-        MethodInfo? rotateHeadPrefix = typeof(AimArms).GetMethod(nameof(RotateHeadPrefix), BindingFlags.NonPublic | BindingFlags.Static);
-        MethodInfo? rotateHeadPostfix = typeof(AimArms).GetMethod(nameof(RotateHeadPostfix), BindingFlags.NonPublic | BindingFlags.Static);
-        if (rotateHead != null && rotateHeadPrefix != null && rotateHeadPostfix != null)
-            harmony.Patch(rotateHead, prefix: new HarmonyMethod(rotateHeadPrefix), postfix: new HarmonyMethod(rotateHeadPostfix) { priority = Priority.Last });
-        MethodInfo? fireMode = AccessTools.Method(typeof(FirearmsAnimator), nameof(FirearmsAnimator.SetFireMode));
-        MethodInfo? fireModeCheck = AccessTools.Method(typeof(FirearmsAnimator), nameof(FirearmsAnimator.TriggerFiremodeCheck));
-        MethodInfo? fireModePostfix = typeof(AimArms).GetMethod(nameof(FireModePostfix), BindingFlags.NonPublic | BindingFlags.Static);
-        MethodInfo? fireModeCheckPostfix = typeof(AimArms).GetMethod(nameof(FireModeCheckPostfix), BindingFlags.NonPublic | BindingFlags.Static);
-        if (fireMode != null && fireModePostfix != null)
-            harmony.Patch(fireMode, postfix: new HarmonyMethod(fireModePostfix));
-        if (fireModeCheck != null && fireModeCheckPostfix != null)
-            harmony.Patch(fireModeCheck, postfix: new HarmonyMethod(fireModeCheckPostfix));
-        MethodInfo? adjustShot = AccessTools.Method(typeof(Player.FirearmController), nameof(Player.FirearmController.AdjustShotVectors));
-        MethodInfo? adjustShotPrefix = typeof(AimArms).GetMethod(nameof(AdjustShotPrefix), BindingFlags.NonPublic | BindingFlags.Static);
-        if (adjustShot != null && adjustShotPrefix != null)
-            harmony.Patch(adjustShot, prefix: new HarmonyMethod(adjustShotPrefix));
-        MethodInfo? aim = AccessTools.Method(typeof(Physical), nameof(Physical.Aim));
-        MethodInfo? aimPrefix = typeof(AimArms).GetMethod(nameof(AimPrefix), BindingFlags.NonPublic | BindingFlags.Static);
-        if (aim != null && aimPrefix != null)
-            harmony.Patch(aim, prefix: new HarmonyMethod(aimPrefix));
-        MethodInfo? holdBreath = AccessTools.Method(typeof(Physical), nameof(Physical.HoldBreath));
-        MethodInfo? holdBreathPostfix = typeof(AimArms).GetMethod(nameof(HoldBreathPostfix), BindingFlags.NonPublic | BindingFlags.Static);
-        if (holdBreath != null && holdBreathPostfix != null)
-            harmony.Patch(holdBreath, postfix: new HarmonyMethod(holdBreathPostfix));
-        MethodInfo? visualPass = AccessTools.Method(typeof(Player), "VisualPass");
-        MethodInfo? visualPassPostfix = typeof(AimArms).GetMethod(nameof(VisualPassPostfix), BindingFlags.NonPublic | BindingFlags.Static);
-        if (visualPass != null && visualPassPostfix != null)
-            harmony.Patch(visualPass, postfix: new HarmonyMethod(visualPassPostfix) { priority = Priority.Last });
-        MethodInfo? shot = AccessTools.Method(typeof(Player), nameof(Player.OnMakingShot));
-        MethodInfo? shotTranspiler = typeof(AimArms).GetMethod(nameof(SkipMountedBodyRecoil), BindingFlags.NonPublic | BindingFlags.Static);
-        if (shot != null && shotTranspiler != null)
-            harmony.Patch(shot, transpiler: new HarmonyMethod(shotTranspiler));
-        MethodInfo? movement = AccessTools.Method(typeof(Player), nameof(Player.MovementUpdate));
-        MethodInfo? movementPostfix = typeof(AimArms).GetMethod(nameof(MovementUpdatePostfix), BindingFlags.NonPublic | BindingFlags.Static);
-        if (movement != null && movementPostfix != null)
-            harmony.Patch(movement, postfix: new HarmonyMethod(movementPostfix));
-        MethodInfo? look = AccessTools.Method(typeof(Player), nameof(Player.Look));
-        MethodInfo? lookPrefix = typeof(AimArms).GetMethod(nameof(LookPrefix), BindingFlags.NonPublic | BindingFlags.Static);
-        MethodInfo? lookPostfix = typeof(AimArms).GetMethod(nameof(LookPostfix), BindingFlags.NonPublic | BindingFlags.Static);
-        if (look != null && lookPrefix != null && lookPostfix != null)
-            harmony.Patch(look, prefix: new HarmonyMethod(lookPrefix), postfix: new HarmonyMethod(lookPostfix));
-        PatchLaser(harmony);
-        MethodInfo? visible = AccessTools.PropertyGetter(typeof(Player), nameof(Player.IsVisible));
-        MethodInfo? visiblePostfix = typeof(AimArms).GetMethod(nameof(VisiblePostfix), BindingFlags.NonPublic | BindingFlags.Static);
-        if (visible != null && visiblePostfix != null)
-            harmony.Patch(visible, postfix: new HarmonyMethod(visiblePostfix));
-        MethodInfo? strategy = AccessTools.Method(typeof(ProceduralWeaponAnimation), nameof(ProceduralWeaponAnimation.SetStrategy), new[] { typeof(EPointOfView) });
-        MethodInfo? strategyPrefix = typeof(AimArms).GetMethod(nameof(SetStrategyPrefix), BindingFlags.NonPublic | BindingFlags.Static);
-        if (strategy != null && strategyPrefix != null)
-            harmony.Patch(strategy, prefix: new HarmonyMethod(strategyPrefix));
-        MethodInfo? thirdEffectors = AccessTools.Method(AccessTools.TypeByName("ThirdPersonStrategy"), "ProcessEffectors");
-        MethodInfo? breathePrefix = typeof(AimArms).GetMethod(nameof(BreatheAsFirstPerson), BindingFlags.NonPublic | BindingFlags.Static);
-        if (thirdEffectors != null && breathePrefix != null)
-            harmony.Patch(thirdEffectors, prefix: new HarmonyMethod(breathePrefix));
-        MethodInfo? effectors = AccessTools.Method(typeof(ProceduralWeaponAnimation), nameof(ProceduralWeaponAnimation.ProcessEffectors));
-        MethodInfo? effectorsPrefix = typeof(AimArms).GetMethod(nameof(EveryFramePrefix), BindingFlags.NonPublic | BindingFlags.Static);
-        if (effectors != null && effectorsPrefix != null)
-            harmony.Patch(effectors, prefix: new HarmonyMethod(effectorsPrefix));
-        _patched = true;
-    }
 
     // The movement update hands Aim_angle / DeltaRotation to the body animator. Measured in game, the
     // bones seen this frame follow the value handed over in the previous frame, so both are kept.
-    private static void MovementUpdatePostfix(Player __instance)
+    internal static void MovementUpdatePostfix(Player __instance)
     {
         if (!NewCameraSwitch.Enabled || !__instance.IsYourPlayer || __instance.MovementContext == null)
             return;
@@ -240,7 +144,7 @@ internal static class AimArms
 
     // Third-person VisualPass only places the weapon (sprint pose included) while the body
     // mesh is on screen. Looking up from the head camera takes the body out of view.
-    private static void VisiblePostfix(Player __instance, ref bool __result)
+    internal static void VisiblePostfix(Player __instance, ref bool __result)
     {
         if (!__result && NewCameraSwitch.Enabled && __instance.IsYourPlayer)
             __result = true;
@@ -254,7 +158,7 @@ internal static class AimArms
     // camera hangs on the same springs and steps with them, but ours follows the head every frame, so above 60 fps
     // the gun moved on every other frame against the view. Our player's springs are stepped every frame, by the
     // frame's own time, instead.
-    private static void EveryFramePrefix(ProceduralWeaponAnimation __instance, ref float deltaTime, ref int nFixedFrames)
+    internal static void EveryFramePrefix(ProceduralWeaponAnimation __instance, ref float deltaTime, ref int nFixedFrames)
     {
         if (!NewCameraSwitch.Enabled || nFixedFrames < 0 || Time.deltaTime <= 0f)
             return;
@@ -268,7 +172,7 @@ internal static class AimArms
     // The third-person procedural animation leaves out the breath and the hands' shake that sway the gun in first
     // person; with the first-person skeleton they are put back, as the first-person procedural animation runs them
     // (into the hands' springs, which the third-person one then steps on).
-    private static void BreatheAsFirstPerson(ProceduralWeaponAnimation pwa, float deltaTime, int nFixedFrames)
+    internal static void BreatheAsFirstPerson(ProceduralWeaponAnimation pwa, float deltaTime, int nFixedFrames)
     {
         if (!NewCameraSwitch.Enabled || !NewCameraSwitch.FirstPersonSkeleton || nFixedFrames <= 0 || pwa.HandsContainer?.WeaponRootAnim == null
             || !pwa.enabled || Mathf.Approximately(deltaTime, 0f))
@@ -286,7 +190,7 @@ internal static class AimArms
         }
     }
 
-    private static void SetStrategyPrefix(ProceduralWeaponAnimation __instance, ref EPointOfView pointOfView)
+    internal static void SetStrategyPrefix(ProceduralWeaponAnimation __instance, ref EPointOfView pointOfView)
     {
         if (!NewCameraSwitch.Enabled)
             return;
@@ -294,18 +198,6 @@ internal static class AimArms
         if (player != null && player.IsYourPlayer && ReferenceEquals(player.ProceduralWeaponAnimation, __instance)
             && player.PointOfView == EPointOfView.ThirdPerson)
             pointOfView = EPointOfView.ThirdPerson;
-    }
-
-    private static void PatchLaser(Harmony harmony)
-    {
-        System.Type? laserType = AccessTools.TypeByName("LaserBeam");
-        _laserLateUpdate = laserType == null ? null : AccessTools.Method(laserType, "LateUpdate");
-        MethodInfo? laserPrefix = typeof(AimArms).GetMethod(nameof(LaserLateUpdatePrefix), BindingFlags.NonPublic | BindingFlags.Static);
-        MethodInfo? laserTranspiler = typeof(AimArms).GetMethod(nameof(DrawForReplayCamera), BindingFlags.NonPublic | BindingFlags.Static);
-        if (_laserLateUpdate == null || laserPrefix == null || laserTranspiler == null)
-            return;
-
-        harmony.Patch(_laserLateUpdate, prefix: new HarmonyMethod(laserPrefix), transpiler: new HarmonyMethod(laserTranspiler));
     }
 
     internal static void Apply(Player player)
@@ -352,7 +244,7 @@ internal static class AimArms
                 _blend = 1f;
                 _blendAiming = true;
                 _blendSightId = 0;
-                _hasLaserDisplacement = false;
+                _hasCarry = false;
                 _viewKick = Quaternion.identity;
                 return;
             }
@@ -397,7 +289,7 @@ internal static class AimArms
 
         if (!aiming && !_blendAiming && _offset.sqrMagnitude < 0.00000001f && Settled(_turn) && Settled(turn) && _blend >= 1f)
         {
-            _hasLaserDisplacement = false;
+            _hasCarry = false;
             _viewKick = _mounted && bones?.Weapon_Root_Anim != null
                 ? ShotKick(player.ProceduralWeaponAnimation, bones.Weapon_Root_Anim.rotation)
                 : Quaternion.identity;
@@ -406,7 +298,7 @@ internal static class AimArms
 
         if (bones == null)
         {
-            _hasLaserDisplacement = false;
+            _hasCarry = false;
             _viewKick = Quaternion.identity;
             return;
         }
@@ -453,26 +345,26 @@ internal static class AimArms
         else if (!aiming && _mounted && bones.Weapon_Root_Anim != null)
             kick = ShotKick(player.ProceduralWeaponAnimation, bones.Weapon_Root_Anim.rotation);
         _viewKick = !aiming && _mounted ? kick : Quaternion.identity;
-        _laserDisplacement = displacement;
-        _laserPivot = pivot;
-        _laserTurn = carryTurn;
-        _hasLaserDisplacement = displacement.sqrMagnitude >= 0.00000001f || !Settled(carryTurn);
-        EnsureUpperarms(player);
-        for (int i = Upperarms.Count - 1; i >= 0; i--)
+        _carryDisplacement = displacement;
+        _carryPivot = pivot;
+        _carryTurn = carryTurn;
+        _hasCarry = displacement.sqrMagnitude >= 0.00000001f || !Settled(carryTurn);
+        BodySkins.EnsureUpperarms(player);
+        for (int i = BodySkins.Upperarms.Count - 1; i >= 0; i--)
         {
-            Transform arm = Upperarms[i];
+            Transform arm = BodySkins.Upperarms[i];
             if (arm == null)
             {
-                Upperarms.RemoveAt(i);
+                BodySkins.Upperarms.RemoveAt(i);
                 continue;
             }
 
-            for (int j = 0; j < Upperarms.Count; j++)
+            for (int j = 0; j < BodySkins.Upperarms.Count; j++)
             {
-                Transform other = Upperarms[j];
+                Transform other = BodySkins.Upperarms[j];
                 if (i != j && other != null && arm.IsChildOf(other))
                 {
-                    Upperarms.RemoveAt(i);
+                    BodySkins.Upperarms.RemoveAt(i);
                     break;
                 }
             }
@@ -488,13 +380,13 @@ internal static class AimArms
         Vector3 aimDisplacement = displacement;
         Quaternion aimTurn = carryTurn;
         System.Func<Vector3, Vector3> carried = point => aimPivot + aimDisplacement + aimTurn * (point - aimPivot);
-        GripArms(bones, null, carried, carryTurn);
-        foreach (Transform arm in Upperarms)
+        LimbIk.GripArms(bones, BodySkins.Upperarms, null, carried, carryTurn);
+        foreach (Transform arm in BodySkins.Upperarms)
         {
-            if (arm != null && !Reaching(arm))
+            if (arm != null && !LimbIk.Reaching(arm))
                 Carry(arm, pivot, displacement, carryTurn);
         }
-        ReachLimbs(carried);
+        LimbIk.Reach(carried);
 
         if (weapon == null)
             return;
@@ -518,13 +410,13 @@ internal static class AimArms
             && ReferenceEquals(firearm.FirearmsAnimator, animator);
     }
 
-    private static void FireModePostfix(FirearmsAnimator __instance, bool skipAnimation)
+    internal static void FireModePostfix(FirearmsAnimator __instance, bool skipAnimation)
     {
         if (NewCameraSwitch.Enabled && !skipAnimation && IsMainFirearmsAnimator(__instance))
             StartHandAction(FireModeMinSeconds);
     }
 
-    private static void FireModeCheckPostfix(FirearmsAnimator __instance)
+    internal static void FireModeCheckPostfix(FirearmsAnimator __instance)
     {
         if (NewCameraSwitch.Enabled && IsMainFirearmsAnimator(__instance))
             StartHandAction(FireModeMinSeconds);
@@ -552,12 +444,12 @@ internal static class AimArms
             _handAction = false;
     }
 
-    private static void AdjustShotPrefix(Player.FirearmController __instance, ref Vector3 position, ref Vector3 direction)
+    internal static void AdjustShotPrefix(Player.FirearmController __instance, ref Vector3 position, ref Vector3 direction)
     {
         if (NewCameraSwitch.Enabled && __instance.Item is Weapon { BoltAction: true }
             && ReferenceEquals(Singleton<GameWorld>.Instance?.MainPlayer?.HandsController, __instance))
             StartHandAction(BoltMinSeconds);
-        if (!NewCameraSwitch.Enabled || !_hasLaserDisplacement || Time.frameCount - _shotFrame > 2)
+        if (!NewCameraSwitch.Enabled || !_hasCarry || Time.frameCount - _shotFrame > 2)
             return;
         Player? player = Singleton<GameWorld>.Instance?.MainPlayer;
         if (player == null || !ReferenceEquals(player.HandsController, __instance))
@@ -565,44 +457,28 @@ internal static class AimArms
         if (_shotFireport.HasValue && (__instance.CurrentFireport?.Original?.position - _shotFireport.Value)?.sqrMagnitude < 0.000001f)
             return;
 
-        position = _laserPivot + _laserDisplacement + _laserTurn * (position - _laserPivot);
-        direction = _laserTurn * direction;
+        position = _carryPivot + _carryDisplacement + _carryTurn * (position - _carryPivot);
+        direction = _carryTurn * direction;
     }
 
     internal static void CarryOptic(Camera camera)
     {
-        if (!_hasLaserDisplacement || _opticFrame == Time.frameCount)
+        if (!_hasCarry || _opticFrame == Time.frameCount)
             return;
 
         _opticFrame = Time.frameCount;
-        Carry(camera.transform, _laserPivot, _laserDisplacement, _laserTurn);
+        CarryWithGun(camera.transform);
     }
 
-    // The turn that takes one direction onto another, however small. Quaternion.FromToRotation calls anything under
-    // about 0.08 degrees parallel and returns no turn, then the whole of it at once past that: the sight's
-    // alignment set off a few pixels at once halfway through the aim-in.
-    internal static Quaternion TurnFromTo(Vector3 from, Vector3 to)
+    internal static bool GunCarried => _hasCarry;
+
+    internal static void CarryWithGun(Transform transform)
     {
-        Vector3 axis = Vector3.Cross(from, to);
-        float sine = axis.magnitude;
-        float cosine = Vector3.Dot(from, to);
-        if (sine < 1e-12f)
-            return cosine >= 0f ? Quaternion.identity : Quaternion.FromToRotation(from, to);
-        return Quaternion.AngleAxis(Mathf.Atan2(sine, cosine) * Mathf.Rad2Deg, axis / sine);
+        Carry(transform, _carryPivot, _carryDisplacement, _carryTurn);
     }
 
-    // Quaternion.Angle and == treat anything under about 0.16 degrees as no turn at all,
-    // which shows as a visible hop when the last bit of the follow delay is dropped.
-    private static bool Settled(Quaternion turn)
-    {
-        float sine = new Vector3(turn.x, turn.y, turn.z).magnitude;
-        return 2f * Mathf.Atan2(sine, Mathf.Abs(turn.w)) * Mathf.Rad2Deg < 0.005f;
-    }
-
-    private static void Carry(Transform transform, Vector3 pivot, Vector3 displacement, Quaternion turn)
-    {
-        transform.SetPositionAndRotation(pivot + displacement + turn * (transform.position - pivot), turn * transform.rotation);
-    }
+    // The gun left where the game put it (not aimed, or back from the aim).
+    internal static bool GunAtRest => _offset.sqrMagnitude < 0.00000001f && Settled(_turn);
 
     private static Quaternion Recoil(ProceduralWeaponAnimation? animation, Transform? weapon, Vector3 pivot, ref Vector3 displacement, ref Quaternion turn)
     {
@@ -665,7 +541,7 @@ internal static class AimArms
         float along = _mountBlend * _mountBlend * (3f - 2f * _mountBlend);
         if (along <= 0.0001f)
         {
-            AimGrenadePicture(player);
+            GrenadeSight.AimPicture(player);
             return false;
         }
 
@@ -677,7 +553,7 @@ internal static class AimArms
         Vector3 displacement = partialCameraPosition - CameraPosition.Resolve(Vector3.zero, partialCamera) - head.position;
         MoveBody(player, bones, head, displacement, turn);
         ApplyMountedLook(bones, head);
-        AimGrenadePicture(player);
+        GrenadeSight.AimPicture(player);
         return true;
     }
 
@@ -687,15 +563,15 @@ internal static class AimArms
     private static void MoveBody(Player player, PlayerBones bones, Transform head, Vector3 displacement, Quaternion turn)
     {
         Transform moved = FollowRoot(bones, head);
-        EnsureUpperarms(player);
-        EnsureBodySkins(player);
+        BodySkins.EnsureUpperarms(player);
+        BodySkins.EnsureBody(player);
         Transform? pelvis = bones.Pelvis?.Original;
         bool split = pelvis != null && moved.IsChildOf(pelvis);
         HeldPose[] planted = PlantedPoses(bones, split ? pelvis! : moved);
         System.Func<Vector3, Vector3> stay = point => point;
-        GripArms(bones, moved, stay, Quaternion.identity);
+        LimbIk.GripArms(bones, BodySkins.Upperarms, moved, stay, Quaternion.identity);
         if (split)
-            GripLegs(bones, pelvis!);
+            LimbIk.GripLegs(bones, pelvis!);
 
         // The gun stays planted, so the body has to come to the sight. Moving only the upper body squashed it
         // into the hips and twisted it off the legs. Now the hips carry the move and half the turn about the
@@ -722,7 +598,7 @@ internal static class AimArms
         }
         CarryLooseSplit(bones.LeftShoulder?.Original, moved, pelvis, waist, shift, hips, bentWaist, torso);
         CarryLooseSplit(bones.RightShoulder?.Original, moved, pelvis, waist, shift, hips, bentWaist, torso);
-        ReachLimbs(bodyMove, hipsMove);
+        LimbIk.Reach(bodyMove, hipsMove);
         for (int i = 0; i < planted.Length; i++)
             planted[i].Transform.SetPositionAndRotation(planted[i].Position, planted[i].Rotation);
     }
@@ -769,7 +645,7 @@ internal static class AimArms
         Vector3 pivot = weapon.position + weapon.rotation * localPivot;
         Quaternion turn = Quaternion.AngleAxis(swing, Vector3.up);
         Vector3 displacement = pivot + turn * (head.position - pivot) - head.position;
-        EnsureUpperarms(player);
+        BodySkins.EnsureUpperarms(player);
         MoveBody(player, bones, head, displacement, turn);
     }
 
@@ -827,12 +703,12 @@ internal static class AimArms
         if (chest != null && !Settled(chestKick))
         {
             Transform upper = FollowRoot(bones, chest);
-            EnsureUpperarms(player);
+            BodySkins.EnsureUpperarms(player);
             List<HeldPose> held = new();
             Hold(held, bones.Weapon_Root_Anim, upper);
             Hold(held, bones.Weapon_Root_Third, upper);
             System.Func<Vector3, Vector3> stay = point => point;
-            GripArms(bones, upper, stay, Quaternion.identity);
+            LimbIk.GripArms(bones, BodySkins.Upperarms, upper, stay, Quaternion.identity);
             Vector3 pivot = chest.position;
             Carry(chest, pivot, Vector3.zero, chestKick);
             if (bones.Shoulders != null)
@@ -844,7 +720,7 @@ internal static class AimArms
             CarryLoose(bones.RightShoulder?.Original, chest, pivot, Vector3.zero, chestKick);
             Vector3 recoilPivot = pivot;
             Quaternion recoilTurn = chestKick;
-            ReachLimbs(point => recoilPivot + recoilTurn * (point - recoilPivot));
+            LimbIk.Reach(point => recoilPivot + recoilTurn * (point - recoilPivot));
             foreach (HeldPose pose in held)
                 pose.Transform.SetPositionAndRotation(pose.Position, pose.Rotation);
             if (neck == null || neck.IsChildOf(chest))
@@ -903,148 +779,6 @@ internal static class AimArms
 
     private const float HipTurnShare = 0.5f;
 
-    private struct Limb
-    {
-        internal Transform Upper;
-        internal Transform Lower;
-        internal Transform End;
-        internal float UpperLength;
-        internal float LowerLength;
-        internal Vector3 Bend;
-        internal Vector3 TargetPosition;
-        internal Quaternion TargetRotation;
-        internal bool Leg;
-    }
-
-    private static readonly List<Limb> Limbs = new();
-
-    // Where each hand should end up (target maps its current pose there), with the arm's lengths and elbow.
-    private static void GripArms(PlayerBones bones, Transform? moved, System.Func<Vector3, Vector3> target, Quaternion turn)
-    {
-        Limbs.Clear();
-        AddArm(bones.LeftPalm, moved, target, turn);
-        AddArm(bones.RightPalm, moved, target, turn);
-    }
-
-    private static void AddArm(Transform? hand, Transform? moved, System.Func<Vector3, Vector3> target, Quaternion turn)
-    {
-        if (hand == null || (moved != null && !hand.IsChildOf(moved)))
-            return;
-        Transform? upper = null;
-        foreach (Transform arm in Upperarms)
-        {
-            if (arm != null && hand.IsChildOf(arm))
-            {
-                upper = arm;
-                break;
-            }
-        }
-        if (upper == null)
-            return;
-
-        Transform lower = hand;
-        while (lower.parent != null && lower.parent != upper)
-            lower = lower.parent;
-        if (lower.parent != upper || lower == hand)
-            return;
-        AddLimb(upper, lower, hand, target(hand.position), turn * hand.rotation, false);
-    }
-
-    // The feet stay where they are; thigh, calf and foot are found by the rig's bone names.
-    private static void GripLegs(PlayerBones bones, Transform pelvis)
-    {
-        AddLeg(bones.LeftThigh1?.Original, pelvis, "LCalf", "LFoot");
-        AddLeg(bones.RightThigh1?.Original, pelvis, "RCalf", "RFoot");
-    }
-
-    private static void AddLeg(Transform? thigh, Transform pelvis, string calfName, string footName)
-    {
-        if (thigh == null || !thigh.IsChildOf(pelvis))
-            return;
-        Transform? calf = FindBelow(thigh, calfName);
-        Transform? foot = calf != null ? FindBelow(calf, footName) : null;
-        if (calf == null || foot == null)
-            return;
-        AddLimb(thigh, calf, foot, foot.position, foot.rotation, true);
-    }
-
-    private static Transform? FindBelow(Transform root, string name)
-    {
-        foreach (Transform child in root.GetComponentsInChildren<Transform>(true))
-        {
-            if (child != root && child.name.EndsWith(name, System.StringComparison.Ordinal))
-                return child;
-        }
-        return null;
-    }
-
-    private static void AddLimb(Transform upper, Transform lower, Transform end, Vector3 position, Quaternion rotation, bool leg)
-    {
-        Limbs.Add(new Limb
-        {
-            Upper = upper,
-            Lower = lower,
-            End = end,
-            UpperLength = Vector3.Distance(upper.position, lower.position),
-            LowerLength = Vector3.Distance(lower.position, end.position),
-            Bend = lower.position,
-            TargetPosition = position,
-            TargetRotation = rotation,
-            Leg = leg
-        });
-    }
-
-    private static bool Reaching(Transform upper)
-    {
-        foreach (Limb limb in Limbs)
-        {
-            if (limb.Upper == upper)
-                return true;
-        }
-        return false;
-    }
-
-    // Bend each limb so its end reaches the target pose (two-bone IK by the law of cosines). An elbow keeps to
-    // the side it was on, moved by armMove; a knee likewise, moved by legMove (the hips).
-    private static void ReachLimbs(System.Func<Vector3, Vector3> armMove, System.Func<Vector3, Vector3>? legMove = null)
-    {
-        foreach (Limb limb in Limbs)
-        {
-            if (limb.Upper == null || limb.Lower == null || limb.End == null || limb.UpperLength < 0.001f || limb.LowerLength < 0.001f)
-                continue;
-
-            Vector3 root = limb.Upper.position;
-            Vector3 toEnd = limb.TargetPosition - root;
-            float reach = toEnd.magnitude;
-            if (reach < 0.001f)
-                continue;
-            Vector3 along = toEnd / reach;
-            float distance = Mathf.Clamp(reach, Mathf.Abs(limb.UpperLength - limb.LowerLength) + 0.001f, limb.UpperLength + limb.LowerLength - 0.001f);
-            Vector3 side = Vector3.ProjectOnPlane((limb.Leg && legMove != null ? legMove : armMove)(limb.Bend) - root, along);
-            if (side.sqrMagnitude < 0.00000001f)
-                side = Vector3.ProjectOnPlane(limb.Lower.position - root, along);
-            if (side.sqrMagnitude < 0.00000001f)
-                continue;
-            side.Normalize();
-
-            float cos = (limb.UpperLength * limb.UpperLength + distance * distance - limb.LowerLength * limb.LowerLength) / (2f * limb.UpperLength * distance);
-            float sin = Mathf.Sqrt(Mathf.Max(0f, 1f - cos * cos));
-            Vector3 bend = root + along * (limb.UpperLength * cos) + side * (limb.UpperLength * sin);
-            limb.Upper.rotation = TurnFromTo(limb.Lower.position - root, bend - root) * limb.Upper.rotation;
-            limb.Lower.rotation = TurnFromTo(limb.End.position - limb.Lower.position, limb.TargetPosition - limb.Lower.position) * limb.Lower.rotation;
-            limb.End.SetPositionAndRotation(limb.TargetPosition, limb.TargetRotation);
-        }
-        Limbs.Clear();
-    }
-
-    private static Quaternion Twist(Quaternion rotation, Vector3 axis)
-    {
-        Vector3 part = Vector3.Project(new Vector3(rotation.x, rotation.y, rotation.z), axis);
-        Quaternion twist = new Quaternion(part.x, part.y, part.z, rotation.w);
-        float length = Mathf.Sqrt(twist.x * twist.x + twist.y * twist.y + twist.z * twist.z + twist.w * twist.w);
-        return length < 0.0001f ? Quaternion.identity : new Quaternion(twist.x / length, twist.y / length, twist.z / length, twist.w / length);
-    }
-
     // A bone outside the moved chain takes the hips' step unless it already sits under the hips, then the
     // upper body's bend.
     private static void CarryLooseSplit(Transform? bone, Transform moved, Transform? pelvis, Vector3 waist, Vector3 shift, Quaternion hips, Vector3 bentWaist, Quaternion torso)
@@ -1090,7 +824,7 @@ internal static class AimArms
         if (forward.sqrMagnitude < 0.0001f)
             return false;
         forward.Normalize();
-        bool ags = GrenadeLauncher(player);
+        bool ags = GrenadeSight.InHands(player);
         if (ags)
         {
             // The sight body only yaws. The picture inside the glass follows the barrel, and the eye sits on the sight.
@@ -1118,127 +852,6 @@ internal static class AimArms
         rotation = Quaternion.LookRotation(forward, up);
         position = sightPosition - forward * (ForwardDistance + SightRelief(animation, bone));
         return true;
-    }
-
-    private static bool GrenadeLauncher(Player player)
-    {
-        return StationaryHeld(player, out StationaryWeapon? weapon)
-            && weapon!.Animation == StationaryWeapon.EStationaryAnimationType.AGS_17;
-    }
-
-    private static bool StationaryHeld(Player player, out StationaryWeapon? weapon)
-    {
-        weapon = null;
-        if (player.HandsController == null || player.MovementContext == null || !player.MovementContext.IsStationaryWeaponInHands)
-            return false;
-        weapon = player.MovementContext.StationaryWeapon;
-        return weapon != null;
-    }
-
-    // The launcher sight stays level. The picture inside it has to look at the same point the round will reach,
-    // using the barrel pose after the body has been moved. The optic camera already copied its pivot earlier this frame.
-    private static void AimGrenadePicture(Player player)
-    {
-        if (!GrenadeLauncher(player) || player.HandsController is not Player.FirearmController firearm || !firearm.IsAiming)
-            return;
-        try
-        {
-            ProceduralWeaponAnimation? animation = player.ProceduralWeaponAnimation;
-            if (animation == null || firearm.Weapon == null || firearm.CurrentFireport?.Original == null)
-                return;
-
-            Vector3 direction = firearm.WeaponDirection;
-            if (direction.sqrMagnitude < 0.0001f)
-                return;
-            direction.Normalize();
-            Vector3 start = firearm.CurrentFireport.position - direction * firearm.WeaponLn / 5f;
-            if (!GrenadeLanding(player, firearm, start, direction, out Vector3 landing))
-                return;
-
-            OpticSight? sight = Scopes.Current(animation)?.ScopePrefabCache?.CurrentModOpticSight;
-            Transform? pivot = sight?.ScopeData != null ? sight.ScopeData.transform : null;
-            Camera? optic = CameraManager.Instance?.OpticCameraManager?.Camera;
-            if (sight == null || pivot == null)
-                return;
-
-            try
-            {
-                animation.OpticLookAtGlobal(landing);
-            }
-            catch (System.Exception)
-            {
-            }
-
-            if (Vector3.Angle(pivot.forward, landing - pivot.position) > 0.05f)
-                sight.LookAt(landing, firearm.CurrentFireport.Original.forward);
-            if (optic != null)
-                optic.transform.SetPositionAndRotation(pivot.position, pivot.rotation);
-        }
-        catch (System.Exception)
-        {
-        }
-    }
-
-    private const float GrenadeStep = 0.01f;
-    private const int GrenadeStepsPerCast = 4;
-    private const float GrenadeFlightSeconds = 13f;
-    private static readonly RaycastHit[] GrenadeHits = new RaycastHit[16];
-
-    // Steps the round the same way the game does (G1 drag plus gravity, 10 ms steps) and returns the first
-    // thing it would hit. The player and the launcher itself are ignored.
-    private static bool GrenadeLanding(Player player, Player.FirearmController firearm, Vector3 start, Vector3 direction, out Vector3 landing)
-    {
-        landing = default;
-        AmmoTemplate? ammo = firearm.Weapon.CurrentAmmoTemplate;
-        if (ammo == null || ammo.BulletMassGram <= 0f || ammo.BulletDiameterMilimeters <= 0f || ammo.BallisticCoeficient <= 0f)
-            return false;
-
-        float massKg = ammo.BulletMassGram / 1000f;
-        float diameterM = ammo.BulletDiameterMilimeters / 1000f;
-        float coefficient = massKg * 0.0014223f / (diameterM * diameterM * ammo.BallisticCoeficient);
-        float slowdown = 1.2f * diameterM * diameterM * Mathf.PI / 4f;
-        Vector3 gravity = Physics.gravity;
-        Vector3 position = start;
-        Vector3 velocity = direction * (ammo.InitialSpeed * firearm.Weapon.SpeedFactor);
-        Transform? launcher = player.MovementContext?.StationaryWeapon != null ? player.MovementContext.StationaryWeapon.transform : null;
-        int mask = BallisticsCalculatorConstants.HitMask;
-
-        Vector3 castFrom = position;
-        int steps = Mathf.CeilToInt(GrenadeFlightSeconds / GrenadeStep);
-        for (int i = 1; i <= steps; i++)
-        {
-            float speed = velocity.magnitude;
-            float drag = EFT.Ballistics.Shot.CalculateG1DragCoefficient(speed) * coefficient;
-            Vector3 acceleration = gravity + slowdown * (0f - drag) * speed * speed / (2f * massKg) * velocity.normalized;
-            position += velocity * GrenadeStep + 5E-05f * acceleration;
-            velocity += acceleration * GrenadeStep;
-            if (i % GrenadeStepsPerCast != 0 && i != steps)
-                continue;
-
-            Vector3 segment = position - castFrom;
-            float length = segment.magnitude;
-            if (length > 0.0001f)
-            {
-                int count = Physics.RaycastNonAlloc(castFrom, segment / length, GrenadeHits, length, mask, QueryTriggerInteraction.Ignore);
-                float best = float.MaxValue;
-                for (int h = 0; h < count; h++)
-                {
-                    RaycastHit hit = GrenadeHits[h];
-                    if (hit.collider == null || hit.distance >= best)
-                        continue;
-                    Transform owner = hit.collider.transform;
-                    if (owner.GetComponentInParent<Player>() == player || (launcher != null && owner.IsChildOf(launcher)))
-                        continue;
-                    best = hit.distance;
-                    landing = hit.point;
-                }
-                if (best < float.MaxValue)
-                    return true;
-            }
-            castFrom = position;
-        }
-
-        return false;
     }
 
     internal static Quaternion KickView(Quaternion view)
@@ -1391,7 +1004,7 @@ internal static class AimArms
         return TurnFromTo(sightInCamera, Vector3.forward);
     }
 
-    private static void VisualPassPostfix(Player __instance)
+    internal static void VisualPassPostfix(Player __instance)
     {
         if (!NewCameraSwitch.Enabled || !__instance.IsYourPlayer)
             return;
@@ -1408,7 +1021,6 @@ internal static class AimArms
             HeadwearTilt.Apply(__instance, head);
         }
     }
-
 
     private static Vector3 _freeLookFrom;
     private static float _freeLookWeight;
@@ -1615,7 +1227,7 @@ internal static class AimArms
                 holding = player.Physical.HoldingBreath;
                 tired = player.Physical.HandsStamina != null && player.Physical.HandsStamina.Exhausted;
                 if (NewCameraSwitch.Enabled && player.Physical is Physical physical)
-                    ApplyAimDrain(physical);
+                    AimStamina.ApplyAimDrain(physical);
             }
         }
         catch
@@ -1647,53 +1259,6 @@ internal static class AimArms
     private static float Smooth(float t)
     {
         return t * t * (3f - 2f * t);
-    }
-
-    private static bool AimPrefix(Physical __instance, float mass)
-    {
-        Player? player = Singleton<GameWorld>.Instance?.MainPlayer;
-        if (player == null || !ReferenceEquals(player.Physical, __instance))
-            return true;
-        if (!NewCameraSwitch.Enabled)
-        {
-            SetAimDrain(__instance, false);
-            return true;
-        }
-
-        __instance._aimMass = mass;
-        __instance.Consumptions[Physical.EConsumptionType.Aim].Delta.SetDirty();
-        ApplyAimDrain(__instance);
-        return false;
-    }
-
-    private static void HoldBreathPostfix(Physical __instance)
-    {
-        Player? player = Singleton<GameWorld>.Instance?.MainPlayer;
-        if (player == null || !ReferenceEquals(player.Physical, __instance) || !NewCameraSwitch.Enabled)
-            return;
-        ApplyAimDrain(__instance);
-    }
-
-    private static void ApplyAimDrain(Physical physical)
-    {
-        SetAimDrain(physical, physical._aimMass > 0f && physical.HoldingBreath);
-    }
-
-    private static void SetAimDrain(Physical physical, bool active)
-    {
-        if (!ReferenceEquals(_drainOwner, physical))
-        {
-            _drainOwner = physical;
-            _aimDrain = false;
-        }
-        if (_aimDrain == active)
-            return;
-
-        _aimDrain = active;
-        Physical.Consumption consumption = physical.Consumptions[Physical.EConsumptionType.Aim];
-        consumption.SetActive(physical, active);
-        if (!active)
-            physical.Stamina.RemoveConsumption(consumption);
     }
 
     private static bool UpdateTurn(Player player, Quaternion rawCamera)
@@ -1763,7 +1328,7 @@ internal static class AimArms
     private static Vector2 _verticalLimitSaved;
     private static bool _lookLimitSwapped;
 
-    private static void LookPrefix(Player __instance)
+    internal static void LookPrefix(Player __instance)
     {
         _lookLimitSwapped = false;
         if (!NewCameraSwitch.Enabled || !__instance.IsYourPlayer)
@@ -1786,7 +1351,7 @@ internal static class AimArms
         _lookLimitSwapped = true;
     }
 
-    private static void LookPostfix()
+    internal static void LookPostfix()
     {
         if (!_lookLimitSwapped)
             return;
@@ -1800,7 +1365,7 @@ internal static class AimArms
         }
     }
 
-    private static void RotateHeadPostfix(PlayerBones __instance, Vector3 offset)
+    internal static void RotateHeadPostfix(PlayerBones __instance, Vector3 offset)
     {
         if (NewCameraSwitch.Enabled)
             TurnLook(__instance);
@@ -1865,7 +1430,7 @@ internal static class AimArms
         rotation = _smoothLook * steadyTurn;
     }
 
-    private static void RotateHeadPrefix(PlayerBones __instance, ref Vector3 offset)
+    internal static void RotateHeadPrefix(PlayerBones __instance, ref Vector3 offset)
     {
         if (!NewCameraSwitch.Enabled)
             return;
@@ -1959,13 +1524,6 @@ internal static class AimArms
         return LookTurn(player.MovementContext, yaw, down);
     }
 
-    private static Quaternion Scale(Quaternion rotation, float amount)
-    {
-        if (rotation.w < 0f)
-            rotation = new Quaternion(-rotation.x, -rotation.y, -rotation.z, -rotation.w);
-        return Quaternion.SlerpUnclamped(Quaternion.identity, rotation, amount);
-    }
-
     private static bool ResolveIronSight(ProceduralWeaponAnimation animation, Transform bone, out Vector3 position, out Vector3 forward)
     {
         position = bone.position;
@@ -1993,47 +1551,9 @@ internal static class AimArms
         return boneDepth - plane.Depth;
     }
 
-    internal static void ReplayLasers(Camera camera)
-    {
-        if (_laserLateUpdate == null || DeferredLasers.Count == 0)
-            return;
-
-        _drawCamera = camera;
-        _replayingLaser = true;
-        try
-        {
-            foreach (MonoBehaviour laser in DeferredLasers)
-            {
-                if (laser == null || !laser.isActiveAndEnabled)
-                    continue;
-
-                Transform emitter = laser.transform;
-                bool alreadyMoved = EmitterAlreadyMoved(emitter);
-                Vector3 saved = emitter.position;
-                Quaternion savedRotation = emitter.rotation;
-                if (_hasLaserDisplacement && !alreadyMoved)
-                    Carry(emitter, _laserPivot, _laserDisplacement, _laserTurn);
-                _laserLateUpdate.Invoke(laser, null);
-                if (_hasLaserDisplacement && !alreadyMoved)
-                    emitter.SetPositionAndRotation(saved, savedRotation);
-            }
-        }
-        finally
-        {
-            _replayingLaser = false;
-            _drawCamera = null;
-        }
-    }
-
-    public static Camera? GetDrawCamera()
-    {
-        // Under an upscaler the FPS camera's lasers are drawn apart and put in after the upscale (NightVisionIr.cs).
-        return NightVisionEyepieces.LaserDrawCamera(_drawCamera);
-    }
-
     // First person returns before the body shot reaction. Mounting already shrinks the
     // hand recoil; the third-person reaction is the full punch and ignores the bipod.
-    private static IEnumerable<CodeInstruction> SkipMountedBodyRecoil(IEnumerable<CodeInstruction> instructions)
+    internal static IEnumerable<CodeInstruction> SkipMountedBodyRecoil(IEnumerable<CodeInstruction> instructions)
     {
         MethodInfo? getter = AccessTools.PropertyGetter(typeof(Player), nameof(Player.FirstPersonPointOfView));
         MethodInfo? skip = typeof(AimArms).GetMethod(nameof(OrMounted), BindingFlags.NonPublic | BindingFlags.Static);
@@ -2055,163 +1575,6 @@ internal static class AimArms
             return true;
 
         return NewCameraSwitch.Enabled && player.IsYourPlayer && player.MovementContext != null && player.MovementContext.IsInMountedState;
-    }
-
-    private static IEnumerable<CodeInstruction> DrawForReplayCamera(IEnumerable<CodeInstruction> instructions)
-    {
-        List<CodeInstruction> list = new List<CodeInstruction>(instructions);
-        MethodInfo? getCamera = typeof(AimArms).GetMethod(nameof(GetDrawCamera), BindingFlags.Public | BindingFlags.Static);
-        if (getCamera == null)
-            return list;
-
-        for (int i = 0; i < list.Count; i++)
-        {
-            if (list[i].opcode != OpCodes.Call || list[i].operand is not MethodInfo called || called.Name != nameof(Graphics.DrawMesh))
-                continue;
-
-            for (int previous = i - 1; previous >= 0 && previous >= i - 8; previous--)
-            {
-                if (list[previous].opcode != OpCodes.Ldnull)
-                    continue;
-
-                list[previous] = new CodeInstruction(OpCodes.Call, getCamera);
-                break;
-            }
-        }
-
-        return list;
-    }
-
-    private static bool EmitterAlreadyMoved(Transform emitter)
-    {
-        foreach (Transform arm in Upperarms)
-        {
-            if (arm != null && emitter.IsChildOf(arm))
-                return true;
-        }
-
-        Player? player = Comfort.Common.Singleton<GameWorld>.Instance?.MainPlayer;
-        Transform? weapon = player?.PlayerBones?.Weapon_Root_Anim;
-        return weapon != null && emitter.IsChildOf(weapon);
-    }
-
-    private static bool LaserLateUpdatePrefix(MonoBehaviour __instance)
-    {
-        if (_replayingLaser || __instance == null || !NewCameraSwitch.Enabled)
-            return true;
-
-        if (_laserFrame != Time.frameCount)
-        {
-            DeferredLasers.Clear();
-            _laserFrame = Time.frameCount;
-        }
-
-        Player? player = Comfort.Common.Singleton<GameWorld>.Instance?.MainPlayer;
-        if (player == null || !player.IsYourPlayer)
-            return true;
-        bool aiming = player.HandsController != null && player.HandsController.IsAiming;
-        if (!aiming && _offset.sqrMagnitude < 0.00000001f && Settled(_turn))
-            return true;
-
-        Transform playerRoot = ((Component)player).transform;
-        Transform? weapon = player.PlayerBones?.Weapon_Root_Anim;
-        bool onPlayer = __instance.transform.IsChildOf(playerRoot);
-        bool onWeapon = weapon != null && __instance.transform.IsChildOf(weapon);
-        if (!onPlayer && !onWeapon)
-            return true;
-
-        DeferredLasers.Add(__instance);
-        return false;
-    }
-
-    private static void EnsureUpperarms(Player player)
-    {
-        int ownerId = player.GetInstanceID();
-        if (_skinOwnerId == ownerId && Upperarms.Count > 0)
-            return;
-
-        RestoreSkins();
-        _skinOwnerId = ownerId;
-        HashSet<Transform> seen = new();
-        foreach (SkinnedMeshRenderer renderer in player.GetComponentsInChildren<SkinnedMeshRenderer>(true))
-        {
-            if (renderer == null)
-                continue;
-
-            bool carriesArm = false;
-            foreach (Transform bone in renderer.bones)
-            {
-                if (bone == null || !IsUpperarm(bone.name))
-                    continue;
-                carriesArm = true;
-                if (seen.Add(bone))
-                    Upperarms.Add(bone);
-            }
-
-            if (!carriesArm)
-            {
-                RememberSkin(renderer);
-                continue;
-            }
-
-            RememberSkin(renderer);
-        }
-    }
-
-    private static int _bodySkinOwner = int.MinValue;
-
-    private static void EnsureBodySkins(Player player)
-    {
-        int ownerId = player.GetInstanceID();
-        if (_bodySkinOwner == ownerId)
-            return;
-
-        _bodySkinOwner = ownerId;
-        foreach (SkinnedMeshRenderer renderer in player.GetComponentsInChildren<SkinnedMeshRenderer>(true))
-        {
-            if (renderer != null)
-                RememberSkin(renderer);
-        }
-    }
-
-    private static void RememberSkin(SkinnedMeshRenderer renderer)
-    {
-        foreach (SkinState skin in Skins)
-        {
-            if (skin.Renderer == renderer)
-                return;
-        }
-
-        Skins.Add(new SkinState
-        {
-            Renderer = renderer,
-            ForceMatrix = renderer.forceMatrixRecalculationPerRender,
-            UpdateWhenOffscreen = renderer.updateWhenOffscreen
-        });
-        renderer.forceMatrixRecalculationPerRender = true;
-        renderer.updateWhenOffscreen = true;
-    }
-
-    private static bool IsUpperarm(string name)
-    {
-        string normalized = name.Replace(" ", string.Empty).Replace("_", string.Empty);
-        return normalized.IndexOf("upperarm", System.StringComparison.OrdinalIgnoreCase) >= 0;
-    }
-
-    private static void RestoreSkins()
-    {
-        foreach (SkinState skin in Skins)
-        {
-            if (skin.Renderer == null)
-                continue;
-            skin.Renderer.forceMatrixRecalculationPerRender = skin.ForceMatrix;
-            skin.Renderer.updateWhenOffscreen = skin.UpdateWhenOffscreen;
-        }
-
-        Skins.Clear();
-        Upperarms.Clear();
-        _skinOwnerId = 0;
-        _bodySkinOwner = int.MinValue;
     }
 
     internal static void Release(Player? player)
@@ -2237,7 +1600,7 @@ internal static class AimArms
         _freeLookReturning = false;
         _pitchUnderLook = false;
         _headLock = 0f;
-        RestoreSkins();
+        BodySkins.Restore();
         if (!_suppress)
             return;
 
@@ -2261,7 +1624,7 @@ internal static class AimArms
         }
     }
 
-    private static void SetAimingPrefix(PlayerAnimator __instance, ref bool isAiming)
+    internal static void SetAimingPrefix(PlayerAnimator __instance, ref bool isAiming)
     {
         if (!_suppress || !isAiming || !NewCameraSwitch.Enabled)
             return;

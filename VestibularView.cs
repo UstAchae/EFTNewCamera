@@ -116,7 +116,7 @@ internal static class VestibularView
         if (toTarget.sqrMagnitude < 0.0001f)
             toTarget = forward;
         // The shortest turn from where the camera looks to the point: it has no part about the view axis.
-        Quaternion steady = AimArms.TurnFromTo(cameraRotation * Vector3.forward, toTarget) * cameraRotation;
+        Quaternion steady = PoseMath.TurnFromTo(cameraRotation * Vector3.forward, toTarget) * cameraRotation;
         if (Torsion > 0f)
         {
             float roll = Roll(Quaternion.Inverse(intended) * steady);

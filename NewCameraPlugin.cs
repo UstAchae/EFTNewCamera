@@ -15,7 +15,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "justachae.thirdpersoncamera";
     public const string PluginName = "Justachae's Third-Person Skeleton and Camera";
-    public const string PluginVersion = "1.2.0";
+    public const string PluginVersion = "1.2.1";
 
     internal static BepInEx.Logging.ManualLogSource? Log;
     private const string SkeletonThird = "第三人称骨架", SkeletonFirst = "第一人称骨架";
@@ -30,7 +30,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         ConfigEntry<string> skeleton = Config.Bind("", "骨架", SkeletonThird,
             new ConfigDescription("第三人称骨架：用第三人称的身体动作（呼吸摆动、跑步转向时头部翻滚、换枪和翻背包的动作）。第一人称骨架：身体动作用游戏原版的第一人称（没有呼吸摆动和跑步转向时的头部翻滚，换枪、翻背包没有身体动作），晃得少，适合觉得第三人称骨架晕的玩家。除了身体动作，两种骨架的其他功能完全一样（镜头挂在头部、人物显示、瞄准等），只是第一人称骨架下瞄准时枪本身按原版第一人称的摆动晃（呼吸、手抖，屏息时由原版自己减弱），“瞄准摆动”那几组里的“摆动”只管手臂跟着身体动作的晃动，“呼吸”不起作用。局内可以随时切换。",
                 new AcceptableValueList<string>(SkeletonThird, SkeletonFirst), new ConfigurationManagerAttributes { Order = 1 }));
-        AimArms.Install();
+        AimPatches.Install();
         BodyVisibility.Install();
         VisorFilter.Install();
         FirstPersonAudio.Install();
@@ -542,7 +542,7 @@ internal static class NewCameraSwitch
 
         if (player == null || !player.IsYourPlayer)
         {
-            AimArms.ReplayLasers(camera);
+            LaserReplay.Replay(camera);
             return;
         }
 
@@ -584,7 +584,7 @@ internal static class NewCameraSwitch
         if (optic && _poseFrame == Time.frameCount)
             AimArms.CarryOptic(camera);
 
-        AimArms.ReplayLasers(camera);
+        LaserReplay.Replay(camera);
         if (optic)
             OpticElevation.Apply(camera);
         if (main)
