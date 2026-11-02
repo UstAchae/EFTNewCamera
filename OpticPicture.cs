@@ -52,7 +52,9 @@ internal static class OpticPicture
             }
 
             // 正在看普通放大镜时，画面留给它。否则打开枪上那块自己出画面的屏幕（MP-155 智能瞄具）。
-            OpticSight? screen = picture == null ? FindScreen(animation) : null;
+            // 通过全息、红点瞄准时屏幕不开：开着的瞄具镜片登记在游戏那里，游戏就不把准星放到超分之后画，准星会拖影。
+            bool throughCollimator = aiming && picture == null && scope?.ScopePrefabCache != null && scope.ScopePrefabCache.HasCollimators;
+            OpticSight? screen = picture == null && !throughCollimator ? FindScreen(animation) : null;
             OpticSight? show = picture ?? screen;
             if (show == null)
             {
