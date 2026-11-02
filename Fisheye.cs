@@ -9,9 +9,7 @@ namespace EFTNewCamera;
 
 // A fisheye lens on the view. The FPS camera renders straight (rectilinear) with a field wide enough for the fisheye's
 // corners, and an image effect of ours lays that frame out as the lens would, after the SSAA stage has upscaled it
-// (Justachae/Fisheye). The centre is as large as a straight view at the field set (Fov, the game's own measure: up
-// and down) would show it; the curve then takes in more toward the edges, the more curved the wider the whole view. It
-// is on the whole frame, the optic and
+// (Justachae/Fisheye). The horizontal field across the screen is the one set. It is on the whole frame, the optic and
 // the eyepieces in it: whatever is drawn for the frame (the eyes' cameras, the thermal camera, the reticles) takes the
 // FPS camera's field as it renders, so it is laid out straight at the wide field like the rest, and bent with it.
 // The game's field is taken as it stands after its own frame (its zoom eases in coroutines, from the camera's field)
@@ -25,7 +23,7 @@ namespace EFTNewCamera;
 internal static class Fisheye
 {
     internal static bool Enabled;
-    internal static float Fov = 75f;       // degrees, up and down, as the game's own field: the centre is shown that large
+    internal static float Field = 120f;   // degrees, across the screen
     internal static float Curve = 0.4f;    // 0 the straight picture at that field, 1 the stereographic fisheye
     internal static float Vignette = 0.6f; // 0 none, 1 the corners well into the lens barrel's dark
     internal static bool HighResolution;    // the frame rendered larger for the centre's detail (else read sharper, and sharpened)
@@ -141,21 +139,19 @@ internal static class Fisheye
     // How much the fisheye magnifies the centre of the straight frame (pixels on the screen to pixels rendered).
     private static float CentreMagnification(float aspect)
     {
-        float f = CentreScale(Fov);
-        return f * StraightHalfHeight(aspect, f, 1f - 0.5f * Curve);
+        float k = 1f - 0.5f * Curve;
+        Lens(aspect, Field * Mathf.Deg2Rad, k, out float f, out float halfHeight);
+        return f * halfHeight;
     }
 
-    // The fisheye's f (half screen heights per radian at the centre) that shows the centre as large as a straight view
-    // at this field (up and down, in degrees) does.
-    private static float CentreScale(float field) => 1f / Mathf.Tan(field * 0.5f * Mathf.Deg2Rad);
-
-    // For the fisheye r = f tan(k theta) / k, the straight frame's half height (as a tangent) that reaches just as far as
-    // its corners; its edges then reach past the fisheye's.
-    private static float StraightHalfHeight(float aspect, float f, float k)
+    // The fisheye r = f tan(k theta) / k across the screen at across, and the straight frame's half height (as a
+    // tangent) that reaches just as far as its corners; its edges then reach past the fisheye's.
+    private static void Lens(float aspect, float across, float k, out float f, out float halfHeight)
     {
+        f = aspect * k / Mathf.Tan(k * across * 0.5f);
         float corner = Mathf.Sqrt(aspect * aspect + 1f);
         float cornerAngle = Mathf.Min(Mathf.Atan(k * corner / f) / k, MaxCornerDegrees * Mathf.Deg2Rad);
-        return Mathf.Tan(cornerAngle) / corner;
+        halfHeight = Mathf.Tan(cornerAngle) / corner;
     }
 
     // The FPS camera (the one with SSAA) waking: the lens on it, off until wanted. Put on any later, it would come after
@@ -190,14 +186,15 @@ internal static class Fisheye
             return;
         }
 
-        // r = f tan(k theta) / k, in half screen heights: k = 1 with the game's f is the game's straight view itself;
-        // k = 1/2 the stereographic fisheye, the curve set picking between. f keeps the centre as large as the field set
-        // shows it; the more curved, the more is taken in toward the edges.
+        // r = f tan(k theta) / k, in half screen heights: k = 1 is the game's straight view at its own field, k = 1/2 the
+        // stereographic fisheye; the curve set picks between, at the field set. The less curved, the less the centre is
+        // magnified and the more what is near the edges is stretched, as a body camera's wide lens has it.
         float aspect = camera.aspect;
         _gameField = camera.fieldOfView;
-        float f = Mathf.Lerp(CentreScale(_gameField), CentreScale(Fov), t);
+        float gameAcross = 2f * Mathf.Atan(Mathf.Tan(_gameField * 0.5f * Mathf.Deg2Rad) * aspect);
+        float across = Mathf.Lerp(gameAcross, Field * Mathf.Deg2Rad, t);
         float k = 1f - 0.5f * Curve * t;
-        float halfHeight = StraightHalfHeight(aspect, f, k);
+        Lens(aspect, across, k, out float f, out float halfHeight);
         _shape = new Vector4(k, f, halfHeight, aspect);
         // The image circle shrinks from past the corners (none of it seen) to within them.
         float shade = Vignette * t;
