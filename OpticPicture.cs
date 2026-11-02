@@ -174,6 +174,8 @@ internal static class OpticPicture
     }
 
     // 第三人称下游戏不会跑第一人称那套开关。智能瞄具的屏幕不占当前瞄准位，也要单独打开。
+    // 斜边热成像（T12W 之类）也带专用瞄准面，但只在侧过枪通过它瞄准时才要画面（WantsPicture 管）：一直开着的话，
+    // 游戏一直登记着它的镜片，就不再把全息、红点的准星放到超分之后画，准星回到 DLSS 混合的画面里拖影。
     private static OpticSight? FindScreen(ProceduralWeaponAnimation animation)
     {
         if (animation.ScopeAimTransforms == null)
@@ -188,7 +190,8 @@ internal static class OpticPicture
 
             bool ownScreen = cache.CurrentModIgnoreOpticsForCameraPlane
                 || (sat.Mod != null && !string.IsNullOrEmpty(sat.Mod.CustomAimPlane));
-            if (!ownScreen || !cache.CurrentModOpticSight.gameObject.activeInHierarchy)
+            if (!ownScreen || !cache.CurrentModOpticSight.gameObject.activeInHierarchy
+                || cache.CurrentModOpticSight.IsThermalSightAvailableAt45Degrees)
                 continue;
 
             screen = cache.CurrentModOpticSight;
