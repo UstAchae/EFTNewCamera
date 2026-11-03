@@ -29,6 +29,7 @@ internal static class Fisheye
     internal static bool HighResolution;    // the frame rendered larger for the centre's detail (else read sharper, and sharpened)
     internal static float Detail = 1f;     // how much of the centre's magnification is rendered back: 0 none, 1 all
     internal static float Sharpen = 0.5f;  // the sharpening after the lens: 0 none
+    internal static float Soften;          // the frame read smoother, against flicker: 0 Catmull-Rom, 1/2 B-spline, 1 blurred too
     private const float FadeSeconds = 0.25f;
     private const float MaxCornerDegrees = 85f;
     private const float MaxSupersampling = 2.5f;
@@ -50,6 +51,7 @@ internal static class Fisheye
     private static readonly int ShapeId = Shader.PropertyToID("_Fisheye");
     private static readonly int ShadeId = Shader.PropertyToID("_FisheyeShade");
     private static readonly int SharpenId = Shader.PropertyToID("_FisheyeSharpen");
+    private static readonly int SoftenId = Shader.PropertyToID("_FisheyeSoften");
 
     internal static void Install()
     {
@@ -262,6 +264,7 @@ internal static class Fisheye
         }
         _material.SetVector(ShapeId, _shape);
         _material.SetVector(ShadeId, _shade);
+        _material.SetFloat(SoftenId, Soften);
         if (Sharpen <= 0.001f)
         {
             Graphics.Blit(from, to, _material, 0);

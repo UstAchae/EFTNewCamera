@@ -8,6 +8,9 @@
 // bilinear one; where it shrinks it (toward the edges) several points over each screen pixel's footprint are averaged,
 // so fine lines do not shimmer. Pass 1 sharpens the result, never past the brightest and darkest of each pixel's
 // neighbours (no halos; the frame is HDR here, so no fixed range is assumed).
+// _FisheyeSoften trades that sharpness for steadiness: toward 1/2 the frame is read through a cubic B-spline instead,
+// soft and never overshooting (a low-pass filter), and past that it is also blurred over up to 1.5 texels, so detail
+// finer than a pixel that lands on other pixels from frame to frame is spread out and flickers less.
 Shader "Justachae/Fisheye" {
  Properties { _MainTex ("", 2D) = "black" {} }
  CGINCLUDE
@@ -25,6 +28,25 @@ Shader "Justachae/Fisheye" {
    float4 _Fisheye;   // x k, y f, z the straight frame's half height (as the tangent of its half field), w the aspect
    float4 _FisheyeShade;   // x the image circle's radius, y the width of its soft edge (both over the screen's half
                            // diagonal), z how much the light falls off toward the circle's edge
+
+   float _FisheyeSoften;   // 0 the Catmull-Rom filter, 1/2 the B-spline, 1 the B-spline blurred over 1.5 texels
+
+   // The cubic B-spline over 4 by 4 texels, in 4 bilinear reads (its weights are all positive).
+   float4 bspline (float2 uv) {
+    float2 at = uv * _MainTex_TexelSize.zw - 0.5;
+    float2 i = floor(at);
+    float2 f = at - i;
+    float2 g = 1 - f;
+    float2 w0 = g * g * g / 6;
+    float2 w1 = (4 - 6 * f * f + 3 * f * f * f) / 6;
+    float2 w2 = (1 + 3 * f + 3 * f * f - 3 * f * f * f) / 6;
+    float2 w3 = f * f * f / 6;
+    float2 g0 = w0 + w1, g1 = w2 + w3;
+    float2 c0 = (i - 1 + w1 / g0 + 0.5) * _MainTex_TexelSize.xy;
+    float2 c1 = (i + 1 + w3 / g1 + 0.5) * _MainTex_TexelSize.xy;
+    return g0.x * g0.y * tex2Dlod(_MainTex, float4(c0.x, c0.y, 0, 0)) + g1.x * g0.y * tex2Dlod(_MainTex, float4(c1.x, c0.y, 0, 0))
+         + g0.x * g1.y * tex2Dlod(_MainTex, float4(c0.x, c1.y, 0, 0)) + g1.x * g1.y * tex2Dlod(_MainTex, float4(c1.x, c1.y, 0, 0));
+   }
 
    // Catmull-Rom over 4 by 4 texels, in 9 bilinear reads.
    float4 catmullRom (float2 uv) {
@@ -66,7 +88,18 @@ Shader "Justachae/Fisheye" {
     // The screen pixel's footprint on the frame, in the frame's texels.
     float2 dx = ddx(uv), dy = ddy(uv);
     float footprint = max(length(dx * _MainTex_TexelSize.zw), length(dy * _MainTex_TexelSize.zw));
-    float4 sharp = catmullRom(saturate(uv));
+    float2 at = saturate(uv);
+    float4 sharp = catmullRom(at);
+    if (_FisheyeSoften > 0.001) {
+     float4 soft = bspline(at);
+     float blur = saturate(_FisheyeSoften * 2 - 1) * 1.5;
+     if (blur > 0.001) {
+      float2 r = blur * _MainTex_TexelSize.xy;
+      soft = 0.2 * (soft + bspline(saturate(at + float2(r.x, r.y))) + bspline(saturate(at + float2(-r.x, r.y)))
+                     + bspline(saturate(at + float2(r.x, -r.y))) + bspline(saturate(at - r)));
+     }
+     sharp = lerp(sharp, soft, saturate(_FisheyeSoften * 2));
+    }
     float4 averaged = 0.25 * (tex2Dlod(_MainTex, float4(saturate(uv + 0.25 * (dx + dy)), 0, 0))
                             + tex2Dlod(_MainTex, float4(saturate(uv + 0.25 * (dx - dy)), 0, 0))
                             + tex2Dlod(_MainTex, float4(saturate(uv - 0.25 * (dx - dy)), 0, 0))
