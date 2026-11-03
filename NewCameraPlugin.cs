@@ -26,7 +26,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         Log = Logger;
         // No section: the F12 window shows the master switch right under the plugin's name, without a heading.
         ConfigEntry<bool> enabled = Config.Bind("", "总开关", true,
-            new ConfigDescription("关掉后整个 mod 不起作用，一切按游戏原样。", null, new ConfigurationManagerAttributes { Order = 10 }));
+            new ConfigDescription("关掉后整个 mod 不起作用，一切按游戏原样。", null, new ConfigurationManagerAttributes { Order = 8 }));
         MoveFrom(enabled, "新镜头", "总开关");
         ConfigEntry<string> skeleton = Config.Bind("", "骨架", SkeletonThird,
             new ConfigDescription("第三人称骨架：用第三人称的身体动作（呼吸摆动、跑步转向时头部翻滚、换枪和翻背包的动作）。第一人称骨架：身体动作用游戏原版的第一人称（没有呼吸摆动和跑步转向时的头部翻滚，换枪、翻背包没有身体动作），晃得少，适合觉得第三人称骨架晕的玩家。除了身体动作，两种骨架的其他功能完全一样（镜头挂在头部、人物显示、瞄准等），只是第一人称骨架下瞄准时枪本身按原版第一人称的摆动晃（呼吸、手抖，屏息时由原版自己减弱），“瞄准摆动”那几组里的“摆动”只管手臂跟着身体动作的晃动，“呼吸”不起作用。局内可以随时切换。",
@@ -57,25 +57,19 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
     {
         ConfigEntry<bool> fisheye = Config.Bind("", "鱼眼", false,
             new ConfigDescription("画面像透过执法记录仪、运动相机那样的广角镜头看：视野更宽，直线往外弯，四角有镜头的暗角。作用在整个游戏画面上，瞄准时的瞄具、头戴夜视仪和热成像的目镜也一起变形。画面中心是放大过的，由下面的“鱼眼清晰度方式”决定怎么补。",
-                null, new ConfigurationManagerAttributes { Order = 9 }));
+                null, new ConfigurationManagerAttributes { Order = 7 }));
         ConfigEntry<float> field = Config.Bind("", "鱼眼视野", 120f,
             new ConfigDescription("鱼眼开着时，屏幕左边缘到右边缘之间的角度（度）。游戏设置里的视野是上下方向的，75 在 16:9 屏幕上大约相当于这里的 107。",
-                new AcceptableValueRange<float>(100f, 140f), new ConfigurationManagerAttributes { Order = 8 }));
+                new AcceptableValueRange<float>(100f, 140f), new ConfigurationManagerAttributes { Order = 6 }));
         ConfigEntry<float> curve = Config.Bind("", "鱼眼弯曲", 0.4f,
             new ConfigDescription("0：不弯，是同样视野的普通广角画面，中心不放大，边缘的东西被拉得很大。1：完全的鱼眼，画面中间往外鼓，边缘压得扁。默认 0.4 接近执法记录仪、运动相机的感觉。",
-                new AcceptableValueRange<float>(0f, 1f), new ConfigurationManagerAttributes { Order = 7 }));
+                new AcceptableValueRange<float>(0f, 1f), new ConfigurationManagerAttributes { Order = 5 }));
         ConfigEntry<float> vignette = Config.Bind("", "鱼眼暗角", 0.6f,
             new ConfigDescription("镜头四角变暗：越往边缘越暗，开大后四角露出镜筒的黑色圆边。0 是没有暗角。",
-                new AcceptableValueRange<float>(0f, 1f), new ConfigurationManagerAttributes { Order = 6 }));
-        ConfigEntry<string> clarity = Config.Bind("", "鱼眼清晰度方式", FisheyeLight,
-            new ConfigDescription("鱼眼把画面中心放大了，中心会变软。省性能：不提高渲染分辨率，中心用更锐利的插值放大，边缘多点取平均（不闪），再锐化一遍，几乎没有额外开销，这是一般游戏的做法。高清：按更高的分辨率渲染，真正把中心的细节补回来（程度由“鱼眼清晰度补偿”决定），很吃性能和显存。",
-                new AcceptableValueList<string>(FisheyeLight, FisheyeSharp), new ConfigurationManagerAttributes { Order = 5 }));
-        ConfigEntry<float> sharpen = Config.Bind("", "鱼眼锐化", 0.5f,
-            new ConfigDescription("鱼眼之后把画面锐化多少，两种清晰度方式都起作用。0 是不锐化。锐化不会超过周围像素的明暗范围，所以不会出现白边。",
                 new AcceptableValueRange<float>(0f, 1f), new ConfigurationManagerAttributes { Order = 4 }));
-        ConfigEntry<float> soften = Config.Bind("", "鱼眼柔化", 0f,
-            new ConfigDescription("用清晰度换稳定：远处的树叶、细的亮边比一个像素还小，每帧落在不同的像素上，看起来一直在闪。0：用锐利的插值放大画面（最清楚，也最闪）；0.5：改用平滑的 B 样条插值（低通，不会过冲）；1：再额外模糊约 1.5 个像素，闪烁被抹得最匀，画面也最软。只处理当前这一帧，夜视仪和准星不受影响。配合使用时建议把“鱼眼锐化”和游戏图像设置里的“锐化”调低，锐化会把闪烁重新放大。",
-                new AcceptableValueRange<float>(0f, 1f), new ConfigurationManagerAttributes { Order = 3 }));
+        ConfigEntry<string> clarity = Config.Bind("", "鱼眼清晰度方式", FisheyeLight,
+            new ConfigDescription("鱼眼把画面中心放大了，中心会变软。省性能：不提高渲染分辨率，中心用更锐利的插值放大，边缘多点取平均，几乎没有额外开销，这是一般游戏的做法。高清：按更高的分辨率渲染，真正把中心的细节补回来（程度由“鱼眼清晰度补偿”决定），很吃性能和显存。",
+                new AcceptableValueList<string>(FisheyeLight, FisheyeSharp), new ConfigurationManagerAttributes { Order = 3 }));
         ConfigEntry<float> detail = Config.Bind("", "鱼眼清晰度补偿", 1f,
             new ConfigDescription("只在清晰度方式为“高清”时起作用。鱼眼把画面中心放大了，中心会变糊。这一项让游戏按更高的分辨率渲染，把中心的清晰度补回来。1：完全补回，中心和不开鱼眼时一样清楚，但渲染的像素更多（默认视野和弯曲下约 1.8 倍），帧数会明显下降；0：不补，没有额外开销。最多按屏幕的 1.5 倍（像素 2.25 倍）渲染，以免显存不够：视野和弯曲开得很大时（比如 140 度、弯曲 1，中心放大约 2.8 倍）补不满，中心仍会有些糊。显存紧张时（8 GB 显卡、高画质贴图）建议把贴图画质调到中，或者把这一项调低。开了 DLSS 或 FSR 时，它们的渲染分辨率和输出分辨率一起提高。",
                 new AcceptableValueRange<float>(0f, 1f), new ConfigurationManagerAttributes { Order = 2 }));
@@ -87,8 +81,6 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
             Fisheye.Vignette = vignette.Value;
             Fisheye.Detail = detail.Value;
             Fisheye.HighResolution = clarity.Value == FisheyeSharp;
-            Fisheye.Sharpen = sharpen.Value;
-            Fisheye.Soften = soften.Value;
         }
 
         fisheye.SettingChanged += (_, _) => Refresh();
@@ -97,8 +89,6 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         vignette.SettingChanged += (_, _) => Refresh();
         detail.SettingChanged += (_, _) => Refresh();
         clarity.SettingChanged += (_, _) => Refresh();
-        sharpen.SettingChanged += (_, _) => Refresh();
-        soften.SettingChanged += (_, _) => Refresh();
         Refresh();
     }
 

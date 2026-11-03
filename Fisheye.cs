@@ -15,7 +15,7 @@ namespace EFTNewCamera;
 // The game's field is taken as it stands after its own frame (its zoom eases in coroutines, from the camera's field)
 // and handed back at the end of the frame, so the game never sees ours.
 // The fisheye magnifies the centre of the straight frame, which would leave it soft. Light on the card, the frame is
-// read sharper there and sharpened after (Justachae/Fisheye). For the centre's own detail (HighResolution), the frame is made that much
+// read sharper there (Justachae/Fisheye). For the centre's own detail (HighResolution), the frame is made that much
 // larger: the SSAA stage's buffers, which every image effect works in up to the last (SSAAImpl, drawing them onto the
 // screen), are made that many times the screen, and the camera renders that many times as many pixels (the game's
 // supersampling ratio, or its upscaler's render scale, multiplied); the upscalers make their picture at the size
@@ -26,10 +26,8 @@ internal static class Fisheye
     internal static float Field = 120f;   // degrees, across the screen
     internal static float Curve = 0.4f;    // 0 the straight picture at that field, 1 the stereographic fisheye
     internal static float Vignette = 0.6f; // 0 none, 1 the corners well into the lens barrel's dark
-    internal static bool HighResolution;    // the frame rendered larger for the centre's detail (else read sharper, and sharpened)
+    internal static bool HighResolution;    // the frame rendered larger for the centre's detail (else read sharper)
     internal static float Detail = 1f;     // how much of the centre's magnification is rendered back: 0 none, 1 all
-    internal static float Sharpen = 0.5f;  // the sharpening after the lens: 0 none
-    internal static float Soften;          // the frame read smoother, against flicker: 0 Catmull-Rom, 1/2 B-spline, 1 blurred too
     private const float FadeSeconds = 0.25f;
     private const float MaxCornerDegrees = 85f;
     private const float MaxSupersampling = 2.5f;
@@ -50,8 +48,6 @@ internal static class Fisheye
     private static bool _installed;
     private static readonly int ShapeId = Shader.PropertyToID("_Fisheye");
     private static readonly int ShadeId = Shader.PropertyToID("_FisheyeShade");
-    private static readonly int SharpenId = Shader.PropertyToID("_FisheyeSharpen");
-    private static readonly int SoftenId = Shader.PropertyToID("_FisheyeSoften");
 
     internal static void Install()
     {
@@ -264,18 +260,7 @@ internal static class Fisheye
         }
         _material.SetVector(ShapeId, _shape);
         _material.SetVector(ShadeId, _shade);
-        _material.SetFloat(SoftenId, Soften);
-        if (Sharpen <= 0.001f)
-        {
-            Graphics.Blit(from, to, _material, 0);
-            return;
-        }
-        // Sharpened once laid out, on the screen's pixels as they now stand.
-        RenderTexture laid = RenderTexture.GetTemporary(from.width, from.height, 0, from.format);
-        Graphics.Blit(from, laid, _material, 0);
-        _material.SetFloat(SharpenId, Sharpen * 1.5f);
-        Graphics.Blit(laid, to, _material, 1);
-        RenderTexture.ReleaseTemporary(laid);
+        Graphics.Blit(from, to, _material, 0);
     }
 
     // The lens left by ours this frame to what comes after it: taken once, by that (NightVisionEyepieces.RenderImagePrefix).
