@@ -8,11 +8,6 @@
 // bilinear one; where it shrinks it (toward the edges) several points over each screen pixel's footprint are averaged,
 // so fine lines do not shimmer. Pass 1 sharpens the result, never past the brightest and darkest of each pixel's
 // neighbours (no halos; the frame is HDR here, so no fixed range is assumed).
-// Pass 2 steadies the straight frame over time before it is laid out, as temporal antialiasing does: the last result,
-// moved by the game's motion vectors to where it now lies, kept within the brightest and darkest of the pixel's 3 by 3
-// neighbours (so nothing that has moved or changed lingers), and blended with the frame. Detail finer than a pixel of
-// the frame (leaves, thin bright edges at a wide field), which lands on other pixels from frame to frame and flickers,
-// is then averaged out.
 Shader "Justachae/Fisheye" {
  Properties { _MainTex ("", 2D) = "black" {} }
  CGINCLUDE
@@ -103,36 +98,6 @@ Shader "Justachae/Fisheye" {
     float3 high = max(c.rgb, max(max(n, s), max(w, e)));
     float3 sharpened = c.rgb + (c.rgb - 0.25 * (n + s + w + e)) * _FisheyeSharpen;
     return float4(clamp(sharpened, low, high), c.a);
-   }
-   ENDCG
-  }
-  Pass {
-   CGPROGRAM
-   #pragma vertex vert_img
-   #pragma fragment frag
-   sampler2D _FisheyeHistory;
-   sampler2D_half _CameraMotionVectorsTexture;
-   float _FisheyeBlend;   // the share of this frame in the result
-
-   // Weighted toward the darker of two bright values, so a lone bright pixel does not dominate the blend.
-   float weight (float3 c) { return 1 / (1 + max(c.r, max(c.g, c.b))); }
-
-   float4 frag (v2f_img i) : SV_Target {
-    float2 t = _MainTex_TexelSize.xy;
-    float4 c = tex2D(_MainTex, i.uv);
-    float3 low = c.rgb, high = c.rgb;
-    for (int y = -1; y <= 1; y++)
-     for (int x = -1; x <= 1; x++) {
-      float3 n = tex2D(_MainTex, i.uv + float2(x, y) * t).rgb;
-      low = min(low, n);
-      high = max(high, n);
-     }
-    float2 before = i.uv - tex2D(_CameraMotionVectorsTexture, i.uv).xy;
-    if (any(before < 0) || any(before > 1))
-     return c;
-    float3 h = clamp(tex2D(_FisheyeHistory, before).rgb, low, high);
-    float wc = _FisheyeBlend * weight(c.rgb), wh = (1 - _FisheyeBlend) * weight(h);
-    return float4((c.rgb * wc + h * wh) / (wc + wh), c.a);
    }
    ENDCG
   }

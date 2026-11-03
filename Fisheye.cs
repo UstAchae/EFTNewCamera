@@ -29,7 +29,6 @@ internal static class Fisheye
     internal static bool HighResolution;    // the frame rendered larger for the centre's detail (else read sharper, and sharpened)
     internal static float Detail = 1f;     // how much of the centre's magnification is rendered back: 0 none, 1 all
     internal static float Sharpen = 0.5f;  // the sharpening after the lens: 0 none
-    internal static float Steady = 0.5f;   // the straight frame steadied over time before the lens: 0 not at all
     private const float FadeSeconds = 0.25f;
     private const float MaxCornerDegrees = 85f;
     private const float MaxSupersampling = 2.5f;
@@ -51,10 +50,6 @@ internal static class Fisheye
     private static readonly int ShapeId = Shader.PropertyToID("_Fisheye");
     private static readonly int ShadeId = Shader.PropertyToID("_FisheyeShade");
     private static readonly int SharpenId = Shader.PropertyToID("_FisheyeSharpen");
-    private static readonly int HistoryId = Shader.PropertyToID("_FisheyeHistory");
-    private static readonly int BlendId = Shader.PropertyToID("_FisheyeBlend");
-    private static readonly RenderTexture?[] History = new RenderTexture?[2];   // the last steadied frame, and the next
-    private static bool _hasHistory;
 
     internal static void Install()
     {
@@ -188,7 +183,6 @@ internal static class Fisheye
         {
             if (image != null && image.enabled)
                 image.enabled = false;
-            ForgetHistory();
             return;
         }
 
@@ -268,7 +262,6 @@ internal static class Fisheye
         }
         _material.SetVector(ShapeId, _shape);
         _material.SetVector(ShadeId, _shade);
-        from = Steadied(from);
         if (Sharpen <= 0.001f)
         {
             Graphics.Blit(from, to, _material, 0);
@@ -280,63 +273,6 @@ internal static class Fisheye
         _material.SetFloat(SharpenId, Sharpen * 1.5f);
         Graphics.Blit(laid, to, _material, 1);
         RenderTexture.ReleaseTemporary(laid);
-    }
-
-    // The frame steadied over time (pass 2), into the next of the two history textures, which is returned; the frame
-    // itself when steadying is off, or when there is no history to go on (it then starts one).
-    private static RenderTexture Steadied(RenderTexture frame)
-    {
-        if (Steady <= 0.001f || _material == null)
-        {
-            ForgetHistory();
-            return frame;
-        }
-        RenderTexture last = Keep(0, frame), next = Keep(1, frame);
-        if (!_hasHistory)
-        {
-            Graphics.Blit(frame, last);
-            _hasHistory = true;
-            return frame;
-        }
-        _material.SetTexture(HistoryId, last);
-        // At most, a frame's share of a tenth: about ten frames go into what is shown.
-        _material.SetFloat(BlendId, Mathf.Lerp(1f, 0.1f, Steady));
-        Graphics.Blit(frame, next, _material, 2);
-        History[0] = next;
-        History[1] = last;
-        return next;
-    }
-
-    // A history texture the frame's size and format, made anew (and the history forgotten) when the frame changes.
-    private static RenderTexture Keep(int index, RenderTexture frame)
-    {
-        RenderTexture? kept = History[index];
-        if (kept != null && kept.width == frame.width && kept.height == frame.height && kept.format == frame.format)
-            return kept;
-        if (kept != null)
-        {
-            kept.Release();
-            Object.Destroy(kept);
-        }
-        kept = new RenderTexture(frame.width, frame.height, 0, frame.format) { name = "Justachae fisheye history", hideFlags = HideFlags.DontSave };
-        kept.Create();
-        History[index] = kept;
-        _hasHistory = false;
-        return kept;
-    }
-
-    private static void ForgetHistory()
-    {
-        _hasHistory = false;
-        for (int i = 0; i < History.Length; i++)
-        {
-            if (History[i] != null)
-            {
-                History[i]!.Release();
-                Object.Destroy(History[i]);
-                History[i] = null;
-            }
-        }
     }
 
     // The lens left by ours this frame to what comes after it: taken once, by that (NightVisionEyepieces.RenderImagePrefix).
