@@ -688,7 +688,6 @@ internal static class NewCameraSwitch
                 Vector3 beforeRecoil = _posePosition;
                 AimArms.BodyRecoil(player, ref _posePosition, ref _poseRotation);
                 PoseFromHead += _posePosition - beforeRecoil;
-                AimArms.DiagFinal(player, _posePosition, _poseRotation); // TEMP DIAG
                 PoseHead = head;
                 AimArms.LiftHead(head);
                 _poseFrame = Time.frameCount;

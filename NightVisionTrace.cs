@@ -188,7 +188,6 @@ internal static partial class NightVisionEyepieces
         _traceTris.AddRange(built.Tris);
         TraceRootByMesh[built.Mesh] = nodeBase;
         _traceDirty = true;
-        NewCameraPlugin.Log?.LogInfo($"TEMP DIAG trace: {built.Name} {built.Tris.Length} triangles, {built.Nodes.Length} nodes"); // TEMP DIAG
     }
 
     // A mesh's triangles as a hierarchy of boxes, split at the middle of the longest side of their centres down to a

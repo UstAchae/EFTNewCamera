@@ -165,8 +165,6 @@ internal static partial class NightVisionEyepieces
 
     internal static void OnCameraPostRender(Camera camera)
     {
-        if (camera == _scopeBufferOn) // TEMP DIAG
-            DiagOpticAfter(camera);
         if (camera != Camera.main)
             return;
         RestoreMount();

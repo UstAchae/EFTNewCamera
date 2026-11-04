@@ -45,11 +45,6 @@ internal static partial class NightVisionEyepieces
     {
         if (_scopeBufferOn != optic || _scopeTritium == null || _opticDiscs == null || _scopeObjectiveRadius <= 0f)
             return;
-        _dgOpticPos = optic.transform.position; // TEMP DIAG
-        _dgOpticRot = optic.transform.rotation;
-        _dgOpticProj = optic.projectionMatrix;
-        _dgOpticNonJittered = optic.nonJitteredProjectionMatrix;
-        _dgOpticFrame = Time.frameCount;
         Vector3 from = optic.transform.position;
         Matrix4x4 view = optic.worldToCameraMatrix, viewProjection = optic.nonJitteredProjectionMatrix * view;
         float tanUp = Mathf.Tan(optic.fieldOfView * 0.5f * Mathf.Deg2Rad);
@@ -88,13 +83,6 @@ internal static partial class NightVisionEyepieces
                         {
                             glow *= radius * radius / (MinRadius * MinRadius);
                             radius = MinRadius;
-                        }
-                        if (Time.time - _dgVialTime > 3f) // TEMP DIAG: the vial against its renderer's middle, in the sight camera
-                        {
-                            _dgVialTime = Time.time;
-                            Vector3 middle = set.Renderer.bounds.center;
-                            Vector4 mc = viewProjection * new Vector4(middle.x, middle.y, middle.z, 1f);
-                            NewCameraPlugin.Log?.LogInfo($"TEMP DIAG sight vial: {set.Renderer.name} vial at {at.ToString("F3")} uv ({uv.x:F3},{uv.y:F3}) radius {radius:F1} px, {distance:F2} m; renderer middle {middle.ToString("F3")} uv ({mc.x / mc.w * 0.5f + 0.5f:F3},{mc.y / mc.w * 0.5f + 0.5f:F3}); renderer {set.Renderer.GetType().Name}, scale {set.Renderer.transform.lossyScale.ToString("F3")}, sight camera at {from.ToString("F3")} looking {optic.transform.forward.ToString("F3")}");
                         }
                         _opticSeen.Add(new VialSeen
                         {
@@ -144,62 +132,6 @@ internal static partial class NightVisionEyepieces
         _scopeTritium.SetTexture(OcclusionId, _opticOcclusion);
     }
 
-    private static float _dgVialTime; // TEMP DIAG
-    // TEMP DIAG: how far the sight's axis is behind the view as the view turns, with and without the goggle.
-    private static Vector3 _dgLagLast;
-    private static float _dgLagTime, _dgLagSum, _dgLagMax, _dgTurnSum, _dgLagFrames, _dgLagPull;
-    private static int _dgLagFrame = -1;
-    private static void DiagSightLag(Camera camera)
-    {
-        Camera? optic = null;
-        try { optic = EFT.CameraControl.CameraManager.Instance?.OpticCameraManager?.Camera; } catch { }
-        Camera? main = Camera.main;
-        if (optic == null || camera != optic || main == null || !optic.enabled || _dgLagFrame == Time.frameCount)
-            return;
-        _dgLagFrame = Time.frameCount;
-        Vector3 view = main.transform.forward;
-        float lag = Vector3.Angle(view, optic.transform.forward);
-        float turn = Time.unscaledDeltaTime > 0f && _dgLagLast != Vector3.zero ? Vector3.Angle(view, _dgLagLast) / Time.unscaledDeltaTime : 0f;
-        _dgLagLast = view;
-        _dgLagSum += lag;
-        _dgLagMax = Mathf.Max(_dgLagMax, lag);
-        _dgTurnSum += turn;
-        _dgLagFrames++;
-        _dgLagPull = Mathf.Max(_dgLagPull, ScopePullback);
-        if (Time.time - _dgLagTime < 3f)
-            return;
-        float meanLag = _dgLagSum / Mathf.Max(_dgLagFrames, 1f), meanTurn = _dgTurnSum / Mathf.Max(_dgLagFrames, 1f);
-        NewCameraPlugin.Log?.LogInfo($"TEMP DIAG sight lag over 3 s ({_dgLagFrames:F0} frames, goggle {(_dgLagPull > 0.01f ? "down, camera ahead " + (_dgLagPull * 100f).ToString("F1") + " cm" : "not used")}): sight behind the view {meanLag:F3} deg on average, at most {_dgLagMax:F3}; view turning {meanTurn:F1} deg/s on average; behind over turning {(meanTurn > 1f ? (meanLag / meanTurn).ToString("F3") + " s" : "-")}");
-        _dgLagTime = Time.time;
-        _dgLagSum = _dgLagMax = _dgTurnSum = _dgLagFrames = _dgLagPull = 0f;
-    }
-    private static int _dgLensMaterial; // TEMP DIAG
-    // TEMP DIAG: the sight lens's material and its properties, once a material.
-    private static void DiagLensMaterial(Renderer lens)
-    {
-        Material? m = lens.sharedMaterial;
-        if (m == null || m.GetInstanceID() == _dgLensMaterial || m.shader == null)
-            return;
-        _dgLensMaterial = m.GetInstanceID();
-        var text = new System.Text.StringBuilder();
-        Shader shader = m.shader;
-        for (int i = 0; i < shader.GetPropertyCount(); i++)
-        {
-            string name = shader.GetPropertyName(i);
-            var type = shader.GetPropertyType(i);
-            string value = type switch
-            {
-                ShaderPropertyType.Float or ShaderPropertyType.Range => m.GetFloat(name).ToString("F4"),
-                ShaderPropertyType.Vector => m.GetVector(name).ToString("F4"),
-                ShaderPropertyType.Color => m.GetColor(name).ToString(),
-                ShaderPropertyType.Texture => m.GetTexture(name)?.name ?? "none",
-                _ => "?"
-            };
-            text.Append("  ").Append(name).Append(" = ").AppendLine(value);
-        }
-        NewCameraPlugin.Log?.LogInfo($"TEMP DIAG sight lens {lens.name} material {m.name} shader {shader.name} keywords [{string.Join(",", m.shaderKeywords)}], materials {lens.sharedMaterials.Length}:" + System.Environment.NewLine + text);
-    }
-
     // The sight's sharp picture cut down to a quarter by a pass, then spread at each size, each level the last halved
     // and spread again (as Blurred does for the frame), into the levels' temporaries.
     private static void BlurredInto(CommandBuffer buffer, int pass, int[] levels)
@@ -221,29 +153,6 @@ internal static partial class NightVisionEyepieces
             buffer.ReleaseTemporaryRT(ScopeAcrossId);
             buffer.ReleaseTemporaryRT(ScopeCutId);
         }
-    }
-
-    // TEMP DIAG: whether the sight camera moved or changed its projection between its pre-render and its post-render.
-    private static Vector3 _dgOpticPos;
-    private static Quaternion _dgOpticRot;
-    private static Matrix4x4 _dgOpticProj, _dgOpticNonJittered;
-    private static int _dgOpticFrame = -1, _dgOpticRenders;
-    private static float _dgOpticTime, _dgOpticMoved, _dgOpticTurned, _dgOpticShift;
-    private static void DiagOpticAfter(Camera optic)
-    {
-        if (_dgOpticFrame != Time.frameCount)
-            return;
-        _dgOpticRenders++;
-        _dgOpticMoved = Mathf.Max(_dgOpticMoved, (optic.transform.position - _dgOpticPos).magnitude);
-        _dgOpticTurned = Mathf.Max(_dgOpticTurned, Quaternion.Angle(optic.transform.rotation, _dgOpticRot));
-        Matrix4x4 p = optic.projectionMatrix;
-        _dgOpticShift = Mathf.Max(_dgOpticShift, Mathf.Abs(p.m02 - _dgOpticNonJittered.m02) + Mathf.Abs(p.m12 - _dgOpticNonJittered.m12) + Mathf.Abs(p.m11 - _dgOpticNonJittered.m11));
-        if (Time.time - _dgOpticTime < 3f)
-            return;
-        NewCameraPlugin.Log?.LogInfo($"TEMP DIAG sight camera pre- to post-render over 3 s ({_dgOpticRenders} renders): moved up to {_dgOpticMoved * 1000f:F2} mm, turned up to {_dgOpticTurned:F3} deg, projection vs the non-jittered one noted up to {_dgOpticShift:F5}; now proj m02 {p.m02:F5} m12 {p.m12:F5} m11 {p.m11:F4}, non-jittered m02 {optic.nonJitteredProjectionMatrix.m02:F5} m12 {optic.nonJitteredProjectionMatrix.m12:F5} m11 {optic.nonJitteredProjectionMatrix.m11:F4}, pixels {optic.pixelWidth}x{optic.pixelHeight}, rect {optic.rect}");
-        _dgOpticTime = Time.time;
-        _dgOpticMoved = _dgOpticTurned = _dgOpticShift = 0f;
-        _dgOpticRenders = 0;
     }
 
     // The sight camera's steps after it has rendered: the vials' occlusion and discs, then the light through the

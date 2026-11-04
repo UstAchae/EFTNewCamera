@@ -74,36 +74,12 @@ internal static partial class NightVisionEyepieces
     private static readonly int VialTraceId = Shader.PropertyToID("_VialTrace");
     private static readonly int OcclusionId = Shader.PropertyToID("_Occlusion");
 
-    // TEMP DIAG: frame times, with how many discs and how many pixels they cover, every 3 s.
-    private static float _dgFrameTime, _dgFrameSum, _dgFrameMax, _dgPixels;
-    private static int _dgFrames, _dgDiscs, _dgParts;
-    private static void DiagFrames(int count, int parts)
-    {
-        float dt = Time.unscaledDeltaTime;
-        _dgFrames++;
-        _dgFrameSum += dt;
-        _dgFrameMax = Mathf.Max(_dgFrameMax, dt);
-        float pixels = 0f;
-        for (int k = 0; k < count; k++)
-            pixels += Mathf.PI * _vialShape[k].z * _vialShape[k].z;
-        _dgPixels = Mathf.Max(_dgPixels, pixels);
-        _dgDiscs = Mathf.Max(_dgDiscs, count);
-        _dgParts = Mathf.Max(_dgParts, parts);
-        if (Time.time - _dgFrameTime < 3f)
-            return;
-        NewCameraPlugin.Log?.LogInfo($"TEMP DIAG frames: {_dgFrames} frames, mean {1000f * _dgFrameSum / Mathf.Max(_dgFrames, 1):F1} ms, longest {1000f * _dgFrameMax:F1} ms; up to {_dgDiscs} discs over {_dgPixels:F0} pixels, {_dgParts} parts traced");
-        _dgFrameTime = Time.time;
-        _dgFrameSum = _dgFrameMax = _dgPixels = 0f;
-        _dgFrames = _dgDiscs = _dgParts = 0;
-    }
-
     // Every vial near the lens as a disc over the frame, as seen from view: the gun in hand's, and those of guns and
     // sights lying about or in others' hands, which glow as much (the nearest MaxVials of them).
     private static void AddTritium(Camera view, RenderTexture frame)
     {
         if (_objective == null || _body == null || TritiumBrightness <= 0f)
         {
-            DiagFrames(0, 0); // TEMP DIAG
             return;
         }
         Vector3 lens = _body.TransformPoint(_objectiveFront);
@@ -161,7 +137,6 @@ internal static partial class NightVisionEyepieces
         }
         if (_vialsSeen.Count == 0)
         {
-            DiagFrames(0, 0); // TEMP DIAG
             return;
         }
         _vialsSeen.Sort(ByDistance);
@@ -184,7 +159,6 @@ internal static partial class NightVisionEyepieces
             }
             _vialMasks[k] = new Vector4(mask & 0xFFFF, mask >> 16, 0f, 0f);
         }
-        DiagFrames(count, parts); // TEMP DIAG
 
         _objective.SetFloatArray(VialTraceId, _vialTrace);
         _objective.SetVectorArray(VialsId, _vialShape);

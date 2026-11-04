@@ -77,7 +77,6 @@ internal static partial class NightVisionEyepieces
             Mesh? mesh = lens != null && lens.TryGetComponent(out MeshFilter filter) ? filter.sharedMesh : null;
             if (scope?.Mod != null && lens != null && lens.enabled && mesh != null)
             {
-                DiagLensMaterial(lens); // TEMP DIAG
                 _lensMesh = mesh;
                 _lensMatrix = lens.localToWorldMatrix;
                 _lensFrame = Time.frameCount;
@@ -100,11 +99,6 @@ internal static partial class NightVisionEyepieces
                 _scopeLight.SetVector(ScopePupilId, pupil);
                 _scopeLight.SetVector(OpticTanId, new Vector4(tanUp * optic.aspect, tanUp, magnification, 0f));
                 _scopeLight.SetFloat(ApertureRadiusId, 0.5f * Aperture);
-                if (Time.time - _dgScopeTime > 3f) // TEMP DIAG
-                {
-                    _dgScopeTime = Time.time;
-                    NewCameraPlugin.Log?.LogInfo($"TEMP DIAG scope through goggle: {scope.Mod.Item.Template._name} x{magnification:F2}, objective {objective * 1000f:F0} mm, pupil {2000f * pupil.w:F1} mm (light {Mathf.Min(1f, pupil.w * pupil.w / (0.25f * Aperture * Aperture)):P0} centred), eye point {relief * 100f:F1} cm behind the lens, objective off it {pupil.x * 1000f:F1}/{pupil.y * 1000f:F1} mm, camera ahead {ScopePullback * 100f:F1} cm, sight camera fov {optic.fieldOfView:F2} (field {scope.Mod.ScopeZoomValue:F2}, game's power {scope.Mod.GetCurrentOpticZoom():F2}, range {scope.Mod.GetMinOpticZoom():F1}-{scope.Mod.GetMaxOpticZoom():F1}{(sight!.CameraData is ScopeSmoothCameraData sm ? ", fields " + sm.MinMaxFieldOfView.ToString("F2") : "")}), target {(optic.targetTexture != null ? optic.targetTexture.width + "x" + optic.targetTexture.height : "screen")}");
-                }
             }
         }
         if (on && _scopeBufferOn != optic)
@@ -120,8 +114,6 @@ internal static partial class NightVisionEyepieces
         else if (!on)
             RemoveScopeBuffer();
     }
-    private static float _dgScopeTime; // TEMP DIAG
-
     private static void RemoveScopeBuffer()
     {
         if (_scopeBufferOn != null && _scopeBuffer != null)
@@ -140,18 +132,6 @@ internal static partial class NightVisionEyepieces
         _objective.SetFloat(ScopeOnId, 0f);
         if (ScopePullback <= 0.005f || _lensMesh == null || _lensFrame != Time.frameCount)
             return;
-        OpticSight? dgSight = CameraManager.Instance?.OpticCameraManager?.CurrentOpticSight; // TEMP DIAG
-        if (dgSight != null && dgSight.LensRenderer != null)
-        {
-            float moved = (dgSight.LensRenderer.localToWorldMatrix.GetColumn(3) - _lensMatrix.GetColumn(3)).magnitude;
-            _dgLensMoved = Mathf.Max(_dgLensMoved, moved);
-            if (Time.time - _dgLensTime > 3f)
-            {
-                _dgLensTime = Time.time;
-                NewCameraPlugin.Log?.LogInfo($"TEMP DIAG sight lens moved between render and image effect: up to {_dgLensMoved * 1000f:F2} mm over 3 s");
-                _dgLensMoved = 0f;
-            }
-        }
         _scopeMask ??= new Material(_objectiveShader!) { hideFlags = HideFlags.DontSave };
         if (_scopeLens == null || _scopeLens.width != frame.width || _scopeLens.height != frame.height)
         {
@@ -172,8 +152,6 @@ internal static partial class NightVisionEyepieces
         _objective.SetTexture(ScopeLensId, _scopeLens);
         _objective.SetFloat(ScopeOnId, 1f);
     }
-    private static float _dgLensMoved, _dgLensTime; // TEMP DIAG
-
     // The sight's power now. The game's own figure (GetCurrentOpticZoom) is its table of powers by mode, which for a
     // variable sight turned smoothly with the wheel holds one end only. What the wheel turns is the sight camera's
     // field: SightComponent.ScopeZoomValue, between MinMaxFov.x, the widest, at the least power, and MinMaxFov.y, the

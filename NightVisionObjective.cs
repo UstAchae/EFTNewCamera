@@ -18,7 +18,6 @@ internal static partial class NightVisionEyepieces
     private static Shader? _objectiveShader;
     private static Material? _objective;
     private static Vector3 _objectiveFront;             // the lenses' front in the device's frame (its eye side is +Y)
-    private static Transform? _dgObjectiveBody; // TEMP DIAG
     private static readonly int LensId = Shader.PropertyToID("_Lens");
     private static readonly int TanHalfId = Shader.PropertyToID("_TanHalf");
     private static readonly int StepId = Shader.PropertyToID("_Step");
@@ -40,7 +39,6 @@ internal static partial class NightVisionEyepieces
     {
         if (camera == _scopeBufferOn)
             NoteOptic(camera);
-        DiagSightLag(camera); // TEMP DIAG
         if (!camera.CompareTag("MainCamera"))
             return;
         _renderedFrom = camera.transform.position;
@@ -84,11 +82,6 @@ internal static partial class NightVisionEyepieces
             NearBlurLimit * Mathf.Deg2Rad * pixelsPerRadian));
         _objective.SetVector(TanHalfId, new Vector2(tanUp * frame.width / frame.height, tanUp));
         PrepareScope(view, frame);
-        if (_dgObjectiveBody != _body) // TEMP DIAG
-        {
-            _dgObjectiveBody = _body;
-            NewCameraPlugin.Log?.LogInfo($"TEMP DIAG objective (gaussian levels): device {_device.Node} ahead {ahead:F3} m, frame {frame.width}x{frame.height}, fov {view.fieldOfView:F1}, px/rad (quarter) {pixelsPerRadian:F0}, half at {NearBlurDistance:F2} m, limit {NearBlurLimit:F2} deg");
-        }
 
         // Everything, blurred at each size; what is near, cut out (premultiplied), the same; and how far what is near
         // is spread, blurred so that it reaches past its edge.
