@@ -1,0 +1,265 @@
+using EFT;
+using EFT.InputSystem;
+using HarmonyLib;
+using UnityEngine;
+
+namespace EFTNewCamera;
+
+// Aiming with the stock at the middle of the chest (high ready to engagement, centre-chest stock placement), as one
+// does with a goggle down and an aiming laser: the gun as aimed, only lower and to the right and canted in, its bore
+// along the line of sight; the eye looks over it, not through the sight. One key for both, told apart as games tell a
+// tap from a hold: the aim key's press is held back until it is known which it is. Let go within a moment, it was a
+// click, and the aim is taken then as the game takes it (its own toggle: a click again ends it); still down after the
+// moment, it is a hold, and the aim is taken straight into this stance, which lasts while the key is held and ends the
+// aim when it is let go. The game's aim stays on throughout, so the sway, breath and recoil are the aimed ones
+// (AimArms places the gun); only its slowdown is lifted, and the mouse turns as when walking.
+internal static class ChestStance
+{
+    internal static bool Enabled = true;
+    internal static KeyCode Key = KeyCode.Mouse1;  // the aim key as bound in the game (it does not report a release)
+    internal static float HoldSeconds = 0.25f;
+    internal static float Drop = 0.10f, Ahead = 0f, Side = 0.05f;      // the sight's place from where it is aimed (m)
+    internal static float Cant = 30f;                                   // the gun's turn about its line of sight (degrees, top to the left)
+
+    internal static bool Active { get; private set; }
+    // How far into the stance the gun is (0 or 1): kept as it was once the aim ends, so the gun leaves from where it was,
+    // and set as the next aim is taken.
+    internal static float Weight { get; private set; }
+    // From the aimed place (the sight at the eye): the gun held as aimed, only lower and to the right.
+    internal static Vector3 Offset => new Vector3(Side, -Drop, Ahead);
+
+    private static bool _pending;        // a press of the aim key held back, not yet known to be a click or a hold
+    private static bool _held;           // in the stance, the key still down
+    private static float _pressTime;
+    private static float _retryTime, _leftTime;
+    private static bool _fromAim;        // the held-back press came while aimed
+    private static bool _heldFromAim;    // the stance now was taken from the aim, and goes back to it
+    private static bool _easingBack;
+    private const float LeftSeconds = 0.4f;   // past the carry's blend back to the hip
+    private const float EnterSeconds = 0.25f; // from the aim into the stance
+    private const float RetrySeconds = 0.1f;
+
+    // The aim key's command, before the game takes it: a press that would begin an aim is held back. In the stance (and
+    // while a press is held back) the sight is not changed: the aim key is down, and Ctrl with it, meant for Ctrl+T
+    // (the tactical device's mode), would otherwise be the game's Ctrl+aim, the next sight.
+    internal static bool TranslatePrefix(ref ECommand command, ref InputNode.ETranslateResult __result)
+    {
+        if ((Active || _pending) && (command == ECommand.ChangeScope || command == ECommand.ChangeScopeMagnification))
+        {
+            __result = default;
+            return false;
+        }
+        // The aim key down takes Ctrl for its own Ctrl+aim, and Ctrl+T comes as T alone: with Ctrl down it is Ctrl+T, the
+        // tactical device's next mode.
+        if ((Active || _pending) && command == ECommand.ToggleTacticalDevice && (Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl)))
+            command = ECommand.NextTacticalDevice;
+        if (!Enabled || command != ECommand.ToggleAlternativeShooting || _pending || Active)
+            return true;
+        // From the hip a click aims and a hold takes the stance; aimed, a click ends the aim and a hold turns it into the
+        // stance.
+        if (Comfort.Common.Singleton<GameWorld>.Instance?.MainPlayer?.HandsController is not Player.FirearmController firearm)
+            return true;
+        _fromAim = firearm.IsAiming;
+        _pending = true;
+        _pressTime = Time.time;
+        __result = default;
+        return false;
+    }
+
+    // Each frame: a held-back press taken as a click or a hold once it is known, and the stance ended when let go.
+    internal static void Update(Player player)
+    {
+        var hands = player.HandsController;
+        if (_pending)
+        {
+            if (hands is not Player.FirearmController firearm || hands.IsAiming != _fromAim)
+                _pending = false;              // the aim changed under it (a move of the body, a weapon switch)
+            else if (!Input.GetKey(Key))
+            {
+                _pending = false;
+                if (_fromAim)
+                    firearm.SetAim(false);
+                else
+                {
+                    Active = false;
+                    Weight = 0f;
+                    firearm.ToggleAim();
+                }
+            }
+            else if (Time.time - _pressTime >= HoldSeconds)
+            {
+                _pending = false;
+                Active = true;
+                // From the hip the aim's own raise carries the gun there; from the aim it eases over from the eye.
+                Weight = _fromAim ? 0f : 1f;
+                _held = true;
+                _heldFromAim = _fromAim;
+                if (_fromAim)
+                    player.MovementContext?.SetAimingSlowdown(false, 0f);
+                else
+                {
+                    firearm.ToggleAim();
+                    if (!firearm.IsAiming)
+                        Active = _held = false;
+                }
+            }
+            return;
+        }
+        bool aiming = hands != null && hands.IsAiming;
+        bool down = Input.GetKey(Key);
+        if (_held && !down)
+        {
+            _held = false;
+            bool was = Active;
+            Active = false;
+            _leftTime = Time.time;
+            if (was && aiming && hands is Player.FirearmController letGo)
+            {
+                if (_heldFromAim)
+                {
+                    // Taken from the aim: back to it, the gun easing up to the eye, the aim's slowdown on again.
+                    _easingBack = true;
+                    float buff = 0f;
+                    try { buff = Traverse.Create(letGo).Field("_buffInfo").Field("AimMovementSpeed").GetValue<float>(); } catch { }
+                    player.MovementContext?.SetAimingSlowdown(true, 0.33f + buff);
+                }
+                else
+                    letGo.SetAim(false);
+            }
+            return;
+        }
+        if (!aiming && !_held)
+        {
+            _easingBack = false;
+            // Out of the stance and the aim: the gun has been carried down from it (AimArms keeps its place by the
+            // stance's sight while Weight lasts), and then the stance is let go.
+            Active = false;
+            if (Weight > 0f && Time.time - _leftTime > LeftSeconds)
+                Weight = 0f;
+            return;
+        }
+        if (!aiming)
+        {
+            // Ended by a move of the body (a step up, a vault) while the key is still held: the stance waits, and the aim
+            // is taken again once the move lets it (tried now and then, not every frame).
+            Active = false;
+            if (_held && hands is Player.FirearmController again && Time.time - _retryTime > RetrySeconds)
+            {
+                _retryTime = Time.time;
+                again.ToggleAim();
+            }
+            return;
+        }
+        if (_held && !Active)
+        {
+            Active = true;
+            Weight = 1f;
+            player.MovementContext?.SetAimingSlowdown(false, 0f);
+        }
+        else if (!_held && !Active)
+        {
+            // Easing back to the aim it was taken from; or an aim not taken by a hold, as aimed.
+            Weight = _easingBack ? Mathf.Max(0f, Weight - Time.deltaTime / EnterSeconds) : 0f;
+            if (Weight <= 0f)
+                _easingBack = false;
+        }
+        if (Active && Weight < 1f)
+            Weight = Mathf.Min(1f, Weight + Time.deltaTime / EnterSeconds);
+    }
+
+    // The gun's own up, in its frame: the axis across its bore (its bore is its -Y) that most of its sights stand up
+    // along, a canted one being the odd one out. Found once a gun (and its set of sights).
+    private static int _upWeapon = -1, _upSights = -1;
+    private static Vector3 _upLocal = Vector3.forward;
+    private static Transform? _uprightSight;
+    private static readonly Vector3[] Across = { Vector3.right, -Vector3.right, Vector3.forward, -Vector3.forward };
+
+    private static void FindUp(EFT.Animations.ProceduralWeaponAnimation animation, Transform weapon)
+    {
+        var sights = animation.ScopeAimTransforms;
+        int count = sights?.Count ?? 0;
+        if (weapon.GetInstanceID() == _upWeapon && count == _upSights)
+            return;
+        _upWeapon = weapon.GetInstanceID();
+        _upSights = count;
+        _upLocal = Vector3.forward;
+        _uprightSight = null;
+        if (sights == null || count == 0)
+            return;
+        var votes = new int[Across.Length];
+        var first = new Transform?[Across.Length];
+        int firstAxis = -1;
+        for (int i = 0; i < count; i++)
+        {
+            Transform? bone = sights[i]?.Bone;
+            if (bone == null)
+                continue;
+            Vector3 up = weapon.InverseTransformDirection(bone.name == "aim_camera" ? bone.forward : bone.up);
+            int best = 0;
+            for (int a = 1; a < Across.Length; a++)
+                if (Vector3.Dot(up, Across[a]) > Vector3.Dot(up, Across[best]))
+                    best = a;
+            if (Vector3.Angle(up, Across[best]) > 25f)
+                continue;
+            votes[best]++;
+            first[best] ??= bone;
+            if (firstAxis < 0)
+                firstAxis = best;
+        }
+        int pick = firstAxis;
+        for (int a = 0; a < Across.Length; a++)
+            if (pick < 0 || votes[a] > votes[pick])
+                pick = a;
+        if (pick < 0)
+            return;
+        _upLocal = Across[pick];
+        _uprightSight = first[pick];
+    }
+
+    // In the stance the gun is placed by a sight that stands upright on it, whichever is aimed through.
+    internal static Transform? UprightSight(EFT.Animations.ProceduralWeaponAnimation animation)
+    {
+        Transform? weapon = animation.HandsContainer?.Weapon;
+        if (weapon == null)
+            return null;
+        FindUp(animation, weapon);
+        return _uprightSight;
+    }
+
+    // The turn that cants the gun Cant degrees from the view's up (top to the left), about the line of sight, whatever
+    // the game has turned it to for the sight aimed through: its own up there, as the carry's turn leaves it, put there.
+    internal static Quaternion Canted(EFT.Animations.ProceduralWeaponAnimation animation, Quaternion turn, Quaternion view, float weight)
+    {
+        Vector3 forward = view * Vector3.forward;
+        Transform? weapon = animation.HandsContainer?.Weapon;
+        if (weapon == null)
+            return Quaternion.AngleAxis(Cant * weight, forward) * turn;
+        FindUp(animation, weapon);
+        Vector3 have = Vector3.ProjectOnPlane(turn * weapon.TransformDirection(_upLocal), forward);
+        Vector3 want = Quaternion.AngleAxis(Cant, forward) * Vector3.ProjectOnPlane(view * Vector3.up, forward);
+        if (have.sqrMagnitude < 1e-8f)
+            return turn;
+        return Quaternion.AngleAxis(Vector3.SignedAngle(have, want, forward) * weight, forward) * turn;
+    }
+
+    // The mouse's turn rate: in the stance as through a red dot or a holographic sight, whatever is aimed through (a
+    // magnified sight's slower one is for looking through it): the gun's own aim sensitivity, which every collimator in
+    // the game shares (0.65), times the player's aiming sensitivity, as the game works it out (UpdateSensitivity).
+    private static readonly AccessTools.FieldRef<Player, System.Func<float>> GetAimingSensitivity = AccessTools.FieldRefAccess<Player, System.Func<float>>("GetAimingSensitivity");
+
+    internal static void RotationPostfix(Player __instance, ref float __result)
+    {
+        if (!Active || !__instance.IsYourPlayer || __instance.HandsController is not Player.FirearmController { IsAiming: true } firearm)
+            return;
+        System.Func<float>? aiming = GetAimingSensitivity(__instance);
+        if (aiming == null || firearm.Item?.Template == null)
+            return;
+        __result = Mathf.Lerp(__result, firearm.Item.Template.AimSensitivity * aiming(), Weight);
+    }
+
+    // The game's aim slowdown, not put on while in the stance.
+    internal static bool SlowdownPrefix(MovementContext __instance, bool __0)
+    {
+        return !(__0 && Active && __instance == Comfort.Common.Singleton<GameWorld>.Instance?.MainPlayer?.MovementContext);
+    }
+}

@@ -19,6 +19,9 @@ internal static partial class NightVisionEyepieces
 {
     private const float EyeNear = 0.01f;          // the eyecups are a couple of centimetres away
     private const float EyeFar = 0.5f;            // the eyes draw only what is close; the scene is the main camera's
+    private const float BehindLens = 0.1f;        // through a lens, what is further from the eye than this is beyond it
+    private static readonly int LensMapId = Shader.PropertyToID("_LensMap");
+    private static readonly int BehindLensId = Shader.PropertyToID("_BehindLens");
     private const float LensMapScale = 1f;   // the lenses' edges are sharp: the map at the eye's own size
     private const float LensMapRange = 1f;
     private const float HistoryWeight = 0.9f;
@@ -162,6 +165,8 @@ internal static partial class NightVisionEyepieces
 
     internal static void OnCameraPostRender(Camera camera)
     {
+        if (camera == _scopeBufferOn) // TEMP DIAG
+            DiagOpticAfter(camera);
         if (camera != Camera.main)
             return;
         RestoreMount();
@@ -217,7 +222,8 @@ internal static partial class NightVisionEyepieces
             if (monocular >= 0 && side != monocular)
                 continue;
             bool aIsThisSide = side == 0 ? a <= b : a > b;
-            Vector3 shift = right * ((aIsThisSide ? a : b) * EyeShift * _split);
+            // The eyes stay back of the camera when it has come forward to a sight (NightVisionScope.cs).
+            Vector3 shift = right * ((aIsThisSide ? a : b) * EyeShift * _split) - view.forward * ScopePullback;
             RenderEye(side, camera, position, shift, _lensNodes[aIsThisSide ? CentreLensA : CentreLensB], monocular >= 0);
         }
     }
@@ -341,6 +347,8 @@ internal static partial class NightVisionEyepieces
         }
 
         RenderTexture current = RenderTexture.GetTemporary(source.width, source.height, 0, RenderTextureFormat.ARGBHalf);
+        _eyeOptics.SetTexture(LensMapId, _lensMaps[side] != null ? _lensMaps[side] : Texture2D.blackTexture);
+        _eyeOptics.SetFloat(BehindLensId, BehindLens);
         Graphics.Blit(source, current, _eyeOptics, 0);
         RenderTexture history = Target(_eyeHistory, side, source.width, source.height, 0, RenderTextureFormat.ARGBHalf, "Justachae NVG eye history");
         bool continued = _historyFrame[side] == Time.frameCount - 1;

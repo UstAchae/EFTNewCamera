@@ -15,6 +15,8 @@ namespace EFTNewCamera;
 internal static class AimArms
 {
     private const float BlendSeconds = 0.2f;
+    // Leaving an aim (as aimed or at the chest) to the hip: as long as the game's own lowering of the gun takes.
+    private const float LeaveSeconds = 0.35f;
     private const float MeanSeconds = 1f;
     private const float AimInSeconds = 0.7f;
     private const float AimInMeanSeconds = 0.08f;
@@ -54,7 +56,117 @@ internal static class AimArms
     private static float _blend = 1f;
     private static float _mountBlend;
     private static Vector3 _offset;
+    // TEMP DIAG: the 50 frames from the stance at the chest to the hip, as seen (camera frame, cm): the sight carried,
+    // the sight as the game's animation has it, the carry's offset, and the blend's progress.
+    private static int _dgLeaveFrames = -1;
+    private static Vector2 _dgMouse;
+    private static readonly System.Collections.Generic.Queue<string> _dgBefore = new System.Collections.Generic.Queue<string>();
+    private static readonly System.Text.StringBuilder _dgLeave = new System.Text.StringBuilder();
+    private static void DiagLeave(bool aiming, Transform? part, Vector3 cameraPosition, Quaternion cameraRotation, Vector3 target, Quaternion hipTurn)
+    {
+        Player? who = Comfort.Common.Singleton<GameWorld>.Instance?.MainPlayer;
+        if (who?.MovementContext != null)
+            _dgMouse = who.MovementContext.Rotation;
+        if (_dgLeaveFrames < 0 && !aiming && _blend < 0.2f)
+        {
+            _dgLeaveFrames = 0;
+            _dgLeave.Clear();
+            Player? me = Comfort.Common.Singleton<GameWorld>.Instance?.MainPlayer;
+            _dgLeave.AppendLine($"  {(_blendSeen ? "from the chest" : "from the aim")}, moving {(me?.MovementContext?.MovementDirection.ToString("F2") ?? "?")}, speed {(me?.MovementContext?.ActualLinearVelocity ?? 0f):F2}, follow delay {FollowDelay:F2}");
+        }
+        if (_dgLeaveFrames < 0 && part != null && aiming && ChestStance.Active)
+        {
+            // In the stance: the last few frames kept, to show what the leaving follows.
+            Quaternion lookIn = Quaternion.Euler(_dgMouse.y, _dgMouse.x, 0f);
+            Vector3 ei = (Quaternion.Inverse(lookIn) * cameraRotation).eulerAngles;
+            _dgPending = $"  {Time.frameCount} in the stance | camera off the mouse yaw/pitch/roll {new Vector3(Mathf.DeltaAngle(0f, ei.y), Mathf.DeltaAngle(0f, ei.x), Mathf.DeltaAngle(0f, ei.z)).ToString("F2")}";
+            _dgPendingBefore = true;
+        }
+        if (_dgLeaveFrames == 0 && _dgLeave.Length < 200)
+            foreach (string line in _dgBefore)
+                _dgLeave.AppendLine(line);
+        _dgPart = part;
+        if (_dgLeaveFrames < 0 || part == null)
+            return;
+        Quaternion back = Quaternion.Inverse(cameraRotation);
+        Vector3 pivot = _carryPivot;
+        Vector3 carried = back * (pivot + _turn * (part.position - pivot) + _offset - cameraPosition) * 100f;
+        Vector3 anim = back * (part.position - cameraPosition) * 100f;
+        // The camera's turn since the last frame against the mouse's (deg: yaw, pitch, roll), and where the gun points as seen.
+        Quaternion look = Quaternion.Euler(_dgMouse.y, _dgMouse.x, 0f);
+        Quaternion camAgainstLook = Quaternion.Inverse(look) * cameraRotation;
+        Vector3 e = camAgainstLook.eulerAngles;
+        Vector3 rel = new Vector3(Mathf.DeltaAngle(0f, e.y), Mathf.DeltaAngle(0f, e.x), Mathf.DeltaAngle(0f, e.z));
+        Vector3 bore = part.name == "aim_camera" ? -part.up : -part.forward;
+        Vector3 muzzle = back * (_turn * bore);
+        Vector3 hipMuzzle = back * (hipTurn * bore);
+        _dgPending = $"  {Time.frameCount} blend {_blend:F2} carried {carried.ToString("F1")} offset {(back * _offset * 100f).ToString("F1")} | camera off the mouse yaw/pitch/roll {rel.ToString("F2")} | gun points {muzzle.ToString("F3")} hip would {hipMuzzle.ToString("F3")}";
+        _dgPendingBefore = false;
+    }
+
+    // TEMP DIAG: the camera as it is finally placed (after the balance and the body's recoil): its place against the
+    // body (body's yaw frame, cm: right, up, ahead), its pitch off the mouse, and the main camera's field of view.
+    private static string? _dgPending;
+    private static Transform? _dgPart;
+    private static bool _dgPendingBefore;
+    internal static void DiagFinal(Player player, Vector3 position, Quaternion rotation)
+    {
+        if (_dgPending == null)
+            return;
+        string line = _dgPending;
+        _dgPending = null;
+        Quaternion yawFrame = Quaternion.Euler(0f, player.Transform.rotation.eulerAngles.y, 0f);
+        Vector3 place = Quaternion.Inverse(yawFrame) * (position - player.Transform.position) * 100f;
+        Quaternion look = Quaternion.Euler(_dgMouse.y, _dgMouse.x, 0f);
+        Vector3 e = (Quaternion.Inverse(look) * rotation).eulerAngles;
+        Camera? cam = Camera.main;
+        line += $" | final camera at {place.ToString("F1")} pitch {Mathf.DeltaAngle(0f, e.x):F2} fov {(cam != null ? cam.fieldOfView : 0f):F1}";
+        // Where the gun is drawn, as seen from the final camera (degrees right, up from the view's centre): the weapon's
+        // root (by the grip), the sight it is placed by, and the muzzle.
+        Quaternion inv = Quaternion.Inverse(rotation);
+        string Seen(Vector3 world)
+        {
+            Vector3 v = inv * (world - position);
+            return v.z > 0.01f ? $"({Mathf.Atan2(v.x, v.z) * Mathf.Rad2Deg:F2}, {Mathf.Atan2(v.y, v.z) * Mathf.Rad2Deg:F2})" : "(behind)";
+        }
+        Transform? root = player.PlayerBones?.Weapon_Root_Anim;
+        Transform? muzzle = (player.HandsController as Player.FirearmController)?.CurrentFireport?.Original;
+        line += $" | drawn root {(root != null ? Seen(root.position) : "-")} sight {(_dgPart != null ? Seen(_dgPart.position) : "-")} muzzle {(muzzle != null ? Seen(muzzle.position) : "-")}";
+        if (_dgPendingBefore)
+        {
+            _dgBefore.Enqueue(line);
+            while (_dgBefore.Count > 5)
+                _dgBefore.Dequeue();
+            return;
+        }
+        _dgLeave.AppendLine(line);
+        if (++_dgLeaveFrames >= 50)
+        {
+            NewCameraPlugin.Log?.LogInfo("TEMP DIAG leaving the stance:" + System.Environment.NewLine + _dgLeave);
+            _dgLeaveFrames = -1;
+        }
+    }
+
+    // The gun part as drawn (against the camera it was placed for), and in which frame.
+    private static Transform? _drawnPart;
+    private static int _drawnFrame = -10;
+    private static Vector3 _drawnSeen;
+    private static Quaternion _drawnTurn = Quaternion.identity;
+
+    private static void Remember(Transform? part, Vector3 cameraPosition, Quaternion cameraRotation, Vector3 pivot, Vector3 displacement, Quaternion turn)
+    {
+        _drawnPart = part;
+        _drawnFrame = Time.frameCount;
+        if (part == null)
+            return;
+        Quaternion back = Quaternion.Inverse(cameraRotation);
+        _drawnSeen = back * (pivot + displacement + turn * (part.position - pivot) - cameraPosition);
+        _drawnTurn = back * (turn * part.rotation);
+    }
+
     private static Vector3 _blendFrom;
+    private static bool _blendSeen;
+    private static Vector3 _seenFrom;
     private static Quaternion _turn = Quaternion.identity;
     private static Quaternion _turnFrom = Quaternion.identity;
     private static Quaternion _viewTurnFrom = Quaternion.identity;
@@ -228,6 +340,9 @@ internal static class AimArms
             Transform? bone = animation != null && animation.ScopeAimTransforms != null && animation.ScopeAimTransforms.Count > 0
                 ? Scopes.Current(animation)?.Bone
                 : null;
+            // The stock at the chest: placed by an upright sight, not by the one aimed through (a canted one sits off to the side).
+            if (bone != null && ChestStance.Weight > 0f && ChestStance.UprightSight(animation!) is Transform upright)
+                bone = upright;
             Vector3 sightPosition = bone != null ? bone.position : Vector3.zero;
             Vector3 sightForward = Vector3.forward;
             bool ironAligned = bone != null && animation != null && ResolveIronSight(animation, bone, out sightPosition, out sightForward);
@@ -253,6 +368,10 @@ internal static class AimArms
                 sightId = bone.GetInstanceID();
                 float relief = SightRelief(animation, bone);
                 Vector3 aimPoint = new Vector3(0f, 0f, ForwardDistance + relief);
+                // The stock at the chest (ChestStance): the gun as aimed, lower and to the right of the eye.
+                float chest = ChestStance.Weight * ChestStance.Weight * (3f - 2f * ChestStance.Weight);
+                if (chest > 0f)
+                    aimPoint += ChestStance.Offset * chest;
                 Transform? root = bones.Weapon_Root_Anim;
                 SteadyHead(player, cameraPosition, cameraRotation, out Vector3 steadyPosition, out Quaternion steadyRotation);
                 Quaternion bodyRotation = _bodyLook * Quaternion.Inverse(_smoothLook) * steadyRotation;
@@ -266,6 +385,10 @@ internal static class AimArms
                         turn = TurnFromTo(sightForward, bodyRotation * Vector3.forward);
                 }
 
+                // Canted in about the line of sight, through the sight (the carry's pivot), by the same angle whatever sight
+                // the game has turned the gun for.
+                if (chest > 0f)
+                    turn = ChestStance.Canted(animation, turn, bodyRotation, chest);
                 Quaternion delay = _lagLook * Quaternion.Inverse(_bodyLook);
                 Vector3 placed = sightPosition + target;
                 target = steadyPosition + delay * (placed - bodyPosition) - sightPosition;
@@ -290,6 +413,7 @@ internal static class AimArms
         if (!aiming && !_blendAiming && _offset.sqrMagnitude < 0.00000001f && Settled(_turn) && Settled(turn) && _blend >= 1f)
         {
             _hasCarry = false;
+            Remember(gunPart, cameraPosition, cameraRotation, Vector3.zero, Vector3.zero, Quaternion.identity);
             _viewKick = _mounted && bones?.Weapon_Root_Anim != null
                 ? ShotKick(player.ProceduralWeaponAnimation, bones.Weapon_Root_Anim.rotation)
                 : Quaternion.identity;
@@ -303,11 +427,28 @@ internal static class AimArms
             return;
         }
 
+        Vector3 pivotNow = sightPoint ?? (bones.Weapon_Root_Anim != null ? bones.Weapon_Root_Anim.position : Vector3.zero);
+        Vector3? seenPivot = null;
         if (aiming != _blendAiming || sightId != _blendSightId)
         {
             _blendFrom = _offset;
+            // Into or out of the stance at the chest: the gun goes along a straight line as seen, whatever the game's
+            // own aim animation does under it (leaving, it starts from the eye, and would carry the gun up first). Where
+            // the part was seen as it was last carried.
+            _blendSeen = ChestStance.Weight > 0f && gunPart != null;
+            // As it was drawn last frame, against that frame's camera: last frame's carry applied to this frame's bones
+            // would put it off by however far the body moved in between, turned by the carry's turn (the stance's cant),
+            // and the gun would start the blend with a jump while walking.
+            bool drawnLast = gunPart != null && ReferenceEquals(gunPart, _drawnPart) && _drawnFrame == Time.frameCount - 1;
+            _seenFrom = drawnLast
+                ? _drawnSeen
+                : gunPart != null
+                    ? Quaternion.Inverse(cameraRotation) * (_carryPivot + _turn * (gunPart.position - _carryPivot) + _offset - cameraPosition)
+                    : Vector3.zero;
             _turnFrom = _turn;
-            _viewTurnFrom = gunPart != null ? Quaternion.Inverse(cameraRotation) * (_turn * gunPart.rotation) : Quaternion.identity;
+            _viewTurnFrom = drawnLast
+                ? _drawnTurn
+                : gunPart != null ? Quaternion.Inverse(cameraRotation) * (_turn * gunPart.rotation) : Quaternion.identity;
             _viewTurnPart = gunPart;
             _blend = 0f;
             _blendAiming = aiming;
@@ -316,9 +457,10 @@ internal static class AimArms
 
         if (_blend < 1f)
         {
-            _blend = Mathf.Min(1f, _blend + Time.deltaTime / BlendSeconds);
+            // Out of the stance to the hip, over as long as the game's own lowering of the gun takes, which would
+            // otherwise go on moving it once the blend was done.
+            _blend = Mathf.Min(1f, _blend + Time.deltaTime / (!aiming ? LeaveSeconds : BlendSeconds));
             float t = _blend * _blend * (3f - 2f * _blend);
-            _offset = Vector3.Lerp(_blendFrom, target, t);
             // The gun turns, as seen, along the same curve: from how it lay in view when the blend began to how it lies
             // once there. The game's own aim-in turns it in steps (the first-person animation turns it fast and stops
             // halfway), which would otherwise show as the gun halting mid-way.
@@ -329,6 +471,19 @@ internal static class AimArms
             }
             else
                 _turn = Quaternion.Slerp(_turnFrom, turn, t);
+            if (_blendSeen && gunPart != null && ReferenceEquals(gunPart, _viewTurnPart))
+            {
+                // The part where it is seen along the line, the gun turned about the part itself all the while (the
+                // pivot the stance had): the hip's pivot, the camera, would swing the still-turned gun about as it came.
+                // Where the hip will have it: about its own pivot.
+                Vector3 part = gunPart.position;
+                Vector3 there = pivotNow + turn * (part - pivotNow) + target;
+                Vector3 seen = Vector3.Lerp(_seenFrom, Quaternion.Inverse(cameraRotation) * (there - cameraPosition), t);
+                _offset = cameraPosition + cameraRotation * seen - part;
+                seenPivot = part;
+            }
+            else
+                _offset = Vector3.Lerp(_blendFrom, target, t);
         }
         else
         {
@@ -336,9 +491,10 @@ internal static class AimArms
             _turn = turn;
         }
 
+        DiagLeave(aiming, gunPart, cameraPosition, cameraRotation, target, turn); // TEMP DIAG
         Vector3 displacement = _offset;
         Quaternion carryTurn = _turn;
-        Vector3 pivot = sightPoint ?? (bones.Weapon_Root_Anim != null ? bones.Weapon_Root_Anim.position : Vector3.zero);
+        Vector3 pivot = seenPivot ?? sightPoint ?? (bones.Weapon_Root_Anim != null ? bones.Weapon_Root_Anim.position : Vector3.zero);
         Quaternion kick = Quaternion.identity;
         if (aiming && !_mounted)
             kick = Recoil(player.ProceduralWeaponAnimation, bones.Weapon_Root_Anim, pivot, ref displacement, ref carryTurn);
@@ -349,6 +505,7 @@ internal static class AimArms
         _carryPivot = pivot;
         _carryTurn = carryTurn;
         _hasCarry = displacement.sqrMagnitude >= 0.00000001f || !Settled(carryTurn);
+        Remember(gunPart, cameraPosition, cameraRotation, pivot, displacement, carryTurn);
         BodySkins.EnsureUpperarms(player);
         for (int i = BodySkins.Upperarms.Count - 1; i >= 0; i--)
         {
@@ -1383,8 +1540,10 @@ internal static class AimArms
             return;
 
         bool aiming = player.HandsController != null && player.HandsController.IsAiming;
-        float target = aiming && _smoothedHead.sqrMagnitude <= 0.01f ? 1f : 0f;
-        _headLock = Mathf.MoveTowards(_headLock, target, Time.deltaTime / HeadLockSeconds);
+        // The stock at the chest leaves the head free, as at the hip: the view goes with the head (and the balance),
+        // so nothing changes as the stance is let go.
+        float target = aiming && !ChestStance.Active && _smoothedHead.sqrMagnitude <= 0.01f ? 1f : 0f;
+        _headLock = Mathf.MoveTowards(_headLock, target, Time.deltaTime / (target > _headLock ? HeadLockSeconds : LeaveSeconds));
     }
 
     private static void SteadyHead(Player player, Vector3 cameraPosition, Quaternion cameraRotation, out Vector3 position, out Quaternion rotation)

@@ -8,7 +8,7 @@ namespace EFTNewCamera;
 // looking at one point on the line the player means to look along (the mouse look plus free look), the set
 // distance ahead of a steady eye. The head's bob and its turn from each step are turned out of view. Yaw and
 // pitch are balanced fully; the turn about the view axis (roll) only by the torsion share, as real eyes counter-roll
-// only a small part of a head tilt.
+// only a small part of a head tilt, and only its quick part: a lean (Q, E) is the player's own and stays.
 // Aiming, mounting, scene guns, vaulting, climbing and the BTR are left as they are.
 // The point is whatever that line hits, found the way a bullet finds its target.
 // While the hands or body are busy (switching or reloading, meds, inventory, looting, doors) the animation turns
@@ -37,6 +37,11 @@ internal static class VestibularView
     private static float _focus;
 
     private const float FadeSeconds = 0.2f;
+    // A roll held longer than about this is the player's own (a lean), not a step's.
+    private const float HeldRollSeconds = 0.6f;
+    private const float LeanCatchSeconds = 0.15f;
+    private static float _heldRoll, _leanTilt, _leanCatchUntil;
+    private static int _rollFrame = -10;
     // Two of these in a row separate a step (about two a second) from changing pose.
     private const float StepSeconds = 0.25f;
 
@@ -97,7 +102,7 @@ internal static class VestibularView
             _eyeSteady = Vector3.Lerp(_eyeSteady, _eyeFirst, follow);
         }
 
-        bool free = !(player.HandsController != null && player.HandsController.IsAiming)
+        bool free = (!(player.HandsController != null && player.HandsController.IsAiming) || ChestStance.Active)
             && !movement.IsInMountedState
             && !movement.IsStationaryWeaponInHands
             && movement.RotationAction == MovementContext.DefaultRotationFunction
@@ -119,8 +124,19 @@ internal static class VestibularView
         Quaternion steady = PoseMath.TurnFromTo(cameraRotation * Vector3.forward, toTarget) * cameraRotation;
         if (Torsion > 0f)
         {
+            // Only the quick roll, a step's, is countered: a held one is meant (a lean with Q or E), and kept. The held
+            // part is the roll smoothed over a while, caught up at once while the lean is changing and a moment after.
             float roll = Roll(Quaternion.Inverse(intended) * steady);
-            steady = Quaternion.AngleAxis(-roll * Torsion, steady * Vector3.forward) * steady;
+            float tilt = movement.SmoothedTilt;
+            if (Mathf.Abs(tilt - _leanTilt) > 0.001f)
+                _leanCatchUntil = Time.time + LeanCatchSeconds;
+            _leanTilt = tilt;
+            if (Time.frameCount - _rollFrame > 1 || Time.time < _leanCatchUntil)
+                _heldRoll = roll;
+            else
+                _heldRoll = Mathf.Lerp(roll, _heldRoll, Mathf.Exp(-Time.deltaTime / HeldRollSeconds));
+            _rollFrame = Time.frameCount;
+            steady = Quaternion.AngleAxis(-(roll - _heldRoll) * Torsion, steady * Vector3.forward) * steady;
         }
         return Quaternion.Slerp(cameraRotation, steady, amount);
     }

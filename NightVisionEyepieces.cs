@@ -253,6 +253,8 @@ internal static partial class NightVisionEyepieces
         _installed = true;
     }
 
+    private static float _dgStateTime; // TEMP DIAG
+
     internal static void Update(Player player)
     {
         if (!LoadShaders())
@@ -305,6 +307,11 @@ internal static partial class NightVisionEyepieces
         HoldMainThermal(cameras, thermal && worn);
         KeepThermalGlow(thermalDevice);
         Active = on;
+        if (Time.time - _dgStateTime > 3f) // TEMP DIAG: why the eyepieces are or are not on
+        {
+            _dgStateTime = Time.time;
+            NewCameraPlugin.Log?.LogInfo($"TEMP DIAG eyepieces: device {(_body != null ? _device.Node : "none")}, present {present}, image ready {EyepieceImageReady(cameras)}, brnvg {brnvg} (picture {Picture}, renderer type {(BodyVisibility.NightRendererType != null ? "found" : "none")}, renderer {(renderer != null ? renderer.GetType().Name + (renderer.enabled ? " on" : " off") : "none")}), worn {worn}, switched on {switchedOn}, flip {_flip:F2}, settled {settled}, powered {powered}, on {on}, binocular {Binocular}, eyes {EyesOn}");
+        }
         _split = Binocular ? _flip : 0f;
         KeepEyepieceImage(cameras, worn && (on || _flip > 0.001f));
         if (_body != null)
@@ -426,6 +433,7 @@ internal static partial class NightVisionEyepieces
             Vector3 local = Quaternion.Inverse(lens.transform.localRotation) * (floor - tube.Centre);
             _lensFloors[i] = new Vector4(local.x, local.y, local.z, tube.LensRadius > 0f ? tube.LensRadius : _device.LensRadius);
         }
+        MeasureObjective(body);
         MakeFaceLights();
     }
 
@@ -462,6 +470,8 @@ internal static partial class NightVisionEyepieces
                 _irLightShader = shader;
             else if (shader.name == "Justachae/Fisheye")
                 _fisheyeShader = shader;
+            else if (shader.name == "Justachae/NVG/Objective")
+                _objectiveShader = shader;
         }
 
         if (_binocularShader == null || _lensMaskShader == null || _eyeOpticsShader == null || _glowShader == null)
@@ -469,6 +479,8 @@ internal static partial class NightVisionEyepieces
         _glowMaterial = new Material(_glowShader) { name = "Justachae NVG eyepiece glow", hideFlags = HideFlags.DontSave };
         _binocularMaterial = new Material(_binocularShader) { name = "Justachae NVG eyepieces", hideFlags = HideFlags.DontSave };
         _eyeOptics = new Material(_eyeOpticsShader) { name = "Justachae NVG eye optics", hideFlags = HideFlags.DontSave };
+        if (_objectiveShader != null)
+            _objective = new Material(_objectiveShader) { name = "Justachae NVG objective", hideFlags = HideFlags.DontSave };
         return true;
     }
 

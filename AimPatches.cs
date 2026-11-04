@@ -53,6 +53,12 @@ internal static class AimPatches
             prefix: Hook(typeof(AimArms), nameof(AimArms.SetStrategyPrefix)));
         Patch(harmony, AccessTools.Method(AccessTools.TypeByName("ThirdPersonStrategy"), "ProcessEffectors"),
             prefix: Hook(typeof(AimArms), nameof(AimArms.BreatheAsFirstPerson)));
+        Patch(harmony, AccessTools.Method(typeof(FirearmHandsInputTranslator), nameof(FirearmHandsInputTranslator.TranslateCommand)),
+            prefix: Hook(typeof(ChestStance), nameof(ChestStance.TranslatePrefix)));
+        Patch(harmony, AccessTools.Method(typeof(Player), nameof(Player.GetRotationMultiplier)),
+            postfix: Hook(typeof(ChestStance), nameof(ChestStance.RotationPostfix)));
+        Patch(harmony, AccessTools.Method(typeof(MovementContext), nameof(MovementContext.SetAimingSlowdown)),
+            prefix: Hook(typeof(ChestStance), nameof(ChestStance.SlowdownPrefix)));
         Patch(harmony, AccessTools.Method(typeof(ProceduralWeaponAnimation), nameof(ProceduralWeaponAnimation.ProcessEffectors)),
             prefix: Hook(typeof(AimArms), nameof(AimArms.EveryFramePrefix)));
     }

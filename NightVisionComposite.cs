@@ -124,14 +124,18 @@ internal static partial class NightVisionEyepieces
             Graphics.Blit(from, into);
         else
         {
-            RenderTexture? made = null, withIr = null;
-            // The lenses see IR, the naked eye around them does not.
-            Texture picture = LensPicture(camera, WithIr(from, ref withIr), ref made);
+            RenderTexture? made = null, withIr = null, focused = null;
+            // The lenses see IR, the naked eye around them does not; and they see it through the objective.
+            Texture picture = LensPicture(camera, ThroughObjective(camera, WithIr(from, ref withIr), ref focused), ref made);
+            picture = EaseGrain(picture, ref made);
+            ReleaseMask();
             Compose(composite, glow, from, into, picture);
             if (made != null)
                 RenderTexture.ReleaseTemporary(made);
             if (withIr != null)
                 RenderTexture.ReleaseTemporary(withIr);
+            if (focused != null)
+                RenderTexture.ReleaseTemporary(focused);
         }
         if (lensed != null)
         {

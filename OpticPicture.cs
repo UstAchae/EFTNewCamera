@@ -43,6 +43,23 @@ internal static class OpticPicture
 
             bool aiming = player.HandsController != null && player.HandsController.IsAiming;
             ProceduralWeaponAnimation.SightNBone? scope = Scopes.Current(animation);
+            // The stock at the chest (ChestStance): nothing is looked through, so no sight makes its picture (the game
+            // would render its whole scene again for it every frame); the sight aimed through next is turned on again.
+            if (aiming && ChestStance.Weight > 0f)
+            {
+                ReleaseHeld();
+                if (animation.ScopeAimTransforms != null)
+                    foreach (ProceduralWeaponAnimation.SightNBone sat in animation.ScopeAimTransforms)
+                    {
+                        OpticSight? optic = sat.ScopePrefabCache != null ? sat.ScopePrefabCache.CurrentModOpticSight : null;
+                        if (optic == null || !optic.enabled)
+                            continue;
+                        optic.enabled = false;
+                        if (!_quieted.Contains(optic))
+                            _quieted.Add(optic);
+                    }
+                return;
+            }
             OpticSight? picture = null;
             if (aiming && scope != null)
             {

@@ -133,9 +133,21 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         ConfigEntry<float> monocularSeeThrough = Config.Bind("头戴式成像装备", "PVS-14 左眼透明度", 0.5f,
             new ConfigDescription("AN/PVS-14 单筒夜视仪只挡在右眼前，左眼看过去时机身往画面边缘逐渐变透明。0：不变透明（两只眼都看到完整的机身）；0.5：默认；1：变透明得最快。",
                 new AcceptableValueRange<float>(0f, 1f), new ConfigurationManagerAttributes { Order = 0 }));
+        ConfigEntry<float> nearBlur = Config.Bind("头戴式成像装备", "近处虚化距离", 1f,
+            new ConfigDescription("夜视仪的物镜对焦在远处，近处的手、枪和机瞄是虚的，越近越虚，远处是清楚的。原版夜视和 BRNVG 的画面都会这样，热成像不受影响。距离从夜视仪的物镜算起：在这个距离上虚化是“近处虚化上限”的一半，更近的越来越接近上限，更远的逐渐变清楚。拉长这个距离，枪的前端和更远一点的东西也会更虚。",
+                new AcceptableValueRange<float>(0.2f, 3f), new ConfigurationManagerAttributes { Order = 0 }));
+        ConfigEntry<float> nearBlurLimit = Config.Bind("头戴式成像装备", "近处虚化上限", 0.75f,
+            new ConfigDescription("近处虚化最多糊开多大（模糊圆斑的半径，单位为度）。越近越接近这个值，但不是一刀切：整把枪从后到前仍是越近越虚。0.5 到 1 比较合适；越大，离眼睛近的部分糊得越厉害。",
+                new AcceptableValueRange<float>(0.2f, 3f), new ConfigurationManagerAttributes { Order = 0 }));
+        ConfigEntry<float> tritium = Config.Bind("头戴式成像装备", "氚光亮度", 1f,
+            new ConfigDescription("透过夜视仪看氚光机瞄（以及游戏里做了氚光的其他瞄具）：每个氚光点被物镜散成一个亮度均匀、边缘清楚的圆盘，离眼睛越近圆盘越大、越暗。这一项调这些圆盘有多亮，0 是不画。",
+                new AcceptableValueRange<float>(0f, 4f), new ConfigurationManagerAttributes { Order = 0 }));
         void Refresh()
         {
             NightVisionEyepieces.Picture = picture.Value;
+            NightVisionEyepieces.TritiumBrightness = tritium.Value;
+            NightVisionEyepieces.NearBlurDistance = nearBlur.Value;
+            NightVisionEyepieces.NearBlurLimit = nearBlurLimit.Value;
             HeadwearTilt.Degrees = headwearPitch.Value;
             HeadwearTilt.Up = headwearUp.Value;
             HeadwearTilt.Down = headwearDown.Value;
@@ -153,6 +165,9 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         }
 
         picture.SettingChanged += (_, _) => Refresh();
+        nearBlur.SettingChanged += (_, _) => Refresh();
+        tritium.SettingChanged += (_, _) => Refresh();
+        nearBlurLimit.SettingChanged += (_, _) => Refresh();
         headwearPitch.SettingChanged += (_, _) => Refresh();
         headwearUp.SettingChanged += (_, _) => Refresh();
         headwearDown.SettingChanged += (_, _) => Refresh();
@@ -325,7 +340,8 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         if (_aimDistance == null || _aimDistanceFarther == null || _aimDistanceCloser == null || !NewCameraSwitch.Enabled)
             return;
         // Only while aiming: the same keys set the helmet mount at the hip.
-        bool aiming = Comfort.Common.Singleton<GameWorld>.Instance?.MainPlayer?.ProceduralWeaponAnimation?.IsAiming == true;
+        // Not in the stance at the chest (its place is set in the settings).
+        bool aiming = Comfort.Common.Singleton<GameWorld>.Instance?.MainPlayer?.ProceduralWeaponAnimation?.IsAiming == true && !ChestStance.Active;
         float step = 0f;
         if (aiming && _aimDistanceFarther.Value.IsPressed())
             step += AimDistanceSpeed * Time.deltaTime;
@@ -377,6 +393,44 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         recoilChest.SettingChanged += (_, _) => Refresh();
         recoilHead.SettingChanged += (_, _) => Refresh();
         followDelay.SettingChanged += (_, _) => Refresh();
+        Refresh();
+        BindChestStance();
+    }
+
+    private void BindChestStance()
+    {
+        const string section = "胸口抵肩";
+        ConfigEntry<bool> enabled = Config.Bind(section, "启用", true,
+            "按住瞄准键不放时，不把瞄具对到眼前，而是枪托抵在胸口正中、枪放低并向内倾斜，枪管和视线平行，靠激光指示器瞄准（戴夜视仪时的常用姿势）。点一下瞄准键仍是正常开镜（松开时开镜）；按住超过下面的时间就直接进入胸口抵肩，松开就退出瞄准。摆动、呼吸、后坐力和开镜时一样，走路速度不按开镜减慢，鼠标灵敏度和红点、全息开镜时一样，前庭平衡照常起作用。");
+        ConfigEntry<KeyCode> key = Config.Bind(section, "瞄准键", KeyCode.Mouse1,
+            "游戏里绑定的瞄准键（默认鼠标右键 Mouse1），用来判断是否还按着。改了游戏里的瞄准键时这里也要改。");
+        ConfigEntry<float> hold = Config.Bind(section, "按住多久算按住（秒）", 0.25f,
+            new ConfigDescription("瞄准键按下后，这个时间内松开算点一下（松开时正常开镜），超过这个时间还按着算按住（直接进入胸口抵肩）。越短按住时等得越少，但慢一点的点击可能被当成按住。", new AcceptableValueRange<float>(0.1f, 1f)));
+        ConfigEntry<float> drop = Config.Bind(section, "比开镜时低（米）", 0.10f,
+            new ConfigDescription("胸口抵肩时，枪比正常开镜时的位置低多少（负数是更高）。", new AcceptableValueRange<float>(-0.1f, 0.3f)));
+        ConfigEntry<float> side = Config.Bind(section, "比开镜时偏右（米）", 0.05f,
+            new ConfigDescription("胸口抵肩时，枪比正常开镜时的位置往右多少（负数是往左）。", new AcceptableValueRange<float>(-0.15f, 0.15f)));
+        ConfigEntry<float> ahead = Config.Bind(section, "比开镜时靠前（米）", 0f,
+            new ConfigDescription("胸口抵肩时，枪比正常开镜时的位置往前多少（负数是往后）。", new AcceptableValueRange<float>(-0.15f, 0.15f)));
+        ConfigEntry<float> cant = Config.Bind(section, "倾斜（度）", 30f,
+            new ConfigDescription("胸口抵肩时，枪绕着瞄准线转多少度，正数是枪的上面往左倒（向内），负数往右。", new AcceptableValueRange<float>(-60f, 60f)));
+        void Refresh()
+        {
+            ChestStance.Enabled = enabled.Value;
+            ChestStance.Key = key.Value;
+            ChestStance.HoldSeconds = hold.Value;
+            ChestStance.Drop = drop.Value;
+            ChestStance.Ahead = ahead.Value;
+            ChestStance.Side = side.Value;
+            ChestStance.Cant = cant.Value;
+        }
+        enabled.SettingChanged += (_, _) => Refresh();
+        key.SettingChanged += (_, _) => Refresh();
+        hold.SettingChanged += (_, _) => Refresh();
+        drop.SettingChanged += (_, _) => Refresh();
+        ahead.SettingChanged += (_, _) => Refresh();
+        side.SettingChanged += (_, _) => Refresh();
+        cant.SettingChanged += (_, _) => Refresh();
         Refresh();
     }
 
@@ -431,6 +485,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
     };
     private static readonly Camera.CameraCallback PreRender = camera =>
     {
+        Guarded(NightVisionEyepieces.NoteRendered, camera, "pre-render (objective)");
         Guarded(NightVisionEyepieces.OnCameraPreRender, camera, "pre-render (eyepieces)");
         Guarded(NightVisionEyepieces.OnCameraPreRenderIr, camera, "pre-render (IR)");
     };
@@ -539,6 +594,7 @@ internal static class NewCameraSwitch
             VestibularView.Reset();
         }
         ChooseSkeleton(player);
+        ChestStance.Update(player);
         AimArms.Apply(player);
         NightVisionEyepieces.Update(player);
         BodyVisibility.Apply(player);
@@ -613,6 +669,9 @@ internal static class NewCameraSwitch
                 AimArms.UnliftHead(head);
                 AimArms.FollowMountedGun(player);
                 _poseRotation = CameraDirection.Resolve(head.rotation);
+                // A magnified sight through the goggle: the camera (the objective) ahead of the eyes, the gun with it.
+                CameraPosition.ScopeAhead = 0f;
+                CameraPosition.ScopeAhead = NightVisionEyepieces.ScopePull(player, CameraPosition.Resolve(head.position, _poseRotation), _poseRotation);
                 _posePosition = CameraPosition.Resolve(head.position, _poseRotation);
                 PoseFromHead = CameraPosition.Offset(_poseRotation);
                 AimArms.ObserveHead(player, _posePosition, _poseRotation);
@@ -629,6 +688,7 @@ internal static class NewCameraSwitch
                 Vector3 beforeRecoil = _posePosition;
                 AimArms.BodyRecoil(player, ref _posePosition, ref _poseRotation);
                 PoseFromHead += _posePosition - beforeRecoil;
+                AimArms.DiagFinal(player, _posePosition, _poseRotation); // TEMP DIAG
                 PoseHead = head;
                 AimArms.LiftHead(head);
                 _poseFrame = Time.frameCount;
