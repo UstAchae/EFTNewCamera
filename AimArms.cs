@@ -575,7 +575,7 @@ internal static class AimArms
         forward.Normalize();
         Vector3 right = Vector3.Cross(Vector3.up, forward);
         Quaternion turn = Quaternion.AngleAxis(-RealRecoil.WaistYawLeft * Mathf.Rad2Deg, Vector3.up)
-            * Quaternion.AngleAxis(-RealRecoil.WaistPitch * Mathf.Rad2Deg, right);
+            * Quaternion.AngleAxis(-RealRecoil.WaistPitch * RecoilRiseScale * Mathf.Rad2Deg, right);
         if (Settled(turn))
             return;
 
@@ -665,6 +665,11 @@ internal static class AimArms
     // How much larger the gun's slide back in the shoulder is drawn than the physical recoil works it out (F12).
     internal static float RecoilTravelScale = 4f;
 
+    // How much larger the climb is than the physical recoil works it out (F12): the upper body's pitch about the waist and
+    // the gun's in the shoulder, up and back down alike; sideways as worked out. The muzzle climbs that much, and the
+    // bullet, leaving along it, with it.
+    internal static float RecoilRiseScale = 3f;
+
     // Where the butt sits in the shoulder, from the eye on the cheek weld: a little behind it and below.
     private const float PocketBehindEye = 0.12f;
     private const float PocketBelowEye = 0.07f;
@@ -682,7 +687,7 @@ internal static class AimArms
         Quaternion torso = withTorso && _torsoFrame == Time.frameCount ? _torsoTurn : Quaternion.identity;
         Quaternion kick = torso
             * Quaternion.AngleAxis(-RealRecoil.GunYawLeft * Mathf.Rad2Deg, cameraRotation * Vector3.up)
-            * Quaternion.AngleAxis(-RealRecoil.GunPitch * Mathf.Rad2Deg, cameraRotation * Vector3.right);
+            * Quaternion.AngleAxis(-RealRecoil.GunPitch * RecoilRiseScale * Mathf.Rad2Deg, cameraRotation * Vector3.right);
         // Sliding back along the line of sight hardly shows from the eye (8 mm is a few pixels), so the slide is drawn
         // larger: a move back along the line of sight only, the muzzle's direction (and the bullet's) unchanged.
         Vector3 back = -(cameraRotation * Vector3.forward) * (RealRecoil.GunBack * RecoilTravelScale);

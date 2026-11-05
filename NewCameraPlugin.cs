@@ -363,6 +363,11 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
                 new AcceptableValueRange<float>(1f, 8f)));
         travel.SettingChanged += (_, _) => AimArms.RecoilTravelScale = travel.Value;
         AimArms.RecoilTravelScale = travel.Value;
+        ConfigEntry<float> rise = SettingsLayout.Bind(Config, "瞄准", "上跳倍数", 3f,
+            new ConfigDescription("物理后坐力：开枪时枪口上跳（上身后仰加上枪在肩窝里往上翻）放大几倍，上跳和回正一起放大，快慢不变，左右方向不变。1 是按物理算的原样（一发 5.56 约 0.3°）；默认 3，约 1°。子弹沿枪口射出，所以连射时后面几发也跟着打得更高、散得更开，压枪更难；单发影响不大（子弹出膛时枪还没开始跳）。",
+                new AcceptableValueRange<float>(1f, 6f)));
+        rise.SettingChanged += (_, _) => AimArms.RecoilRiseScale = rise.Value;
+        AimArms.RecoilRiseScale = rise.Value;
         RealRecoil.PocketStiffness = pocket.Value;
         _aimDistance.SettingChanged += (_, _) => AimArms.ForwardDistance = _aimDistance.Value;
         AimArms.ForwardDistance = _aimDistance.Value;
