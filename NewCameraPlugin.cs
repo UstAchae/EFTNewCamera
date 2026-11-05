@@ -314,7 +314,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         ConfigEntry<float> vertical = BindMeters("镜头位置", "垂直", 0.05f, "沿镜头上方向移动，单位为米。");
         ConfigEntry<float> forward = BindMeters("镜头位置", "前后", 0.08f, "沿镜头前方向移动，单位为米。");
         ConfigEntry<bool> aimEye = Config.Bind("镜头位置", "瞄准时移到瞄准眼", true,
-            "开镜和胸口抵肩时，镜头的水平位置平滑移到瞄准用的那只眼：右肩时到右眼，换到左肩时到左眼，枪跟着一起过去；退出瞄准时回到上面设的水平位置。");
+            "开镜时，镜头的水平位置平滑移到瞄准用的那只眼：右肩时到右眼，换到左肩时到左眼，枪跟着一起过去；胸口抵肩时镜头不动，枪的姿势仍按移到那只眼时摆；退出瞄准时回到上面设的水平位置。");
         ConfigEntry<float> eye = Config.Bind("镜头位置", "瞄准眼离中线（米）", 0.03f,
             new ConfigDescription("开镜时镜头离头部中线多远：右眼是正值这么远，左眼是负值这么远。", new AcceptableValueRange<float>(0f, 0.06f)));
         void Refresh()
@@ -506,6 +506,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
     // game lights lights there, per camera), so each of ours is kept from throwing; a failure is logged once.
     private static readonly Camera.CameraCallback PreCull = camera =>
     {
+        Guarded(Fisheye.Reassert, camera, "pre-cull (fisheye)");
         Guarded(NewCameraSwitch.OnCameraPreCull, camera, "pre-cull (camera)");
         Guarded(NightVisionEyepieces.OnCameraPreCull, camera, "pre-cull (eyepieces)");
     };

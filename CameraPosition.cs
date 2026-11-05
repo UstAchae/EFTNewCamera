@@ -9,7 +9,8 @@ internal static class CameraPosition
     internal static float Horizontal;
     internal static float Across;
     // Aimed, the camera goes over to the eye the gun is shouldered for: the right one, or the left one with the gun on
-    // the left shoulder (the game's left stance), the gun with it (AimArms places it from the camera).
+    // the left shoulder (the game's left stance), the gun with it (AimArms places it from the camera). At the chest
+    // (ChestStance) the camera stays, and only the gun is placed as from that eye (PoseAcross).
     internal static bool AimEyeEnabled = true;
     internal static float AimEye = 0.03f;            // the eye from the head's middle (m)
     internal static float Vertical;
@@ -22,39 +23,41 @@ internal static class CameraPosition
     private const float AimInSeconds = 0.2f;
     private const float AimOutSeconds = 0.35f;       // as long as the gun takes back to the hip (AimArms.LeaveSeconds)
     private const float SideSeconds = 0.3f;
-    private static float _aimed;
+    private static float _aimed, _viewAimed;
+    // Across from the camera to where the gun is placed from (the aiming eye's place as the pose has it), camera's right (m).
+    internal static float PoseAcross;
     private static float _side = 1f;
 
-    // Each frame, before the camera is placed: how far over to the aiming eye, aimed as at the chest (ChestStance).
+    // Each frame, before the camera is placed: how far over to the aiming eye the pose is (aimed, also at the chest)
+    // and the camera (aimed, not at the chest).
     internal static void UpdateAimEye(Player player)
     {
         bool aimed = AimEyeEnabled && player.HandsController != null && player.HandsController.IsAiming;
-        float target = aimed ? 1f : 0f;
-        _aimed = Mathf.MoveTowards(_aimed, target, Time.deltaTime / (target > _aimed ? AimInSeconds : AimOutSeconds));
+        _aimed = Ease(_aimed, aimed);
+        _viewAimed = Ease(_viewAimed, aimed && !ChestStance.Active);
         bool left = false;
         try { left = player.MovementContext?.LeftStanceController?.LeftStance == true; } catch { }
         _side = Mathf.MoveTowards(_side, left ? -1f : 1f, 2f * Time.deltaTime / SideSeconds);
         float u = 0.5f * (_side + 1f);
         float side = 2f * u * u * (3f - 2f * u) - 1f;
-        float w = _aimed * _aimed * (3f - 2f * _aimed);
-        Horizontal = Mathf.Lerp(Across, side * AimEye, w);
+        float pose = Mathf.Lerp(Across, side * AimEye, Smooth(_aimed));
+        Horizontal = Mathf.Lerp(Across, side * AimEye, Smooth(_viewAimed));
+        PoseAcross = pose - Horizontal;
     }
 
-    // How far over to the aiming eye (0 to 1, eased), and which eye: from -1 the left to 1 the right, eased between.
-    internal static float AimedWeight => _aimed * _aimed * (3f - 2f * _aimed);
-    internal static float AimSide
+    private static float Ease(float at, bool on)
     {
-        get
-        {
-            float u = 0.5f * (_side + 1f);
-            return 2f * u * u * (3f - 2f * u) - 1f;
-        }
+        float target = on ? 1f : 0f;
+        return Mathf.MoveTowards(at, target, Time.deltaTime / (target > at ? AimInSeconds : AimOutSeconds));
     }
+
+    private static float Smooth(float t) => t * t * (3f - 2f * t);
 
     internal static void ResetAimEye()
     {
-        _aimed = 0f;
+        _aimed = _viewAimed = 0f;
         Horizontal = Across;
+        PoseAcross = 0f;
     }
 
     internal static Vector3 Resolve(Vector3 headPosition, Quaternion cameraRotation)

@@ -9,9 +9,9 @@ float4 _TubeAxis0, _TubeAxis1, _TubeAxis2, _TubeAxis3;   // where each tube look
 float4 _TubeField;                // x cosine of the field's half angle, y of where it starts to fade
 float4 _Power;                    // z frame
 float4 _TubePower, _TubeMottle;   // each tube's output (0 off, 1 on), and how mottled while it settles
-float _Overscan;                  // how far past the middle each eye's view reaches, as a share of the frame
+float _Overscan;                  // how far past the split each eye's view reaches, as a share of the frame
+float _Split;                     // where across the frame the left eye's view gives way to the right's (0.5 with the camera between the eyes)
 float4 _EyeSpan;                  // x the left eye's view's share of the frame's width, y the right's (1: the whole frame)
-float4 _Dominant;                 // x how much the aiming eye's tube picture lies over the other's, y that eye (0 left, 1 right)
 float4 _Monocular;                // x 1 for a monocular, whose one eye (y: 0 left, 1 right) sees the whole frame; the other half fades toward its edge, z as this power (0 not at all)
 float4 _Lamp;                     // x the lenses' brightness, y the glow's, z the eyepieces' distortion, w the field angle it is given at (rad)
 float _Mode;
@@ -50,7 +50,7 @@ float blotches (float2 uv) {
 // One eye's view at a pixel of the main frame: the device it drew, and the light reaching it through the lenses (its
 // w how much of the pixel a lens lets light through, less toward the edge of the tube's field); cover how much of the
 // pixel the lenses' glass covers, out to where its light ends.
-// Each eye's view reaches a little past the middle of the frame (_Overscan), so the two can be blended there.
+// Each eye's view reaches a little past the split (_Overscan), so the two can be blended there.
 void eyeSide (float2 uv, bool right, out float4 eye, out float4 light, out float cover) {
  float span = right ? _EyeSpan.y : _EyeSpan.x;
  float2 local = float2((uv.x - (right ? 1 - span : 0)) / span, uv.y);
@@ -77,7 +77,7 @@ void eyeSide (float2 uv, bool right, out float4 eye, out float4 light, out float
 // A monocular's one eye everywhere, fading over the other eye's half: that eye sees past the device, and the two
 // views are seen as one, the device the fainter the further out toward that eye's edge.
 void eyeAt (float2 uv, out float4 eye, out float4 light, out float cover) {
- float toRight = smoothstep(0.5 - _Overscan * 0.5, 0.5 + _Overscan * 0.5, uv.x);
+ float toRight = smoothstep(_Split - _Overscan * 0.5, _Split + _Overscan * 0.5, uv.x);
  if (_Monocular.x > 0.5) {
   bool right = _Monocular.y > 0.5;
   eyeSide(uv, right, eye, light, cover);
@@ -88,26 +88,12 @@ void eyeAt (float2 uv, out float4 eye, out float4 light, out float cover) {
   cover *= shown;
   return;
  }
- if (toRight <= 0) eyeSide(uv, false, eye, light, cover);
- else if (toRight >= 1) eyeSide(uv, true, eye, light, cover);
- else {
-  float4 leftEye, rightEye; float4 leftLight, rightLight; float leftCover, rightCover;
-  eyeSide(uv, false, leftEye, leftLight, leftCover);
-  eyeSide(uv, true, rightEye, rightLight, rightCover);
-  eye = lerp(leftEye, rightEye, toRight);
-  light = lerp(leftLight, rightLight, toRight);
-  cover = lerp(leftCover, rightCover, toRight);
- }
- // Aimed, the aiming eye's tube picture over the other eye's (its view then reaches across the whole frame), its rim
- // laid over the other's, as a monocular before the aiming eye is seen.
- bool dominantRight = _Dominant.y > 0.5;
- float own = dominantRight ? toRight : 1 - toRight;
- if (_Dominant.x > 0 && own < 1) {
-  float4 domEye, domLight; float domCover;
-  eyeSide(uv, dominantRight, domEye, domLight, domCover);
-  float over = _Dominant.x * domLight.w * (1 - own);
-  eye = lerp(eye, domEye, over);
-  light = lerp(light, domLight, over);
-  cover = lerp(cover, domCover, over);
- }
+ if (toRight <= 0) { eyeSide(uv, false, eye, light, cover); return; }
+ if (toRight >= 1) { eyeSide(uv, true, eye, light, cover); return; }
+ float4 leftEye, rightEye; float4 leftLight, rightLight; float leftCover, rightCover;
+ eyeSide(uv, false, leftEye, leftLight, leftCover);
+ eyeSide(uv, true, rightEye, rightLight, rightCover);
+ eye = lerp(leftEye, rightEye, toRight);
+ light = lerp(leftLight, rightLight, toRight);
+ cover = lerp(leftCover, rightCover, toRight);
 }

@@ -54,8 +54,8 @@ internal static partial class NightVisionEyepieces
     private static readonly int EyeId = Shader.PropertyToID("_Eye");
     private static readonly int OverscanId = Shader.PropertyToID("_Overscan");
     private static readonly int MonocularId = Shader.PropertyToID("_Monocular");
+    private static readonly int SplitId = Shader.PropertyToID("_Split");
     private static readonly int EyeSpanId = Shader.PropertyToID("_EyeSpan");
-    private static readonly int DominantId = Shader.PropertyToID("_Dominant");
     private static readonly int LensClearId = Shader.PropertyToID("_LensClear");
     private static readonly int OpticsId = Shader.PropertyToID("_Optics");
     private static readonly int[] EyeIds = { Shader.PropertyToID("_LeftEye"), Shader.PropertyToID("_RightEye") };
@@ -216,25 +216,51 @@ internal static partial class NightVisionEyepieces
         float fade = seeThrough <= 0.5f ? seeThrough * 2f : 1f + (seeThrough - 0.5f) * 6f;
         binocular.SetVector(MonocularId, new Vector4(monocular >= 0 ? 1f : 0f, monocular, fade, 0f));
         binocular.SetFloat(LensClearId, LensReflections ? 0f : 1f);
-        // Aimed, the aiming eye leads (CameraPosition.AimEye): its tube's picture over the other eye's, as one sees with
-        // a dominant eye, that eye's view drawn across the whole frame for it.
-        float aimSide = CameraPosition.AimSide;
-        float dominance = monocular < 0 ? CameraPosition.AimedWeight * Mathf.Abs(aimSide) : 0f;
-        int dominant = aimSide >= 0f ? 1 : 0;
-        binocular.SetVector(DominantId, new Vector4(dominance, dominant, 0f, 0f));
-        float half = (1f + Overscan) * 0.5f;
-        bool leftWhole = monocular == 0 || (dominance > 0f && dominant == 0), rightWhole = monocular == 1 || (dominance > 0f && dominant == 1);
-        binocular.SetVector(EyeSpanId, new Vector4(leftWhole ? 1f : half, rightWhole ? 1f : half, 0f, 0f));
         _eyesFrame = Time.frameCount;
+        // Each eye the set share of the way from the camera to its lens: the camera gone over to the aiming eye
+        // (CameraPosition) is that eye, its eyepiece straight ahead in the middle of the frame, the other off to its
+        // side. They stay back of the camera when it has come forward to a sight (NightVisionScope.cs).
+        Vector3 back = view.forward * ScopePullback;
+        Vector3 EyeShiftOf(float lens) => right * (lens * EyeShift * _split) - back;
+        Vector3 leftShift = EyeShiftOf(a <= b ? a : b), rightShift = EyeShiftOf(a <= b ? b : a);
+        Transform leftLens = _lensNodes[a <= b ? CentreLensA : CentreLensB], rightLens = _lensNodes[a <= b ? CentreLensB : CentreLensA];
+        // The two views meet halfway between where each eye sees its own eyepiece, not at the frame's middle: with the
+        // camera over at one eye, its eyepiece is in the middle and the other's off to the side.
+        float split = monocular >= 0 ? 0.5f
+            : Mathf.Clamp(0.5f * (Across(camera, position, leftShift, leftLens) + Across(camera, position, rightShift, rightLens)), 0.2f, 0.8f);
+        float leftSpan = monocular >= 0 ? 1f : HeldSpan(0, split + 0.5f * Overscan), rightSpan = monocular >= 0 ? 1f : HeldSpan(1, 1f - split + 0.5f * Overscan);
+        binocular.SetFloat(SplitId, split);
+        binocular.SetVector(EyeSpanId, new Vector4(leftSpan, rightSpan, 0f, 0f));
         for (int side = 0; side < 2; side++)
         {
             if (monocular >= 0 && side != monocular)
                 continue;
-            bool aIsThisSide = side == 0 ? a <= b : a > b;
-            // The eyes stay back of the camera when it has come forward to a sight (NightVisionScope.cs).
-            Vector3 shift = right * ((aIsThisSide ? a : b) * EyeShift * _split) - view.forward * ScopePullback;
-            RenderEye(side, camera, position, shift, _lensNodes[aIsThisSide ? CentreLensA : CentreLensB], side == 0 ? leftWhole : rightWhole);
+            RenderEye(side, camera, position, side == 0 ? leftShift : rightShift, side == 0 ? leftLens : rightLens, side == 0 ? leftSpan : rightSpan);
         }
+    }
+
+    // How much of the frame's width an eye draws: what it needs, rounded up to a step and kept while it still covers
+    // the need and is not much more, so that the split, which moves a little with every turn of the head against the
+    // view, does not change the eye's targets' size (each change makes them anew) frame after frame.
+    private const float SpanStep = 0.05f;
+    private static readonly float[] _heldSpans = { 0f, 0f };
+    private static float HeldSpan(int side, float needed)
+    {
+        float held = _heldSpans[side];
+        if (needed > held || needed < held - 2f * SpanStep)
+            held = _heldSpans[side] = Mathf.Min(1f, Mathf.Ceil(needed / SpanStep) * SpanStep);
+        return held;
+    }
+
+    // Where across the frame (0 left, 1 right) an eye standing at shift from the camera sees a lens straight on.
+    private static float Across(Camera camera, Vector3 cameraPlace, Vector3 shift, Transform lens)
+    {
+        Vector3 to = (Vector3)FromCamera(lens, cameraPlace).GetColumn(3) - shift;
+        Transform view = camera.transform;
+        float z = Vector3.Dot(to, view.forward);
+        if (z <= 1e-4f)
+            return 0.5f;
+        return 0.5f + 0.5f * camera.projectionMatrix.m00 * Vector3.Dot(to, view.right) / z;
     }
 
     // Where a transform stands from the head along the world's axes, by the local offsets between them: up from each
@@ -264,12 +290,12 @@ internal static partial class NightVisionEyepieces
     }
 
     // cameraPlace: the main camera's; shift: this eye from it.
-    private static void RenderEye(int side, Camera main, Vector3 cameraPlace, Vector3 shift, Transform centreLens, bool whole)
+    private static void RenderEye(int side, Camera main, Vector3 cameraPlace, Vector3 shift, Transform centreLens, float span)
     {
         Vector3 position = cameraPlace + shift;
         // Half of the frame the game's SSAA stage puts it in, and a little past the middle (Overscan), where the
         // composite eases from one eye to the other; or all of it (a monocular's eye).
-        float span = whole ? 1f : (1f + Overscan) * 0.5f, middle = whole ? 0f : side == 0 ? span - 1f : 1f - span;
+        float middle = span >= 1f ? 0f : side == 0 ? span - 1f : 1f - span;
         int width = Mathf.Max(Mathf.CeilToInt(Screen.width * span), 1), height = Mathf.Max(Screen.height, 1);
         RenderTexture view = Target(_eyeViews, side, width, height, 24, RenderTextureFormat.ARGBHalf, "Justachae NVG eye");
         RenderTexture lensMap = Target(_lensMaps, side, Mathf.Max((int)(width * LensMapScale), 8), Mathf.Max((int)(height * LensMapScale), 8), 16,
@@ -524,7 +550,10 @@ internal static partial class NightVisionEyepieces
             return target;
 
         if (target != null)
+        {
             target.Release();
+            Object.Destroy(target);
+        }
         target = new RenderTexture(width, height, depth, format) { name = name + (side == 0 ? " left" : " right") };
         targets[side] = target;
         return target;
@@ -534,13 +563,21 @@ internal static partial class NightVisionEyepieces
     {
         for (int i = 0; i < 2; i++)
         {
-            _eyeViews[i]?.Release();
-            _eyeViews[i] = null;
-            _eyeHistory[i]?.Release();
-            _eyeHistory[i] = null;
-            _lensMaps[i]?.Release();
-            _lensMaps[i] = null;
+            Drop(_eyeViews, i);
+            Drop(_eyeHistory, i);
+            Drop(_lensMaps, i);
+            Drop(_selfMasks, i);
+            _heldSpans[i] = 0f;
         }
+    }
+
+    private static void Drop(RenderTexture?[] targets, int i)
+    {
+        if (targets[i] == null)
+            return;
+        targets[i]!.Release();
+        Object.Destroy(targets[i]);
+        targets[i] = null;
     }
 }
 

@@ -40,6 +40,8 @@ internal static class Fisheye
     private static float _weight;          // 0 the straight picture, 1 the whole fisheye
     private static Camera? _widened;       // the camera given our field this frame
     private static float _gameField;       // its field as the game had it
+    private static float _widenedField;    // ours on it
+    private static bool _toldReset;
     private static Vector4 _shape;         // k, f, the straight frame's half height, aspect (Justachae/Fisheye)
     private static Vector4 _shade;         // the image circle's radius and soft edge, the light's falloff
     private static Camera? _imageCamera;
@@ -197,10 +199,27 @@ internal static class Fisheye
         // The image circle shrinks from past the corners (none of it seen) to within them.
         float shade = Vignette * t;
         _shade = new Vector4(1.2f - 0.3f * shade, 0.15f, 0.35f * shade, 0f);
-        camera.fieldOfView = 2f * Mathf.Atan(halfHeight) * Mathf.Rad2Deg;
+        _widenedField = 2f * Mathf.Atan(halfHeight) * Mathf.Rad2Deg;
+        camera.fieldOfView = _widenedField;
         _widened = camera;
         if (!image.enabled)
             image.enabled = true;
+    }
+
+    // Before the frame's first camera renders: something after this mod's LateUpdate may have set the camera's field
+    // again (in the hideout a Cinemachine brain drives the FPS camera and pushes the game's field to it every frame).
+    // Its field taken as the game's, and ours put back, so the frame is drawn as wide as the lens bends it.
+    internal static void Reassert(Camera _)
+    {
+        if (_widened == null || Mathf.Abs(_widened.fieldOfView - _widenedField) < 0.001f)
+            return;
+        if (!_toldReset)
+        {
+            _toldReset = true;
+            NewCameraPlugin.Log?.LogInfo($"Fisheye: the camera's field was set to {_widened.fieldOfView:F2} after ours ({_widenedField:F2}); put back before rendering.");
+        }
+        _gameField = _widened.fieldOfView;
+        _widened.fieldOfView = _widenedField;
     }
 
     // The game's field back on the camera, at the end of the frame (and before the next one is worked out).

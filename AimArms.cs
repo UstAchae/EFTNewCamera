@@ -276,7 +276,8 @@ internal static class AimArms
             {
                 sightId = bone.GetInstanceID();
                 float relief = SightRelief(animation, bone);
-                Vector3 aimPoint = new Vector3(0f, 0f, ForwardDistance + relief);
+                // From the aiming eye: the camera, or where the eye would be at the chest, where the camera stays.
+                Vector3 aimPoint = new Vector3(CameraPosition.PoseAcross, 0f, ForwardDistance + relief);
                 // The stock at the chest (ChestStance): the gun as aimed, lower and to the right of the eye.
                 float chest = ChestStance.Weight * ChestStance.Weight * (3f - 2f * ChestStance.Weight);
                 if (chest > 0f)
