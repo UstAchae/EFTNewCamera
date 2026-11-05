@@ -408,17 +408,19 @@ internal static class AimArms
         Quaternion carryTurn = _turn;
         Vector3 pivot = seenPivot ?? sightPoint ?? (bones.Weapon_Root_Anim != null ? bones.Weapon_Root_Anim.position : Vector3.zero);
         Quaternion kick = Quaternion.identity;
+        // A pistol in the hands turns about the wrists (RealRecoil.Pistol), the right hand's.
+        Vector3? grip = RealRecoil.Pistol && bones.RightPalm != null ? bones.RightPalm.position : (Vector3?)null;
         if (aiming && !_mounted)
             kick = RealRecoil.Active
-                ? GunRecoil(player.ProceduralWeaponAnimation, bones.Weapon_Root_Anim, pivot, cameraPosition, cameraRotation, true, ref displacement, ref carryTurn)
+                ? GunRecoil(player.ProceduralWeaponAnimation, bones.Weapon_Root_Anim, pivot, cameraPosition, cameraRotation, true, grip, ref displacement, ref carryTurn)
                 : Recoil(player.ProceduralWeaponAnimation, bones.Weapon_Root_Anim, pivot, ref displacement, ref carryTurn);
         else if (hipRecoil)
             // The upper body's turn is already on the bones (the gun goes with it, TorsoRecoil); only the kick in the hands.
-            GunRecoil(player.ProceduralWeaponAnimation, bones.Weapon_Root_Anim, pivot, cameraPosition, cameraRotation, false, ref displacement, ref carryTurn);
+            GunRecoil(player.ProceduralWeaponAnimation, bones.Weapon_Root_Anim, pivot, cameraPosition, cameraRotation, false, grip, ref displacement, ref carryTurn);
         else if (!aiming && _mounted && bones.Weapon_Root_Anim != null)
             kick = ShotKick(player.ProceduralWeaponAnimation, bones.Weapon_Root_Anim.rotation);
         _viewKick = !aiming && _mounted ? kick : Quaternion.identity;
-        if (aiming && !_mounted && RealRecoil.Active)
+        if (aiming && !_mounted && RealRecoil.Active && !RealRecoil.Pistol)
         {
             _sightKick = kick;
             _sightKickFrame = Time.frameCount;
@@ -677,7 +679,7 @@ internal static class AimArms
     // RealRecoil: the gun against the upper body at the shoulder pocket, sliding back along the bore and turning
     // about the pocket. (The game's own recoil pivot is not the stock: turned about it, a gun whose muzzle went
     // right swung its sight end left.)
-    private static Quaternion GunRecoil(ProceduralWeaponAnimation? animation, Transform? weapon, Vector3 pivot, Vector3 cameraPosition, Quaternion cameraRotation, bool withTorso, ref Vector3 displacement, ref Quaternion turn)
+    private static Quaternion GunRecoil(ProceduralWeaponAnimation? animation, Transform? weapon, Vector3 pivot, Vector3 cameraPosition, Quaternion cameraRotation, bool withTorso, Vector3? grip, ref Vector3 displacement, ref Quaternion turn)
     {
         if (animation == null || weapon == null || animation.HandsContainer == null || RealRecoil.Resting)
             return Quaternion.identity;
@@ -687,11 +689,11 @@ internal static class AimArms
         Quaternion torso = withTorso && _torsoFrame == Time.frameCount ? _torsoTurn : Quaternion.identity;
         Quaternion kick = torso
             * Quaternion.AngleAxis(-RealRecoil.GunYawLeft * Mathf.Rad2Deg, cameraRotation * Vector3.up)
-            * Quaternion.AngleAxis(-RealRecoil.GunPitch * RecoilRiseScale * Mathf.Rad2Deg, cameraRotation * Vector3.right);
+            * Quaternion.AngleAxis(-RealRecoil.GunPitch * (RealRecoil.Pistol ? 1f : RecoilRiseScale) * Mathf.Rad2Deg, cameraRotation * Vector3.right);
         // Sliding back along the line of sight hardly shows from the eye (8 mm is a few pixels), so the slide is drawn
         // larger: a move back along the line of sight only, the muzzle's direction (and the bullet's) unchanged.
-        Vector3 back = -(cameraRotation * Vector3.forward) * (RealRecoil.GunBack * RecoilTravelScale);
-        Vector3 recoilPivot = cameraPosition - cameraRotation * new Vector3(0f, PocketBelowEye, PocketBehindEye);
+        Vector3 back = -(cameraRotation * Vector3.forward) * (RealRecoil.GunBack * (RealRecoil.Pistol ? 1f : RecoilTravelScale));
+        Vector3 recoilPivot = grip ?? cameraPosition - cameraRotation * new Vector3(0f, PocketBelowEye, PocketBehindEye);
         if (withTorso)
             _sightKickPivot = recoilPivot;
         displacement = recoilPivot + kick * (pivot + displacement - recoilPivot) - pivot + back;

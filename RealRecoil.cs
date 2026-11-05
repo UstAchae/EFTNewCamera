@@ -148,13 +148,31 @@ internal static class RealRecoil
     internal static bool Active => Enabled && NewCameraSwitch.Enabled;
 
     // Upper body about the waist, gun against the upper body, head against the upper body (radians, metres).
-    internal static float WaistPitch => (float)_q[0];
-    internal static float WaistYawLeft => (float)_q[1];
-    internal static float GunBack => (float)_q[2];
-    internal static float GunPitch => (float)_q[3];
-    internal static float GunYawLeft => (float)_q[4];
-    internal static float HeadPitch => (float)_q[5];
-    internal static float HeadYawLeft => (float)_q[6];
+    internal static float WaistPitch => _pistol ? 0f : (float)_q[0];
+    internal static float WaistYawLeft => _pistol ? 0f : (float)_q[1];
+    internal static float GunBack => _pistol ? (float)_pq[2] : (float)_q[2];
+    internal static float GunPitch => _pistol ? (float)_pq[0] : (float)_q[3];
+    internal static float GunYawLeft => _pistol ? (float)_pq[1] : (float)_q[4];
+    internal static float HeadPitch => _pistol ? 0f : (float)_q[5];
+    internal static float HeadYawLeft => _pistol ? 0f : (float)_q[6];
+
+    // A pistol held in the hands, with nothing on the shoulder: a model of its own. The body hardly takes part; the gun
+    // turns about the wrists, the bore some centimetres over them, and the arms give back along their length. Its
+    // coordinates: 0 pitch about the wrists (up +, rad), 1 yaw (left +, rad), 2 back along the arms (m). Set so a 9 mm
+    // shot (about 3 N·s) climbs some 7 degrees, highest at about 75 ms and back by about 0.3 s without dipping under, as
+    // two-handed shooting of a service pistol is measured (5 to 10 degrees); the arms give some 3 cm. Neither the climb
+    // nor the slide back is drawn larger (RecoilRiseScale, RecoilTravelScale): this is already the pistol as it moves.
+    internal static bool Pistol => _pistol;
+    private static bool _pistol;
+    private static readonly double[] _pq = new double[3], _pqd = new double[3];
+    private const double PistolBoreOverWrist = 0.07;   // m
+    private const double PistolInertia = 0.05;          // kg·m², gun, hands and forearms about the wrists
+    private const double PistolPitchHz = 2.0, PistolPitchDamping = 0.8;
+    private const double PistolYawHz = 2.8, PistolYawDamping = 0.8;
+    private const double PistolArmMass = 2.0;           // kg, gun and forearms along the arms
+    private const double PistolBackHz = 3.0, PistolBackDamping = 0.9;
+    // The hold's scatter, as torque impulse per unit of the shot's: a fraction of the climb's lever.
+    private const double PistolScatterPitch = 0.15 * PistolBoreOverWrist, PistolScatterYaw = 0.12 * PistolBoreOverWrist;
     internal static bool Resting => _resting;
 
     internal static void WeaponChanged()
@@ -211,13 +229,21 @@ internal static class RealRecoil
         // A bolt action or pump has no carrier running in the gun; everything else does (研究 §12).
         double beta = weapon.BoltAction ? 0.0 : 0.35;
         double loose = Math.Min(HoldLooseningMax, 1.0 + HoldLooseningPerShot * (_burst - 1)) * (1.8 - Stamina);
-        _shots[_shotCount % _shots.Length] = new Shot
-        {
-            Time = at, Impulse = impulse, Beta = beta, Cycle = cycle,
-            HoldPitch = Gaussian() * HoldScatterPitch * impulse * loose,
-            HoldYaw = Gaussian() * HoldScatterYaw * impulse * loose,
-            MuzzleDown = climbTaken * _climbPerDown * impulse
-        };
+        _shots[_shotCount % _shots.Length] = _pistol
+            ? new Shot
+            {
+                Time = at, Impulse = impulse, Beta = beta, Cycle = cycle,
+                HoldPitch = Gaussian() * PistolScatterPitch * impulse * loose,
+                HoldYaw = Gaussian() * PistolScatterYaw * impulse * loose,
+                MuzzleDown = climbTaken * impulse
+            }
+            : new Shot
+            {
+                Time = at, Impulse = impulse, Beta = beta, Cycle = cycle,
+                HoldPitch = Gaussian() * HoldScatterPitch * impulse * loose,
+                HoldYaw = Gaussian() * HoldScatterYaw * impulse * loose,
+                MuzzleDown = climbTaken * _climbPerDown * impulse
+            };
         _shotCount++;
         _resting = false;
         TookShot = true;
@@ -253,6 +279,8 @@ internal static class RealRecoil
     {
         Array.Clear(_q, 0, N);
         Array.Clear(_qd, 0, N);
+        Array.Clear(_pq, 0, 3);
+        Array.Clear(_pqd, 0, 3);
         Array.Clear(_errPitch, 0, HistoryLength);
         Array.Clear(_errYaw, 0, HistoryLength);
         Array.Clear(_errPitchRate, 0, HistoryLength);
@@ -315,6 +343,11 @@ internal static class RealRecoil
             shouldered = true;
         _stockSoft = Math.Max(0.0, Math.Min(0.4, stockSoft));
         _shouldered = shouldered;
+        bool pistol = weapon.WeapClass == "pistol" && !shouldered;
+        if (pistol != _pistol)
+            Rest();
+        _pistol = pistol;
+        NewCameraPlugin.Log?.LogInfo($"Physical recoil: {weapon.ShortName?.Localized() ?? weapon.TemplateId.ToString()} ({weapon.WeapClass}), {(pistol ? "pistol in the hands" : shouldered ? "shouldered" : "held without the shoulder")}, {_weaponMass:F2} kg");
         foregrip = Math.Max(0.0, Math.Min(0.5, foregrip));
         _yawHold = 1.0 + 2.0 * foregrip;
         _pitchHold = (1.0 + foregrip) * Math.Max(0.5, 1.0 + GripPressPerErgonomics * pistolGrip);
@@ -503,6 +536,11 @@ internal static class RealRecoil
 
     private static void Advance(double now)
     {
+        if (_pistol)
+        {
+            AdvancePistol(now);
+            return;
+        }
         if (!_built)
             return;
         // A long stall (a loading screen, a pause) is not integrated; the body has long settled.
@@ -557,6 +595,39 @@ internal static class RealRecoil
                 _qd[a] += _qdd[a] * Step;
                 _q[a] += _qd[a] * Step;
                 if (double.IsNaN(_q[a]) || Math.Abs(_q[a]) > 1.0)
+                {
+                    Rest();
+                    return;
+                }
+            }
+        }
+    }
+
+    private static void AdvancePistol(double now)
+    {
+        if (now - _time > 0.5)
+            _time = now - 0.5;
+        double wp = 2.0 * Math.PI * PistolPitchHz, wy = 2.0 * Math.PI * PistolYawHz, wb = 2.0 * Math.PI * PistolBackHz;
+        double kp = PistolInertia * wp * wp, cp = 2.0 * PistolPitchDamping * PistolInertia * wp;
+        double ky = PistolInertia * wy * wy, cy = 2.0 * PistolYawDamping * PistolInertia * wy;
+        double kb = PistolArmMass * wb * wb, cb = 2.0 * PistolBackDamping * PistolArmMass * wb;
+        while (_time + Step <= now)
+        {
+            _time += Step;
+            ShotForces(_time, out double fBore, out double fCarrier, out double holdPitch, out double holdYaw, out double fDown);
+            double back = fBore + fCarrier;
+            // The push along the bore, over the wrists, turns the gun up; a compensator takes its share of that turn.
+            double torque = PistolBoreOverWrist * (back - fDown) + holdPitch;
+            double ap = (torque - kp * _pq[0] - cp * _pqd[0]) / PistolInertia;
+            double ay = (holdYaw - ky * _pq[1] - cy * _pqd[1]) / PistolInertia;
+            double ab = (back - kb * _pq[2] - cb * _pqd[2]) / PistolArmMass;
+            _pqd[0] += ap * Step;
+            _pqd[1] += ay * Step;
+            _pqd[2] += ab * Step;
+            for (int a = 0; a < 3; a++)
+            {
+                _pq[a] += _pqd[a] * Step;
+                if (double.IsNaN(_pq[a]) || Math.Abs(_pq[a]) > 1.0)
                 {
                     Rest();
                     return;

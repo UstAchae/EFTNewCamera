@@ -284,7 +284,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         }
 
         ConfigEntry<bool> followSight = SettingsLayout.Bind(Config, "前庭平衡", "开枪时头跟着枪走", true,
-            "瞄准开枪时，脸贴着枪托，头跟着枪一起动：镜头的位置和方向随枪的后坐一起转，眼睛始终留在瞄准线上，准星在画面上基本不动，整个画面随每一枪跳起、再随回正落回来。这时头不再被枪托单独推偏，上面两项“开枪时头偏转的眼球回正”不起作用。关掉时头不跟枪，画面不动，看到的是准星和枪在画面里跳，连射时瞄准线会跑到眼睛上面。只在瞄准、物理后坐力起作用时有效，子弹方向不受影响（子弹始终沿枪口）。");
+            "瞄准开枪时，脸贴着枪托，头跟着枪一起动：镜头的位置和方向随枪的后坐一起转，眼睛始终留在瞄准线上，准星在画面上基本不动，整个画面随每一枪跳起、再随回正落回来。这时头不再被枪托单独推偏，上面两项“开枪时头偏转的眼球回正”不起作用。关掉时头不跟枪，画面不动，看到的是准星和枪在画面里跳，连射时瞄准线会跑到眼睛上面。只在瞄准、物理后坐力起作用时有效，子弹方向不受影响（子弹始终沿枪口）。手枪不贴脸，不受这一项影响。");
         followSight.SettingChanged += (_, _) => AimArms.FollowSightOnShot = followSight.Value;
         AimArms.FollowSightOnShot = followSight.Value;
         balance.SettingChanged += (_, _) => Refresh();
@@ -359,12 +359,12 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
                 new AcceptableValueRange<float>(0.1f, 1f)));
         pocket.SettingChanged += (_, _) => RealRecoil.PocketStiffness = pocket.Value;
         ConfigEntry<float> travel = SettingsLayout.Bind(Config, "瞄准", "后坐距离倍数", 4f,
-            new ConfigDescription("物理后坐力：开枪时枪往后坐的距离在画面上放大几倍。枪是沿视线退向眼睛的，按物理算的几毫米从眼睛看几乎看不出来，放大后每一枪能看到枪往后一顶。只放大往后退的距离，不转动枪，枪口指向和子弹方向不变。1 是按物理算的原样；默认 4，一发 5.56 大约往后 3 厘米。",
+            new ConfigDescription("物理后坐力：开枪时枪往后坐的距离在画面上放大几倍。枪是沿视线退向眼睛的，按物理算的几毫米从眼睛看几乎看不出来，放大后每一枪能看到枪往后一顶。只放大往后退的距离，不转动枪，枪口指向和子弹方向不变。手枪（没装抵肩枪托）按自己的模型，不受这一项影响。1 是按物理算的原样；默认 4，一发 5.56 大约往后 3 厘米。",
                 new AcceptableValueRange<float>(1f, 8f)));
         travel.SettingChanged += (_, _) => AimArms.RecoilTravelScale = travel.Value;
         AimArms.RecoilTravelScale = travel.Value;
         ConfigEntry<float> rise = SettingsLayout.Bind(Config, "瞄准", "上跳倍数", 3f,
-            new ConfigDescription("物理后坐力：开枪时枪口上跳（上身后仰加上枪在肩窝里往上翻）放大几倍，上跳和回正一起放大，快慢不变，左右方向不变。1 是按物理算的原样（一发 5.56 约 0.3°）；默认 3，约 1°。子弹沿枪口射出，所以连射时后面几发也跟着打得更高、散得更开，压枪更难；单发影响不大（子弹出膛时枪还没开始跳）。",
+            new ConfigDescription("物理后坐力：开枪时枪口上跳（上身后仰加上枪在肩窝里往上翻）放大几倍，上跳和回正一起放大，快慢不变，左右方向不变。1 是按物理算的原样（一发 5.56 约 0.3°）；默认 3，约 1°。子弹沿枪口射出，所以连射时后面几发也跟着打得更高、散得更开，压枪更难；单发影响不大（子弹出膛时枪还没开始跳）。手枪（没装抵肩枪托）按自己的模型，不受这一项影响。",
                 new AcceptableValueRange<float>(1f, 6f)));
         rise.SettingChanged += (_, _) => AimArms.RecoilRiseScale = rise.Value;
         AimArms.RecoilRiseScale = rise.Value;
