@@ -653,6 +653,9 @@ internal static class AimArms
         cameraRotation = Quaternion.Inverse(_eyesHead) * turn * cameraRotation;
     }
 
+    // How much larger the gun's slide back in the shoulder is drawn than the physical recoil works it out (F12).
+    internal static float RecoilTravelScale = 4f;
+
     // Where the butt sits in the shoulder, from the eye on the cheek weld: a little behind it and below.
     private const float PocketBehindEye = 0.12f;
     private const float PocketBelowEye = 0.07f;
@@ -671,7 +674,9 @@ internal static class AimArms
         Quaternion kick = torso
             * Quaternion.AngleAxis(-RealRecoil.GunYawLeft * Mathf.Rad2Deg, cameraRotation * Vector3.up)
             * Quaternion.AngleAxis(-RealRecoil.GunPitch * Mathf.Rad2Deg, cameraRotation * Vector3.right);
-        Vector3 back = -(cameraRotation * Vector3.forward) * RealRecoil.GunBack;
+        // Sliding back along the line of sight hardly shows from the eye (8 mm is a few pixels), so the slide is drawn
+        // larger: along the bore only, the muzzle's direction (and the bullet's) unchanged.
+        Vector3 back = -(cameraRotation * Vector3.forward) * (RealRecoil.GunBack * RecoilTravelScale);
         Vector3 recoilPivot = cameraPosition - cameraRotation * new Vector3(0f, PocketBelowEye, PocketBehindEye);
         displacement = recoilPivot + kick * (pivot + displacement - recoilPivot) - pivot + back;
         turn = kick * turn;

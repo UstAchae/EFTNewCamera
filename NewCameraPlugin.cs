@@ -354,6 +354,11 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
             new ConfigDescription("物理后坐力：枪托在肩窝里被顶住的硬度，管开枪时枪往后坐多少、在肩窝里翻多少，身体其他部分不受影响。1 是最硬，一发 5.56 枪只往后坐约 5 毫米；0.2 约 8 毫米；越小后坐越明显，回正的快慢差不多，调到 0.1 附近会略微往前过一点再回来。",
                 new AcceptableValueRange<float>(0.1f, 1f)));
         pocket.SettingChanged += (_, _) => RealRecoil.PocketStiffness = pocket.Value;
+        ConfigEntry<float> travel = SettingsLayout.Bind(Config, "瞄准", "后坐距离倍数", 4f,
+            new ConfigDescription("物理后坐力：开枪时枪往后坐的距离在画面上放大几倍。枪是沿视线退向眼睛的，按物理算的几毫米从眼睛看几乎看不出来，放大后每一枪能看到枪往后一顶。只放大沿枪管往后的距离，枪口指向和子弹方向不变。1 是按物理算的原样；默认 4，一发 5.56 大约往后 3 厘米。",
+                new AcceptableValueRange<float>(1f, 8f)));
+        travel.SettingChanged += (_, _) => AimArms.RecoilTravelScale = travel.Value;
+        AimArms.RecoilTravelScale = travel.Value;
         RealRecoil.PocketStiffness = pocket.Value;
         _aimDistance.SettingChanged += (_, _) => AimArms.ForwardDistance = _aimDistance.Value;
         AimArms.ForwardDistance = _aimDistance.Value;
