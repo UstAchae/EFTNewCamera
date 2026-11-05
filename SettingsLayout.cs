@@ -78,6 +78,36 @@ internal static class SettingsLayout
             new ConfigDescription(description.Description, description.AcceptableValues, new ConfigurationManagerAttributes { Order = place.Order }));
     }
 
+    // The F12 window lists the groups in the order their first setting was bound, not by name: once everything is
+    // bound, the settings are put in the layout's order (the config's entries, kept in the order they were added).
+    internal static void Arrange(ConfigFile config)
+    {
+        PropertyInfo? property = typeof(ConfigFile).GetProperty("Entries", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+        if (property?.GetValue(config) is not Dictionary<ConfigDefinition, ConfigEntryBase> entries)
+        {
+            NewCameraPlugin.Log?.LogWarning("Settings layout: the config's entries were not found; the groups keep the order they were bound in.");
+            return;
+        }
+        Dictionary<string, int> groupIndex = new();
+        for (int i = 0; i < Groups.Length; i++)
+            groupIndex[Groups[i].Section] = i;
+        List<KeyValuePair<ConfigDefinition, ConfigEntryBase>> sorted = new(entries);
+        int Rank(ConfigDefinition d) => groupIndex.TryGetValue(d.Section, out int g) ? g : Groups.Length;
+        int Place(ConfigEntryBase e) => e.Description?.Tags is object[] tags
+            && System.Array.Find(tags, t => t is ConfigurationManagerAttributes) is ConfigurationManagerAttributes a && a.Order is int o ? o : 0;
+        sorted.Sort((x, y) =>
+        {
+            int c = Rank(x.Key).CompareTo(Rank(y.Key));
+            return c != 0 ? c : Place(y.Value).CompareTo(Place(x.Value));
+        });
+        lock (entries)
+        {
+            entries.Clear();
+            foreach (KeyValuePair<ConfigDefinition, ConfigEntryBase> pair in sorted)
+                entries.Add(pair.Key, pair.Value);
+        }
+    }
+
     // The value saved under the old place, if any, moved to the new one before it is bound there.
     private static void TakeOver(ConfigFile config, ConfigDefinition from, ConfigDefinition to)
     {

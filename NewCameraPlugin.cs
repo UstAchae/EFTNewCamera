@@ -52,6 +52,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         BindVestibular();
         BindNightVision();
         OpticElevation.Initialize();
+        SettingsLayout.Arrange(Config);
     }
 
     private void BindFisheye()
