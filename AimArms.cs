@@ -683,6 +683,8 @@ internal static class AimArms
         // larger: a move back along the line of sight only, the muzzle's direction (and the bullet's) unchanged.
         Vector3 back = -(cameraRotation * Vector3.forward) * (RealRecoil.GunBack * RecoilTravelScale);
         Vector3 recoilPivot = cameraPosition - cameraRotation * new Vector3(0f, PocketBelowEye, PocketBehindEye);
+        if (withTorso)
+            _sightKickPivot = recoilPivot;
         displacement = recoilPivot + kick * (pivot + displacement - recoilPivot) - pivot + back;
         turn = kick * turn;
         return kick;
@@ -1092,18 +1094,22 @@ internal static class AimArms
         return _viewKick * view;
     }
 
-    // Aimed, while a shot's physical recoil plays: the view taken along with the gun (the upper body's turn about the
-    // waist and the gun's in the shoulder), so the eyes stay on the sight and the scene jumps with the shot instead of
-    // the sight jumping in a steady scene (F12). After the balance (VestibularView), which would turn it back.
+    // Aimed, while a shot's physical recoil plays: the head goes with the gun, the cheek on the stock. The camera is
+    // carried as the gun is (the upper body's turn about the waist and the gun's in the shoulder, about the shoulder
+    // pocket), so the eye stays on the line of the sight and the scene jumps with the shot (F12). Turning the view alone
+    // about the eye left the sight's line passing over it, a few millimetres per degree of climb. After the balance
+    // (VestibularView), which would turn it back.
     internal static bool FollowSightOnShot = true;
     private static Quaternion _sightKick = Quaternion.identity;
+    private static Vector3 _sightKickPivot;
     private static int _sightKickFrame = -1;
 
-    internal static Quaternion SightKickView(Quaternion view)
+    internal static void SightKick(ref Vector3 cameraPosition, ref Quaternion cameraRotation)
     {
         if (!FollowSightOnShot || _sightKickFrame != Time.frameCount || Settled(_sightKick))
-            return view;
-        return _sightKick * view;
+            return;
+        cameraPosition = _sightKickPivot + _sightKick * (cameraPosition - _sightKickPivot);
+        cameraRotation = _sightKick * cameraRotation;
     }
 
     private static void Sway(ProceduralWeaponAnimation animation, Transform third, Transform anim, Transform sightBone, Vector3 sight, Vector3 sightForward, bool ironAligned, int sightId, Vector3 cameraPosition, Quaternion cameraRotation, Vector3 aimPoint, out Vector3 displacement, out Quaternion turn)
