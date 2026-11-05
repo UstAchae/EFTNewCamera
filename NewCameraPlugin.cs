@@ -15,7 +15,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "justachae.thirdpersoncamera";
     public const string PluginName = "Justachae's Third-Person Skeleton and Camera";
-    public const string PluginVersion = "1.4.3";
+    public const string PluginVersion = "1.4.4";
 
     internal static BepInEx.Logging.ManualLogSource? Log;
     private const string SkeletonThird = "第三人称骨架", SkeletonFirst = "第一人称骨架";
@@ -29,7 +29,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
             new ConfigDescription("关掉后整个 mod 不起作用，一切按游戏原样。", null, new ConfigurationManagerAttributes { Order = 8 }));
         MoveFrom(enabled, "新镜头", "总开关");
         ConfigEntry<string> skeleton = Config.Bind("", "骨架", SkeletonThird,
-            new ConfigDescription("第三人称骨架：用第三人称的身体动作（呼吸摆动、跑步转向时头部翻滚、换枪和翻背包的动作）。第一人称骨架：身体动作用游戏原版的第一人称（没有呼吸摆动和跑步转向时的头部翻滚，换枪、翻背包没有身体动作），晃得少，适合觉得第三人称骨架晕的玩家。除了身体动作，两种骨架的其他功能完全一样（镜头挂在头部、人物显示、瞄准等），只是第一人称骨架下瞄准时枪本身按原版第一人称的摆动晃（呼吸、手抖，屏息时由原版自己减弱）。局内可以随时切换。",
+            new ConfigDescription("第三人称骨架：用第三人称的身体动作（呼吸摆动、跑步转向时头部翻滚、换枪和翻背包的动作）。第一人称骨架：身体动作用游戏原版的第一人称（没有呼吸摆动和跑步转向时的头部翻滚，换枪、翻背包没有身体动作），晃得少，适合觉得第三人称骨架晕的玩家。除了身体动作，两种骨架的其他功能完全一样（镜头挂在头部、人物显示、瞄准等），只是第一人称骨架下瞄准时枪本身按原版第一人称的摆动晃（呼吸、手抖，屏息时由原版自己减弱），“瞄准摆动”那几组里的“摆动”只管手臂跟着身体动作的晃动，“呼吸”不起作用。局内可以随时切换。",
                 new AcceptableValueList<string>(SkeletonThird, SkeletonFirst), new ConfigurationManagerAttributes { Order = 7 }));
         AimPatches.Install();
         Fisheye.Install();
@@ -388,9 +388,12 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 
     private bool _aimDistanceHeld;
 
-    // The sway and recoil amounts are the code's own (AimArms, RealRecoil), with no settings.
+    // The recoil amounts and the follow delay are the code's own (AimArms, RealRecoil), with no settings.
     private void BindSway()
     {
+        BindSwaySet("瞄准摆动-平时", "平时（不屏息、手臂有体力）", AimArms.Normal, 0.05f, 0.1f, 1f);
+        BindSwaySet("瞄准摆动-屏息", "按住左 Alt 屏息时", AimArms.Holding, 0f, 0f, 0f);
+        BindSwaySet("瞄准摆动-没体力", "手臂没体力时（优先于屏息）", AimArms.Exhausted, 1f, 1f, 1f);
         BindChestStance();
     }
 
@@ -439,6 +442,36 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         side.SettingChanged += (_, _) => Refresh();
         cant.SettingChanged += (_, _) => Refresh();
         Refresh();
+    }
+
+    private void BindSwaySet(string section, string when, AimArms.SwayAmounts target, float sway, float headFollowDefault, float breathDefault)
+    {
+        ConfigEntry<float> swayAmount = BindAmount(section, "摆动", sway,
+            when + "：枪和手臂快的晃动（转视角时的甩动、走路、手上动作等）带来的平移和转动。0 是瞄具钉在眼前不动，1 是游戏原样。");
+        ConfigEntry<float> headFollow = BindAmount(section, "跟随头部", headFollowDefault,
+            when + "：瞄准方向跟着头的晃动（呼吸、走路颠簸、姿势带来的偏角）走多少，镜头和枪一起跟。0 是只认鼠标方向（探头的歪斜照样保留），1 是完全跟着头。");
+        ConfigEntry<float> breath = BindAmount(section, "呼吸", breathDefault,
+            when + "：手臂和枪跟着慢晃（多半是呼吸）转多少。摆动滑条只管快的晃动，这个管更慢的那部分。0 是不跟着转，1 是游戏原样。");
+        void Refresh()
+        {
+            target.GunMove = swayAmount.Value;
+            target.GunTurn = swayAmount.Value;
+            target.ArmMove = swayAmount.Value;
+            target.ArmTurn = swayAmount.Value;
+            target.HeadFollow = headFollow.Value;
+            target.Breath = breath.Value;
+        }
+
+        swayAmount.SettingChanged += (_, _) => Refresh();
+        headFollow.SettingChanged += (_, _) => Refresh();
+        breath.SettingChanged += (_, _) => Refresh();
+        Refresh();
+    }
+
+    private ConfigEntry<float> BindAmount(string section, string key, float defaultValue, string description)
+    {
+        return Config.Bind(section, key, defaultValue,
+            new ConfigDescription(description, new AcceptableValueRange<float>(0f, 1f)));
     }
 
     private ConfigEntry<float> BindDegrees(string section, string key, float defaultValue, string description)
