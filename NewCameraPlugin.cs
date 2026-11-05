@@ -284,7 +284,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         }
 
         ConfigEntry<bool> followSight = SettingsLayout.Bind(Config, "前庭平衡", "开枪时头跟着枪走", true,
-            "瞄准开枪时，脸贴着枪托，头跟着枪一起动：镜头的位置和方向随枪的后坐一起转，眼睛始终留在瞄准线上，准星在画面上基本不动，整个画面随每一枪跳起、再随回正落回来。关掉时头不跟枪，画面不动，看到的是准星和枪在画面里跳，连射时瞄准线会跑到眼睛上面。只在瞄准、物理后坐力起作用时有效，子弹方向不受影响（子弹始终沿枪口）。");
+            "瞄准开枪时，脸贴着枪托，头跟着枪一起动：镜头的位置和方向随枪的后坐一起转，眼睛始终留在瞄准线上，准星在画面上基本不动，整个画面随每一枪跳起、再随回正落回来。这时头不再被枪托单独推偏，上面两项“开枪时头偏转的眼球回正”不起作用。关掉时头不跟枪，画面不动，看到的是准星和枪在画面里跳，连射时瞄准线会跑到眼睛上面。只在瞄准、物理后坐力起作用时有效，子弹方向不受影响（子弹始终沿枪口）。");
         followSight.SettingChanged += (_, _) => AimArms.FollowSightOnShot = followSight.Value;
         AimArms.FollowSightOnShot = followSight.Value;
         balance.SettingChanged += (_, _) => Refresh();

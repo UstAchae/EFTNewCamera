@@ -637,6 +637,10 @@ internal static class AimArms
     {
         if (!RealRecoil.Active || RealRecoil.Resting)
             return;
+        // Aimed with the head going with the gun (SightKick): the head moves as the gun does, not pushed off it by the
+        // stock on its own, which put the eye beside and under the sight's line.
+        if (FollowSightOnShot && _sightKickFrame == Time.frameCount)
+            return;
         Transform? neck = player.PlayerBones?.Neck;
         if (neck == null)
             return;
