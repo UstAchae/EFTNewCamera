@@ -283,6 +283,10 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
             AimArms.HeadEyeSeconds = headEyeSeconds.Value;
         }
 
+        ConfigEntry<bool> followSight = SettingsLayout.Bind(Config, "前庭平衡", "开枪时视线跟随准星", true,
+            "瞄准开枪时，眼睛盯着准星而不是目标：每一枪枪口往哪跳，画面就跟着往哪转，准星在画面上不动，整个画面随后坐一跳一跳再落回来。关掉时眼睛盯着目标，画面不动，看到的是准星和枪在画面里跳。只在瞄准、物理后坐力起作用时有效，子弹方向不受影响（子弹始终沿枪口）。");
+        followSight.SettingChanged += (_, _) => AimArms.FollowSightOnShot = followSight.Value;
+        AimArms.FollowSightOnShot = followSight.Value;
         balance.SettingChanged += (_, _) => Refresh();
         strength.SettingChanged += (_, _) => Refresh();
         torsion.SettingChanged += (_, _) => Refresh();
@@ -718,6 +722,7 @@ internal static class NewCameraSwitch
                 AimArms.HeadRecoil(player, ref _posePosition, ref _poseRotation);
                 PoseFromHead += _posePosition - beforeHead;
                 _poseRotation = VestibularView.Stabilize(player, _posePosition, _poseRotation);
+            _poseRotation = AimArms.SightKickView(_poseRotation);
                 Vector3 beforeRecoil = _posePosition;
                 AimArms.BodyRecoil(player, ref _posePosition, ref _poseRotation);
                 PoseFromHead += _posePosition - beforeRecoil;

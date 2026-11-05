@@ -418,6 +418,11 @@ internal static class AimArms
         else if (!aiming && _mounted && bones.Weapon_Root_Anim != null)
             kick = ShotKick(player.ProceduralWeaponAnimation, bones.Weapon_Root_Anim.rotation);
         _viewKick = !aiming && _mounted ? kick : Quaternion.identity;
+        if (aiming && !_mounted && RealRecoil.Active)
+        {
+            _sightKick = kick;
+            _sightKickFrame = Time.frameCount;
+        }
         _carryDisplacement = displacement;
         _carryPivot = pivot;
         _carryTurn = carryTurn;
@@ -1085,6 +1090,20 @@ internal static class AimArms
     internal static Quaternion KickView(Quaternion view)
     {
         return _viewKick * view;
+    }
+
+    // Aimed, while a shot's physical recoil plays: the view taken along with the gun (the upper body's turn about the
+    // waist and the gun's in the shoulder), so the eyes stay on the sight and the scene jumps with the shot instead of
+    // the sight jumping in a steady scene (F12). After the balance (VestibularView), which would turn it back.
+    internal static bool FollowSightOnShot = true;
+    private static Quaternion _sightKick = Quaternion.identity;
+    private static int _sightKickFrame = -1;
+
+    internal static Quaternion SightKickView(Quaternion view)
+    {
+        if (!FollowSightOnShot || _sightKickFrame != Time.frameCount || Settled(_sightKick))
+            return view;
+        return _sightKick * view;
     }
 
     private static void Sway(ProceduralWeaponAnimation animation, Transform third, Transform anim, Transform sightBone, Vector3 sight, Vector3 sightForward, bool ironAligned, int sightId, Vector3 cameraPosition, Quaternion cameraRotation, Vector3 aimPoint, out Vector3 displacement, out Quaternion turn)
