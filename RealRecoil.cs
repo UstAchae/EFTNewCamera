@@ -159,19 +159,21 @@ internal static class RealRecoil
     // A pistol held in the hands, with nothing on the shoulder: a model of its own. The body hardly takes part; the gun
     // turns about the wrists, the bore some centimetres over them, and the arms give back along their length. Its
     // coordinates: 0 pitch about the wrists (up +, rad), 1 yaw (left +, rad), 2 back along the arms (m). Set so a 9 mm
-    // shot (about 3 N·s) snaps up some 8 degrees (two-handed shooting of a service pistol is measured at 5 to 10),
-    // highest at about 36 ms, and comes straight back, under 1.5 degrees at 150 ms: critically damped, never swinging
-    // past (at 2 Hz and 0.8 it rose over 80 ms and looked acted). The arms give some 2 cm, as fast. Neither the climb
-    // nor the slide back is drawn larger (RecoilRiseScale, RecoilTravelScale): this is already the pistol as it moves.
+    // shot (about 3 N·s) snaps up some 9 degrees (two-handed shooting of a service pistol is measured at 5 to 10),
+    // highest at about 45 ms, and comes back, under 2 degrees at 150 ms. The wrists are the soft joint (3.8 Hz, a little
+    // under critical damping: the gun flips up freely, dipping a few hundredths of a degree past the aim at most; at
+    // 2 Hz and 0.8 it rose over 80 ms and looked acted). The arms are held firm, locked out: they give only about 1 cm,
+    // over some 20 ms. Neither the climb nor the slide back is drawn larger (RecoilRiseScale, RecoilTravelScale): this
+    // is already the pistol as it moves.
     internal static bool Pistol => _pistol;
     private static bool _pistol;
     private static readonly double[] _pq = new double[3], _pqd = new double[3];
     private const double PistolBoreOverWrist = 0.07;   // m
     private const double PistolInertia = 0.022;         // kg·m², gun and hands about the wrists
-    private const double PistolPitchHz = 4.5, PistolPitchDamping = 1.0;
-    private const double PistolYawHz = 6.0, PistolYawDamping = 1.0;
+    private const double PistolPitchHz = 3.8, PistolPitchDamping = 0.85;
+    private const double PistolYawHz = 5.0, PistolYawDamping = 0.9;
     private const double PistolArmMass = 2.0;           // kg, gun and forearms along the arms
-    private const double PistolBackHz = 5.0, PistolBackDamping = 1.0;
+    private const double PistolBackHz = 8.0, PistolBackDamping = 1.0;
     // The slide's run back and home, whatever the game's fire rate (a pistol's is set low, which spread the slide's two
     // knocks 60 and 170 ms after the shot: two phantom shots).
     private const double PistolCycle = 0.04;
