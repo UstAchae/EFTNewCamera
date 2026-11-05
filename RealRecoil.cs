@@ -159,7 +159,7 @@ internal static class RealRecoil
     // A pistol held in the hands, with nothing on the shoulder: a model of its own. The body hardly takes part; the gun
     // turns about the wrists, the bore some centimetres over them, and the arms give back along their length. Its
     // coordinates: 0 pitch about the wrists (up +, rad), 1 yaw (left +, rad), 2 back along the arms (m). Set so a 9 mm
-    // shot (about 3 N·s) snaps up some 9 degrees (two-handed shooting of a service pistol is measured at 5 to 10),
+    // shot (about 3 N·s) from a 1 kg gun snaps up some 9 degrees (two-handed shooting of a service pistol is measured at 5 to 10),
     // highest at about 45 ms, and comes back, under 2 degrees at 150 ms. The wrists are the soft joint (3.8 Hz, a little
     // under critical damping: the gun flips up freely, dipping a few hundredths of a degree past the aim at most; at
     // 2 Hz and 0.8 it rose over 80 ms and looked acted). The arms are held firm, locked out: they give only about 1 cm,
@@ -169,11 +169,23 @@ internal static class RealRecoil
     private static bool _pistol;
     private static readonly double[] _pq = new double[3], _pqd = new double[3];
     private const double PistolBoreOverWrist = 0.07;   // m
-    private const double PistolInertia = 0.022;         // kg·m², gun and hands about the wrists
+    // The springs are set for a 1 kg service pistol (0.022 kg·m² about the wrists, 2 kg along the arms); a heavier gun
+    // is that much harder to turn and push (the gun's mass some 10 cm from the wrists), on the same wrists and arms.
+    private const double PistolInertia = 0.022;         // kg·m², a 1 kg gun and the hands about the wrists
+    private const double PistolHandsInertia = 0.012;    // kg·m², the hands alone
+    private const double PistolGunLeverSq = 0.01;       // m², the gun's mass about the wrists
     private const double PistolPitchHz = 3.8, PistolPitchDamping = 0.85;
     private const double PistolYawHz = 5.0, PistolYawDamping = 0.9;
-    private const double PistolArmMass = 2.0;           // kg, gun and forearms along the arms
+    private const double PistolArmMass = 2.0;           // kg, a 1 kg gun and the forearms along the arms
+    private const double PistolForearmMass = 1.0;       // kg, the forearms and hands alone
     private const double PistolBackHz = 8.0, PistolBackDamping = 1.0;
+    // The wrists and arms stiffen towards the end of their give, spring and damper alike (tissue at its stretch takes
+    // the motion up rather than throwing it back): doubled at 20 degrees up, at 2 cm back. A 9 mm hardly reaches it
+    // (9 degrees either way); a .50 AE (some 17 N·s) snaps up about 30 degrees, not 60, and comes back without
+    // swinging past.
+    private const double PistolWristStiffening = 0.35;  // rad (20 degrees)
+    private const double PistolArmStiffening = 0.02;    // m
+    private static double _pistolInertia = PistolInertia, _pistolArmMass = PistolArmMass;
     // The slide's run back and home, whatever the game's fire rate (a pistol's is set low, which spread the slide's two
     // knocks 60 and 170 ms after the shot: two phantom shots).
     private const double PistolCycle = 0.04;
@@ -316,6 +328,8 @@ internal static class RealRecoil
         foreach (Item item in weapon.GetAllVisibleItems())
             mass += item.Weight;
         _weaponMass = Math.Max(1.0, Math.Min(15.0, mass));
+        _pistolInertia = PistolHandsInertia + PistolGunLeverSq * _weaponMass;
+        _pistolArmMass = PistolForearmMass + _weaponMass;
         _impulseTaken = 0.0;
         double stockSoft = 0.0, foregrip = 0.0, pistolGrip = 0.0;
         bool shouldered = false, folded = weapon.Folded;
@@ -616,9 +630,11 @@ internal static class RealRecoil
         if (now - _time > 0.5)
             _time = now - 0.5;
         double wp = 2.0 * Math.PI * PistolPitchHz, wy = 2.0 * Math.PI * PistolYawHz, wb = 2.0 * Math.PI * PistolBackHz;
-        double kp = PistolInertia * wp * wp, cp = 2.0 * PistolPitchDamping * PistolInertia * wp;
-        double ky = PistolInertia * wy * wy, cy = 2.0 * PistolYawDamping * PistolInertia * wy;
-        double kb = PistolArmMass * wb * wb, cb = 2.0 * PistolBackDamping * PistolArmMass * wb;
+        double inertia = _pistolInertia, armMass = _pistolArmMass;
+        // The wrists' and arms' own springs (set at the 1 kg gun), each damped as set for the gun in the hands.
+        double kp = PistolInertia * wp * wp, cp = 2.0 * PistolPitchDamping * Math.Sqrt(kp * inertia);
+        double ky = PistolInertia * wy * wy, cy = 2.0 * PistolYawDamping * Math.Sqrt(ky * inertia);
+        double kb = PistolArmMass * wb * wb, cb = 2.0 * PistolBackDamping * Math.Sqrt(kb * armMass);
         while (_time + Step <= now)
         {
             _time += Step;
@@ -626,19 +642,28 @@ internal static class RealRecoil
             double back = fBore + fCarrier;
             // The push along the bore, over the wrists, turns the gun up; a compensator takes its share of that turn.
             double torque = PistolBoreOverWrist * (back - fDown) + holdPitch;
-            double ap = (torque - kp * _pq[0] - cp * _pqd[0]) / PistolInertia;
-            double ay = (holdYaw - ky * _pq[1] - cy * _pqd[1]) / PistolInertia;
-            double ab = (back - kb * _pq[2] - cb * _pqd[2]) / PistolArmMass;
+            double wrist = _pq[0] / PistolWristStiffening, arm = _pq[2] / PistolArmStiffening;
+            double gp = 1.0 + wrist * wrist, gb = 1.0 + arm * arm;
+            double ap = (torque - gp * (kp * _pq[0] + cp * _pqd[0])) / inertia;
+            double ay = (holdYaw - ky * _pq[1] - cy * _pqd[1]) / inertia;
+            double ab = (back - gb * (kb * _pq[2] + cb * _pqd[2])) / armMass;
             _pqd[0] += ap * Step;
             _pqd[1] += ay * Step;
             _pqd[2] += ab * Step;
             for (int a = 0; a < 3; a++)
             {
                 _pq[a] += _pqd[a] * Step;
-                if (double.IsNaN(_pq[a]) || Math.Abs(_pq[a]) > 1.0)
+                if (double.IsNaN(_pq[a]) || double.IsInfinity(_pq[a]))
                 {
                     Rest();
                     return;
+                }
+                // Held at the end of the joint's reach, not thrown back to rest: a reset there dropped the gun
+                // still mid-shot (a .50 AE went past it and stood the hands still).
+                if (Math.Abs(_pq[a]) > 1.0)
+                {
+                    _pq[a] = Math.Sign(_pq[a]);
+                    _pqd[a] = 0.0;
                 }
             }
         }
