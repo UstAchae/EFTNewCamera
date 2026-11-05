@@ -45,7 +45,7 @@ internal static class AimArms
     private const float BreathCenterSeconds = 6f;
     private static readonly SwayAmounts Now = new() { GunMove = 0.05f, GunTurn = 0.05f, ArmMove = 0.05f, ArmTurn = 0.05f, HeadFollow = 0.1f, Breath = 1f };
     internal static bool Chase = true;
-    internal static float FollowDelay;
+    internal static float FollowDelay = 0.1f;   // seconds the gun trails the view when swinging the mouse
     internal static float WalkHeadSway;
     internal static float HeadModelPitch;
     private const float MaxDelayDegrees = 15f;
