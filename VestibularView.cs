@@ -9,7 +9,7 @@ namespace EFTNewCamera;
 // distance ahead of a steady eye. The head's bob and its turn from each step are turned out of view. Yaw and
 // pitch are balanced fully; the turn about the view axis (roll) only by the torsion share, as real eyes counter-roll
 // only a small part of a head tilt, and only its quick part: a lean (Q, E) is the player's own and stays.
-// Aiming, mounting, scene guns, vaulting, climbing and the BTR are left as they are.
+// Mounting, scene guns, vaulting, climbing and the BTR are left as they are. Aiming is balanced as well.
 // The point is whatever that line hits, found the way a bullet finds its target.
 // While the hands or body are busy (switching or reloading, meds, inventory, looting, doors) the animation turns
 // the head on purpose, to look at the hands or the bag. That turn is then part of where the player looks.
@@ -102,8 +102,9 @@ internal static class VestibularView
             _eyeSteady = Vector3.Lerp(_eyeSteady, _eyeFirst, follow);
         }
 
-        bool free = (!(player.HandsController != null && player.HandsController.IsAiming) || ChestStance.Active)
-            && !movement.IsInMountedState
+        // Aiming too: the aimed gun is laid along the same mouse look the view is balanced to, so the sight stays put,
+        // and when a shot turns the body and head (RealRecoil) the eyes hold the target while the sight jumps.
+        bool free = !movement.IsInMountedState
             && !movement.IsStationaryWeaponInHands
             && movement.RotationAction == MovementContext.DefaultRotationFunction
             && player.BtrState == EPlayerBtrState.Outside;

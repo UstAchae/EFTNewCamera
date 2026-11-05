@@ -117,7 +117,9 @@ internal static class LaserReplay
         if (player == null || !player.IsYourPlayer)
             return true;
         bool aiming = player.HandsController != null && player.HandsController.IsAiming;
-        if (!aiming && AimArms.GunAtRest)
+        // From the hip the gun is left where the game put it, unless a shot is moving it (RealRecoil turns the upper body
+        // and the gun after this LateUpdate, as the camera culls).
+        if (!aiming && AimArms.GunAtRest && (!RealRecoil.Active || RealRecoil.Resting))
             return true;
 
         Transform playerRoot = ((Component)player).transform;

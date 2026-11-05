@@ -61,6 +61,12 @@ internal static class AimPatches
             prefix: Hook(typeof(ChestStance), nameof(ChestStance.SlowdownPrefix)));
         Patch(harmony, AccessTools.Method(typeof(ProceduralWeaponAnimation), nameof(ProceduralWeaponAnimation.ProcessEffectors)),
             prefix: Hook(typeof(AimArms), nameof(AimArms.EveryFramePrefix)));
+        Patch(harmony, AccessTools.Method(typeof(Player.FirearmController), nameof(Player.FirearmController.Shot)),
+            postfix: Hook(typeof(RealRecoil), nameof(RealRecoil.ShotPostfix)));
+        Patch(harmony, AccessTools.Method(typeof(ShotEffector), nameof(ShotEffector.Process)),
+            prefix: Hook(typeof(RealRecoil), nameof(RealRecoil.ProcessPrefix)));
+        Patch(harmony, AccessTools.Method(typeof(ShotEffector), nameof(ShotEffector.OnWeaponParametersChanged)),
+            postfix: Hook(typeof(RealRecoil), nameof(RealRecoil.WeaponChanged)));
     }
 
     private static HarmonyMethod Hook(System.Type owner, string name, int priority = -1)

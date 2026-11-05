@@ -15,7 +15,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "justachae.thirdpersoncamera";
     public const string PluginName = "Justachae's Third-Person Skeleton and Camera";
-    public const string PluginVersion = "1.3.0";
+    public const string PluginVersion = "1.4.0";
 
     internal static BepInEx.Logging.ManualLogSource? Log;
     private const string SkeletonThird = "第三人称骨架", SkeletonFirst = "第一人称骨架";
@@ -258,11 +258,17 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
     private void BindVestibular()
     {
         ConfigEntry<bool> balance = Config.Bind("前庭平衡", "总开关", true,
-            new ConfigDescription("像内耳前庭带着眼球那样，镜头位置不动，只把镜头转回玩家想看的方向，抵消走路、跑步时头的晃动。注视点取视线上实际看到的东西的距离；切枪、换弹、打药、翻背包、搜刮、开门等动作时，动画让头转去看手或包的部分会保留。开镜、架枪、固定武器、翻越、攀爬时不起作用；中键自由看和后坐力保留。关闭后镜头完全按头部原样晃动。",
+            new ConfigDescription("像内耳前庭带着眼球那样，镜头位置不动，只把镜头转回玩家想看的方向，抵消走路、跑步时头的晃动。注视点取视线上实际看到的东西的距离；切枪、换弹、打药、翻背包、搜刮、开门等动作时，动画让头转去看手或包的部分会保留。开镜时也起作用。（物理后坐力带来的转动不经过这里：上身后仰由眼睛立刻完全抵消；头被枪托带偏的部分见下面两项“开枪时头偏转的眼球回正”。）架枪、固定武器、翻越、攀爬时不起作用；中键自由看和原版后坐力（关掉物理后坐力时）保留。关闭后镜头完全按头部原样晃动。",
                 null, new ConfigurationManagerAttributes { Order = 3 }));
         ConfigEntry<float> strength = Config.Bind("前庭平衡", "强度", 0.7f,
             new ConfigDescription("左右和上下平衡多少。0 是不平衡（原样），1 是完全平衡。",
                 new AcceptableValueRange<float>(0f, 1f), new ConfigurationManagerAttributes { Order = 2 }));
+        ConfigEntry<float> headEyeShare = Config.Bind("前庭平衡", "开枪时头偏转的眼球回正比例", 0.8f,
+            new ConfigDescription("物理后坐力：开枪时脸贴着枪托，头会被带着往右偏。眼睛随后反向转回来，但转不回全部。这是转回来的比例：1 是全部转回（画面最终不偏），0 是完全不转（画面跟着头偏）。上身绕腰的后仰不受这项影响，眼睛总是立刻完全抵消。",
+                new AcceptableValueRange<float>(0f, 1f), new ConfigurationManagerAttributes { Order = 0 }));
+        ConfigEntry<float> headEyeSeconds = Config.Bind("前庭平衡", "开枪时头偏转的眼球回正时间（秒）", 0.08f,
+            new ConfigDescription("同上，眼睛转回来要多久。数越大，越能看到画面先被头带偏、再被眼睛拉回来；0 是立刻转回。",
+                new AcceptableValueRange<float>(0f, 0.3f), new ConfigurationManagerAttributes { Order = -1 }));
         ConfigEntry<float> torsion = Config.Bind("前庭平衡", "扭转补偿", 0.25f,
             new ConfigDescription("头绕视线歪斜（翻滚）时，镜头反向扭回多少。人眼只能反向扭回头部歪斜的一小部分（约一到三成），所以默认 0.25。0 是完全不管翻滚，1 是歪斜全部扭回。探头的歪斜也按这个比例减小。最终效果再乘上强度。",
                 new AcceptableValueRange<float>(0f, 1f), new ConfigurationManagerAttributes { Order = 1 }));
@@ -271,11 +277,15 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
             VestibularView.Enabled = balance.Value;
             VestibularView.Strength = strength.Value;
             VestibularView.Torsion = torsion.Value;
+            AimArms.HeadEyeShare = headEyeShare.Value;
+            AimArms.HeadEyeSeconds = headEyeSeconds.Value;
         }
 
         balance.SettingChanged += (_, _) => Refresh();
         strength.SettingChanged += (_, _) => Refresh();
         torsion.SettingChanged += (_, _) => Refresh();
+        headEyeShare.SettingChanged += (_, _) => Refresh();
+        headEyeSeconds.SettingChanged += (_, _) => Refresh();
         Refresh();
     }
 
@@ -381,14 +391,20 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         ConfigEntry<float> recoilHead = Config.Bind("瞄准摆动", "后坐力传到头部", 1f,
             new ConfigDescription("同一份后坐力，有多少再推到头上（绕脖子转），镜头跟着头走。0 是不推。",
                 new AcceptableValueRange<float>(0f, 2f)));
+        ConfigEntry<bool> realRecoil = Config.Bind("瞄准摆动", "物理后坐力", true,
+            new ConfigDescription("开：按弹头和火药燃气的动量算后坐力，推动“腰—肩窝—脖子”这套弹簧阻尼的身体：上身绕腰后仰、枪在肩窝里后坐、头被枪托带动，人在约 0.2 秒后把枪往回拉，连发几发后越拉越稳；左右方向比上下难控制，枪整体往右上漂。每发的握持都不完全一样，弹着点会随机散开，连射越久散得越开。枪口装置按游戏自己的枪口类型算：制退类（brake）把它的后坐数值乘 8 后从冲量里减，消音器乘 5，补偿类（conpensator）乘 8 后从枪口上跳里减（往下压枪口）；从冲量里减掉的不超过火药燃气那一份的 1.5 倍。枪托不改变冲量：它的后坐数值让肩窝更软、头被震得更轻；没有抵肩的部件（没装枪托或枪托折叠）时只靠手扛，枪绕握把翻，上跳大得多。前握把（后坐数值和人机工效）让人更压得住枪，左右方向更明显。后握把按人机工效 E：上下方向压枪力度 ×(1+0.03E)，枪托被拉进肩窝更紧 ×(1+0.02E)。眼睛像真人一样反向转动，把视线稳在目标上：画面只跟着头移动，看到的是枪和瞄具在画面里跳。子弹跟着枪口走。站立和蹲姿都用它；卧姿、两脚架和固定武器仍用原版后坐。开着时上面三项不起作用。关：用原版后坐力和上面三项。"));
         void Refresh()
         {
+            RealRecoil.Enabled = realRecoil.Value;
+            if (!realRecoil.Value)
+                RealRecoil.Rest();
             AimArms.RecoilKick = recoilKick.Value;
             AimArms.RecoilChest = recoilChest.Value;
             AimArms.RecoilHead = recoilHead.Value;
             AimArms.FollowDelay = followDelay.Value;
         }
 
+        realRecoil.SettingChanged += (_, _) => Refresh();
         recoilKick.SettingChanged += (_, _) => Refresh();
         recoilChest.SettingChanged += (_, _) => Refresh();
         recoilHead.SettingChanged += (_, _) => Refresh();
@@ -668,7 +684,10 @@ internal static class NewCameraSwitch
             {
                 AimArms.UnliftHead(head);
                 AimArms.FollowMountedGun(player);
-                _poseRotation = CameraDirection.Resolve(head.rotation);
+                AimArms.TorsoRecoil(player);
+                // The eyes turn against the recoil's turn of the upper body (vestibulo-ocular reflex): the view keeps
+                // its direction, and only moves with the head.
+                _poseRotation = AimArms.EyesAgainstRecoil(CameraDirection.Resolve(head.rotation));
                 // A magnified sight through the goggle: the camera (the objective) ahead of the eyes, the gun with it.
                 CameraPosition.ScopeAhead = 0f;
                 CameraPosition.ScopeAhead = NightVisionEyepieces.ScopePull(player, CameraPosition.Resolve(head.position, _poseRotation), _poseRotation);
@@ -684,6 +703,10 @@ internal static class NewCameraSwitch
                 }
                 else
                     _poseRotation = AimArms.KickView(_poseRotation);
+                // The head the cheek and neck turned (RealRecoil): the eyes go with it, their direction held.
+                Vector3 beforeHead = _posePosition;
+                AimArms.HeadRecoil(player, ref _posePosition, ref _poseRotation);
+                PoseFromHead += _posePosition - beforeHead;
                 _poseRotation = VestibularView.Stabilize(player, _posePosition, _poseRotation);
                 Vector3 beforeRecoil = _posePosition;
                 AimArms.BodyRecoil(player, ref _posePosition, ref _poseRotation);
