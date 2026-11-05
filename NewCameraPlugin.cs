@@ -312,9 +312,16 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         ConfigEntry<float> horizontal = BindMeters("镜头位置", "水平", 0f, "沿镜头右方向移动，单位为米。");
         ConfigEntry<float> vertical = BindMeters("镜头位置", "垂直", 0.05f, "沿镜头上方向移动，单位为米。");
         ConfigEntry<float> forward = BindMeters("镜头位置", "前后", 0.08f, "沿镜头前方向移动，单位为米。");
+        ConfigEntry<bool> aimEye = Config.Bind("镜头位置", "瞄准时移到瞄准眼", true,
+            "开镜和胸口抵肩时，镜头的水平位置平滑移到瞄准用的那只眼：右肩时到右眼，换到左肩时到左眼，枪跟着一起过去；退出瞄准时回到上面设的水平位置。");
+        ConfigEntry<float> eye = Config.Bind("镜头位置", "瞄准眼离中线（米）", 0.03f,
+            new ConfigDescription("开镜时镜头离头部中线多远：右眼是正值这么远，左眼是负值这么远。", new AcceptableValueRange<float>(0f, 0.06f)));
         void Refresh()
         {
+            CameraPosition.Across = horizontal.Value;
             CameraPosition.Horizontal = horizontal.Value;
+            CameraPosition.AimEyeEnabled = aimEye.Value;
+            CameraPosition.AimEye = eye.Value;
             CameraPosition.Vertical = vertical.Value;
             CameraPosition.Forward = forward.Value;
         }
@@ -322,6 +329,8 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         horizontal.SettingChanged += (_, _) => Refresh();
         vertical.SettingChanged += (_, _) => Refresh();
         forward.SettingChanged += (_, _) => Refresh();
+        aimEye.SettingChanged += (_, _) => Refresh();
+        eye.SettingChanged += (_, _) => Refresh();
         Refresh();
     }
 
@@ -611,6 +620,7 @@ internal static class NewCameraSwitch
         }
         ChooseSkeleton(player);
         ChestStance.Update(player);
+        CameraPosition.UpdateAimEye(player);
         AimArms.Apply(player);
         NightVisionEyepieces.Update(player);
         BodyVisibility.Apply(player);
@@ -639,6 +649,7 @@ internal static class NewCameraSwitch
     // Everything this mod changed handed back, as the game had it; player: the one it was applied to, when still there.
     private static void ReleaseAll(Player? player)
     {
+        CameraPosition.ResetAimEye();
         NightVisionEyepieces.Release();
         CollimatorHandoff.Release();
         OpticPicture.Release(player);

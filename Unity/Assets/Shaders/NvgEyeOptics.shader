@@ -1,6 +1,7 @@
 // One eye's view of a head-mounted night-vision device, after its camera has drawn what is within half a metre.
-// Pass 0: that, solid where it was drawn, premultiplied with its coverage in alpha, to go over the main camera's
-// scene. The light through the lenses is put in afterwards (NvgBinocular.shader). Where the eye looks through a lens
+// Pass 0: that, solid where it was drawn and is the device (marked by pass 2), premultiplied with its coverage in
+// alpha, to go over the main camera's scene; the rest near by (the hands, the gun, the headwear, the world) is the
+// main camera's. The light through the lenses is put in afterwards (NvgBinocular.shader). Where the eye looks through a lens
 // (its lens map), nothing behind the lens is kept: an eye at an eyepiece sees the tube's picture there, not the gun or
 // the hands beyond the glass.
 // Pass 1: resolved over frames where the game dithers (its glass, drawn on some pixels and not their neighbours, in
@@ -16,7 +17,7 @@ Shader "Justachae/NVG/EyeOptics" {
    #pragma vertex vert_img
    #pragma fragment frag
    #include "UnityCG.cginc"
-   sampler2D _MainTex, _LensMap;
+   sampler2D _MainTex, _LensMap, _SelfMask;
    float _BehindLens;   // how far from the eye something seen through a lens is behind it (m)
    UNITY_DECLARE_DEPTH_TEXTURE(_CameraDepthTexture);
    float4 frag (v2f_img i) : SV_Target {
@@ -25,6 +26,8 @@ Shader "Justachae/NVG/EyeOptics" {
     if (Linear01Depth(raw) >= 0.999)
      return 0;
     if (dot(tex2D(_LensMap, i.uv), 1) > 0.01 && LinearEyeDepth(raw) > _BehindLens)
+     return 0;
+    if (tex2D(_SelfMask, i.uv).r < 0.5)
      return 0;
     return float4(tex2D(_MainTex, i.uv).rgb, 1);
    }
@@ -59,6 +62,18 @@ Shader "Justachae/NVG/EyeOptics" {
     float dithered = saturate(drawnMax - drawnMin);
     return lerp(current, history, _HistoryWeight * dithered);
    }
+   ENDCG
+  }
+  // 2: the device's meshes drawn again where they lie (their depth the frame's, so only where they are seen),
+  // marking those pixels of the eye's view as the device's (NightVisionSelf.cs).
+  Pass {
+   Cull Off ZWrite Off ZTest LEqual Offset -1, -1
+   CGPROGRAM
+   #pragma vertex vert
+   #pragma fragment frag
+   #include "UnityCG.cginc"
+   float4 vert (float4 v : POSITION) : SV_POSITION { return UnityObjectToClipPos(v); }
+   fixed4 frag () : SV_Target { return 1; }
    ENDCG
   }
  }

@@ -54,6 +54,8 @@ internal static partial class NightVisionEyepieces
     private static readonly int EyeId = Shader.PropertyToID("_Eye");
     private static readonly int OverscanId = Shader.PropertyToID("_Overscan");
     private static readonly int MonocularId = Shader.PropertyToID("_Monocular");
+    private static readonly int EyeSpanId = Shader.PropertyToID("_EyeSpan");
+    private static readonly int DominantId = Shader.PropertyToID("_Dominant");
     private static readonly int LensClearId = Shader.PropertyToID("_LensClear");
     private static readonly int OpticsId = Shader.PropertyToID("_Optics");
     private static readonly int[] EyeIds = { Shader.PropertyToID("_LeftEye"), Shader.PropertyToID("_RightEye") };
@@ -214,6 +216,15 @@ internal static partial class NightVisionEyepieces
         float fade = seeThrough <= 0.5f ? seeThrough * 2f : 1f + (seeThrough - 0.5f) * 6f;
         binocular.SetVector(MonocularId, new Vector4(monocular >= 0 ? 1f : 0f, monocular, fade, 0f));
         binocular.SetFloat(LensClearId, LensReflections ? 0f : 1f);
+        // Aimed, the aiming eye leads (CameraPosition.AimEye): its tube's picture over the other eye's, as one sees with
+        // a dominant eye, that eye's view drawn across the whole frame for it.
+        float aimSide = CameraPosition.AimSide;
+        float dominance = monocular < 0 ? CameraPosition.AimedWeight * Mathf.Abs(aimSide) : 0f;
+        int dominant = aimSide >= 0f ? 1 : 0;
+        binocular.SetVector(DominantId, new Vector4(dominance, dominant, 0f, 0f));
+        float half = (1f + Overscan) * 0.5f;
+        bool leftWhole = monocular == 0 || (dominance > 0f && dominant == 0), rightWhole = monocular == 1 || (dominance > 0f && dominant == 1);
+        binocular.SetVector(EyeSpanId, new Vector4(leftWhole ? 1f : half, rightWhole ? 1f : half, 0f, 0f));
         _eyesFrame = Time.frameCount;
         for (int side = 0; side < 2; side++)
         {
@@ -222,7 +233,7 @@ internal static partial class NightVisionEyepieces
             bool aIsThisSide = side == 0 ? a <= b : a > b;
             // The eyes stay back of the camera when it has come forward to a sight (NightVisionScope.cs).
             Vector3 shift = right * ((aIsThisSide ? a : b) * EyeShift * _split) - view.forward * ScopePullback;
-            RenderEye(side, camera, position, shift, _lensNodes[aIsThisSide ? CentreLensA : CentreLensB], monocular >= 0);
+            RenderEye(side, camera, position, shift, _lensNodes[aIsThisSide ? CentreLensA : CentreLensB], side == 0 ? leftWhole : rightWhole);
         }
     }
 
@@ -311,12 +322,15 @@ internal static partial class NightVisionEyepieces
             HideGlass();
         if (_precise)
             PutPieces(side, camera, shift, turned, projection);
+        // Which of its pixels are the device's: only those go over the frame (NightVisionSelf).
+        PutSelfMask(side, camera, width, height, shift, turned, projection);
         try
         {
             camera.Render();
         }
         finally
         {
+            TakeSelfMask(side, camera);
             if (_precise)
                 TakePieces(side, camera);
             ShowDevice(false);
@@ -347,6 +361,7 @@ internal static partial class NightVisionEyepieces
         RenderTexture current = RenderTexture.GetTemporary(source.width, source.height, 0, RenderTextureFormat.ARGBHalf);
         _eyeOptics.SetTexture(LensMapId, _lensMaps[side] != null ? _lensMaps[side] : Texture2D.blackTexture);
         _eyeOptics.SetFloat(BehindLensId, BehindLens);
+        _eyeOptics.SetTexture(SelfMaskId, SelfMask(side));
         Graphics.Blit(source, current, _eyeOptics, 0);
         RenderTexture history = Target(_eyeHistory, side, source.width, source.height, 0, RenderTextureFormat.ARGBHalf, "Justachae NVG eye history");
         bool continued = _historyFrame[side] == Time.frameCount - 1;
