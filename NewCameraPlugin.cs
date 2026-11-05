@@ -15,7 +15,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "justachae.thirdpersoncamera";
     public const string PluginName = "Justachae's Third-Person Skeleton and Camera";
-    public const string PluginVersion = "1.4.4";
+    public const string PluginVersion = "1.4.5";
 
     internal static BepInEx.Logging.ManualLogSource? Log;
     private const string SkeletonThird = "第三人称骨架", SkeletonFirst = "第一人称骨架";
@@ -25,10 +25,10 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
     {
         Log = Logger;
         // No section: the F12 window shows the master switch right under the plugin's name, without a heading.
-        ConfigEntry<bool> enabled = Config.Bind("", "总开关", true,
+        ConfigEntry<bool> enabled = SettingsLayout.Bind(Config, "", "总开关", true,
             new ConfigDescription("关掉后整个 mod 不起作用，一切按游戏原样。", null, new ConfigurationManagerAttributes { Order = 8 }));
         MoveFrom(enabled, "新镜头", "总开关");
-        ConfigEntry<string> skeleton = Config.Bind("", "骨架", SkeletonThird,
+        ConfigEntry<string> skeleton = SettingsLayout.Bind(Config, "", "骨架", SkeletonThird,
             new ConfigDescription("第三人称骨架：用第三人称的身体动作（呼吸摆动、跑步转向时头部翻滚、换枪和翻背包的动作）。第一人称骨架：身体动作用游戏原版的第一人称（没有呼吸摆动和跑步转向时的头部翻滚，换枪、翻背包没有身体动作），晃得少，适合觉得第三人称骨架晕的玩家。除了身体动作，两种骨架的其他功能完全一样（镜头挂在头部、人物显示、瞄准等），只是第一人称骨架下瞄准时枪本身按原版第一人称的摆动晃（呼吸、手抖，屏息时由原版自己减弱），“瞄准摆动”那几组里的“摆动”只管手臂跟着身体动作的晃动，“呼吸”不起作用。局内可以随时切换。",
                 new AcceptableValueList<string>(SkeletonThird, SkeletonFirst), new ConfigurationManagerAttributes { Order = 7 }));
         AimPatches.Install();
@@ -56,22 +56,22 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 
     private void BindFisheye()
     {
-        ConfigEntry<bool> fisheye = Config.Bind("鱼眼", "启用", false,
+        ConfigEntry<bool> fisheye = SettingsLayout.Bind(Config, "鱼眼", "启用", false,
             new ConfigDescription("画面像透过执法记录仪、运动相机那样的广角镜头看：视野更宽，直线往外弯，四角有镜头的暗角。作用在整个游戏画面上，瞄准时的瞄具、头戴夜视仪和热成像的目镜也一起变形。画面中心是放大过的，由下面的“清晰度方式”决定怎么补。",
                 null, new ConfigurationManagerAttributes { Order = 7 }));
-        ConfigEntry<float> field = Config.Bind("鱼眼", "视野", 120f,
+        ConfigEntry<float> field = SettingsLayout.Bind(Config, "鱼眼", "视野", 120f,
             new ConfigDescription("鱼眼开着时，屏幕左边缘到右边缘之间的角度（度）。游戏设置里的视野是上下方向的，75 在 16:9 屏幕上大约相当于这里的 107。",
                 new AcceptableValueRange<float>(100f, 140f), new ConfigurationManagerAttributes { Order = 6 }));
-        ConfigEntry<float> curve = Config.Bind("鱼眼", "弯曲", 0.4f,
+        ConfigEntry<float> curve = SettingsLayout.Bind(Config, "鱼眼", "弯曲", 0.4f,
             new ConfigDescription("0：不弯，是同样视野的普通广角画面，中心不放大，边缘的东西被拉得很大。1：完全的鱼眼，画面中间往外鼓，边缘压得扁。默认 0.4 接近执法记录仪、运动相机的感觉。",
                 new AcceptableValueRange<float>(0f, 1f), new ConfigurationManagerAttributes { Order = 5 }));
-        ConfigEntry<float> vignette = Config.Bind("鱼眼", "暗角", 0.6f,
+        ConfigEntry<float> vignette = SettingsLayout.Bind(Config, "鱼眼", "暗角", 0.6f,
             new ConfigDescription("镜头四角变暗：越往边缘越暗，开大后四角露出镜筒的黑色圆边。0 是没有暗角。",
                 new AcceptableValueRange<float>(0f, 1f), new ConfigurationManagerAttributes { Order = 4 }));
-        ConfigEntry<string> clarity = Config.Bind("鱼眼", "清晰度方式", FisheyeLight,
+        ConfigEntry<string> clarity = SettingsLayout.Bind(Config, "鱼眼", "清晰度方式", FisheyeLight,
             new ConfigDescription("鱼眼把画面中心放大了，中心会变软。省性能：不提高渲染分辨率，中心用更锐利的插值放大，边缘多点取平均，几乎没有额外开销，这是一般游戏的做法。高清：按更高的分辨率渲染，真正把中心的细节补回来（程度由“清晰度补偿”决定），很吃性能和显存。",
                 new AcceptableValueList<string>(FisheyeLight, FisheyeSharp), new ConfigurationManagerAttributes { Order = 3 }));
-        ConfigEntry<float> detail = Config.Bind("鱼眼", "清晰度补偿", 1f,
+        ConfigEntry<float> detail = SettingsLayout.Bind(Config, "鱼眼", "清晰度补偿", 1f,
             new ConfigDescription("只在清晰度方式为“高清”时起作用。鱼眼把画面中心放大了，中心会变糊。这一项让游戏按更高的分辨率渲染，把中心的清晰度补回来。1：完全补回，中心和不开鱼眼时一样清楚，但渲染的像素更多（默认视野和弯曲下约 1.8 倍），帧数会明显下降；0：不补，没有额外开销。最多按屏幕的 1.5 倍（像素 2.25 倍）渲染，以免显存不够：视野和弯曲开得很大时（比如 140 度、弯曲 1，中心放大约 2.8 倍）补不满，中心仍会有些糊。显存紧张时（8 GB 显卡、高画质贴图）建议把贴图画质调到中，或者把这一项调低。开了 DLSS 或 FSR 时，它们的渲染分辨率和输出分辨率一起提高。",
                 new AcceptableValueRange<float>(0f, 1f), new ConfigurationManagerAttributes { Order = 2 }));
         void Refresh()
@@ -95,52 +95,52 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 
     private void BindNightVision()
     {
-        ConfigEntry<bool> binocular = Config.Bind("头戴式成像装备", "双眼镜头", true,
+        ConfigEntry<bool> binocular = SettingsLayout.Bind(Config, "头戴式成像装备", "双眼镜头", true,
             new ConfigDescription("头戴夜视仪和热成像开着时，镜头在原地分成左右两个相机，像两只眼睛：各自横移到对准自己那一侧的目镜，随夜视仪翻下的动画逐渐分开。屏幕从中间分成左右两半，左半边是左眼看到的，右半边是右眼看到的，中间平滑过渡。两个相机只画离眼半米以内的东西（夜视仪、头盔边缘），远处的景物仍是主镜头的。镜头离夜视仪较远（比如自由镜头）时不分开。",
                 null, new ConfigurationManagerAttributes { Order = 2 }));
-        ConfigEntry<float> eyeShift = Config.Bind("头戴式成像装备", "双眼平移比例", 0.8f,
+        ConfigEntry<float> eyeShift = SettingsLayout.Bind(Config, "头戴式成像装备", "双眼平移比例", 0.8f,
             new ConfigDescription("双眼镜头时，两个相机各自往外平移多少：1 是正好对准自己那一侧的中间镜片，0 是不平移。画面里的景物始终完整，平移只改变目镜的圆在画面里的位置和被镜片边缘挡掉多少。",
                 new AcceptableValueRange<float>(0f, 1.2f), new ConfigurationManagerAttributes { Order = 1 }));
-        ConfigEntry<KeyboardShortcut> raiseMount = Config.Bind("头戴式成像装备", "挂架升高", new KeyboardShortcut(KeyCode.Equals, KeyCode.LeftAlt),
+        ConfigEntry<KeyboardShortcut> raiseMount = SettingsLayout.Bind(Config, "头戴式成像装备", "挂架升高", new KeyboardShortcut(KeyCode.Equals, KeyCode.LeftAlt),
             new ConfigDescription("按住时把支架往上调（TATM 的滑块、G24 的托架）。只在夜视仪开着、并且处于腰射（没有瞄准）时有效。每个支架（每一件物品）各自记住自己调好的高度、仰俯和前后，存在配置文件夹里的 justachae.thirdpersoncamera.mounts.txt。", null, new ConfigurationManagerAttributes { Order = -1 }));
-        ConfigEntry<KeyboardShortcut> lowerMount = Config.Bind("头戴式成像装备", "挂架降低", new KeyboardShortcut(KeyCode.Minus, KeyCode.LeftAlt),
+        ConfigEntry<KeyboardShortcut> lowerMount = SettingsLayout.Bind(Config, "头戴式成像装备", "挂架降低", new KeyboardShortcut(KeyCode.Minus, KeyCode.LeftAlt),
             new ConfigDescription("按住时把支架往下调。只在夜视仪开着、并且处于腰射（没有瞄准）时有效。", null, new ConfigurationManagerAttributes { Order = -2 }));
-        ConfigEntry<KeyboardShortcut> tiltUp = Config.Bind("头戴式成像装备", "挂架仰起", new KeyboardShortcut(KeyCode.Equals, KeyCode.LeftShift),
+        ConfigEntry<KeyboardShortcut> tiltUp = SettingsLayout.Bind(Config, "头戴式成像装备", "挂架仰起", new KeyboardShortcut(KeyCode.Equals, KeyCode.LeftShift),
             new ConfigDescription("按住时把支架往上仰（目镜抬高）。只在夜视仪开着、并且处于腰射（没有瞄准）时有效。", null, new ConfigurationManagerAttributes { Order = -4 }));
-        ConfigEntry<KeyboardShortcut> tiltDown = Config.Bind("头戴式成像装备", "挂架俯下", new KeyboardShortcut(KeyCode.Minus, KeyCode.LeftShift),
+        ConfigEntry<KeyboardShortcut> tiltDown = SettingsLayout.Bind(Config, "头戴式成像装备", "挂架俯下", new KeyboardShortcut(KeyCode.Minus, KeyCode.LeftShift),
             new ConfigDescription("按住时把支架往下俯（目镜降低）。只在夜视仪开着、并且处于腰射（没有瞄准）时有效。", null, new ConfigurationManagerAttributes { Order = -5 }));
-        ConfigEntry<KeyboardShortcut> slideForward = Config.Bind("头戴式成像装备", "挂架往前", new KeyboardShortcut(KeyCode.Equals, KeyCode.LeftControl),
+        ConfigEntry<KeyboardShortcut> slideForward = SettingsLayout.Bind(Config, "头戴式成像装备", "挂架往前", new KeyboardShortcut(KeyCode.Equals, KeyCode.LeftControl),
             new ConfigDescription("按住时把夜视仪沿支架往前推（离眼睛远；G24 一格一格地走）。只在夜视仪开着、并且处于腰射（没有瞄准）时有效。", null, new ConfigurationManagerAttributes { Order = -7 }));
-        ConfigEntry<KeyboardShortcut> slideBack = Config.Bind("头戴式成像装备", "挂架往后", new KeyboardShortcut(KeyCode.Minus, KeyCode.LeftControl),
+        ConfigEntry<KeyboardShortcut> slideBack = SettingsLayout.Bind(Config, "头戴式成像装备", "挂架往后", new KeyboardShortcut(KeyCode.Minus, KeyCode.LeftControl),
             new ConfigDescription("按住时把夜视仪沿支架往后拉（离眼睛近）。只在夜视仪开着、并且处于腰射（没有瞄准）时有效。", null, new ConfigurationManagerAttributes { Order = -8 }));
-        ConfigEntry<float> headwearPitch = Config.Bind("头戴式成像装备", "头部装备仰俯", 0f,
+        ConfigEntry<float> headwearPitch = SettingsLayout.Bind(Config, "头戴式成像装备", "头部装备仰俯", 0f,
             new ConfigDescription("只转头盔（和挂在上面的夜视仪），头和镜头不动。把头盔前沿往上抬多少度，只能往上，不能往下压。也可以用下面两个快捷键按住调整。",
                 new AcceptableValueRange<float>(0f, HeadwearTilt.Range), new ConfigurationManagerAttributes { Order = -9 }));
-        ConfigEntry<KeyboardShortcut> headwearUp = Config.Bind("头戴式成像装备", "头部装备仰起", HeadwearTilt.Up,
+        ConfigEntry<KeyboardShortcut> headwearUp = SettingsLayout.Bind(Config, "头戴式成像装备", "头部装备仰起", HeadwearTilt.Up,
             new ConfigDescription("按住时把头盔前沿往上抬。只在腰射（没有瞄准）时有效，瞄准时同样的键调瞄准距离。", null, new ConfigurationManagerAttributes { Order = -10 }));
-        ConfigEntry<KeyboardShortcut> headwearDown = Config.Bind("头戴式成像装备", "头部装备俯下", HeadwearTilt.Down,
+        ConfigEntry<KeyboardShortcut> headwearDown = SettingsLayout.Bind(Config, "头戴式成像装备", "头部装备俯下", HeadwearTilt.Down,
             new ConfigDescription("按住时把头盔前沿往回放（最低回到原位）。", null, new ConfigurationManagerAttributes { Order = -11 }));
         HeadwearTilt.Pitch = headwearPitch;
-        ConfigEntry<string> picture = Config.Bind("头戴式成像装备", "夜视画面来源", NightVisionEyepieces.PictureGame,
+        ConfigEntry<string> picture = SettingsLayout.Bind(Config, "头戴式成像装备", "夜视画面来源", NightVisionEyepieces.PictureGame,
             new ConfigDescription("头戴夜视仪和热成像只在自己的目镜里成像，目镜以外是不带夜视的原样画面，设备模型照常画出。支持 GPNVG-18、PNV-10T、PNV-57E、Armasight N-15、AN/PVS-14（单筒）、模组物品 PVS-31A 和 T-7 热成像；其他型号仍是游戏原样的全屏滤镜。这一项选目镜里的夜视画面用谁做。自动：装了 BRNVG 就用 BRNVG，没装就用游戏原版的夜视滤镜。BRNVG：用 BRNVG 的画面，它的 F12 设置（增益、颜色、噪点、泛光、近处虚焦等）都会作用到目镜里；没装 BRNVG 时按原版。原版：用游戏自己的夜视滤镜（绿色、噪点），装了 BRNVG 也不用它的画面。热成像设备不受这个选项影响。",
                 new AcceptableValueList<string>(NightVisionEyepieces.PictureAuto, NightVisionEyepieces.PictureBrnvg, NightVisionEyepieces.PictureGame),
                 new ConfigurationManagerAttributes { Order = 3 }));
-        ConfigEntry<bool> glow = Config.Bind("头戴式成像装备", "目镜光晕", false,
+        ConfigEntry<bool> glow = SettingsLayout.Bind(Config, "头戴式成像装备", "目镜光晕", false,
             new ConfigDescription("夜视开着时，镜片的光往四周晕开，照在镜片玻璃边缘和眼罩内侧的那一圈光。关掉后只剩镜片里的画面。热成像也一样。",
                 null, new ConfigurationManagerAttributes { Order = 0 }));
-        ConfigEntry<bool> reflections = Config.Bind("头戴式成像装备", "镜片反光", false,
+        ConfigEntry<bool> reflections = SettingsLayout.Bind(Config, "头戴式成像装备", "镜片反光", false,
             new ConfigDescription("夜视仪翻下时，目镜镜片表面映出的周围环境和高光，叠在镜片里的夜视画面上。关掉后镜片里只剩夜视画面，设备上的玻璃部件也不画。",
                 null, new ConfigurationManagerAttributes { Order = 0 }));
-        ConfigEntry<float> monocularSeeThrough = Config.Bind("头戴式成像装备", "PVS-14 左眼透明度", 0.5f,
+        ConfigEntry<float> monocularSeeThrough = SettingsLayout.Bind(Config, "头戴式成像装备", "PVS-14 左眼透明度", 0.5f,
             new ConfigDescription("AN/PVS-14 单筒夜视仪只挡在右眼前，左眼看过去时机身往画面边缘逐渐变透明。0：不变透明（两只眼都看到完整的机身）；0.5：默认；1：变透明得最快。",
                 new AcceptableValueRange<float>(0f, 1f), new ConfigurationManagerAttributes { Order = 0 }));
-        ConfigEntry<float> nearBlur = Config.Bind("头戴式成像装备", "近处虚化距离", 1f,
+        ConfigEntry<float> nearBlur = SettingsLayout.Bind(Config, "头戴式成像装备", "近处虚化距离", 1f,
             new ConfigDescription("夜视仪的物镜对焦在远处，近处的手、枪和机瞄是虚的，越近越虚，远处是清楚的。原版夜视和 BRNVG 的画面都会这样，热成像不受影响。距离从夜视仪的物镜算起：在这个距离上虚化是“近处虚化上限”的一半，更近的越来越接近上限，更远的逐渐变清楚。拉长这个距离，枪的前端和更远一点的东西也会更虚。",
                 new AcceptableValueRange<float>(0.2f, 3f), new ConfigurationManagerAttributes { Order = 0 }));
-        ConfigEntry<float> nearBlurLimit = Config.Bind("头戴式成像装备", "近处虚化上限", 0.75f,
+        ConfigEntry<float> nearBlurLimit = SettingsLayout.Bind(Config, "头戴式成像装备", "近处虚化上限", 0.75f,
             new ConfigDescription("近处虚化最多糊开多大（模糊圆斑的半径，单位为度）。越近越接近这个值，但不是一刀切：整把枪从后到前仍是越近越虚。0.5 到 1 比较合适；越大，离眼睛近的部分糊得越厉害。",
                 new AcceptableValueRange<float>(0.2f, 3f), new ConfigurationManagerAttributes { Order = 0 }));
-        ConfigEntry<float> tritium = Config.Bind("头戴式成像装备", "氚光亮度", 0.6f,
+        ConfigEntry<float> tritium = SettingsLayout.Bind(Config, "头戴式成像装备", "氚光亮度", 0.6f,
             new ConfigDescription("透过夜视仪看氚光机瞄（以及游戏里做了氚光的其他瞄具）：每个氚光点被物镜散成一个亮度均匀、边缘清楚的圆盘，离眼睛越近圆盘越大、越暗。这一项调这些圆盘有多亮，0 是不画。",
                 new AcceptableValueRange<float>(0f, 4f), new ConfigurationManagerAttributes { Order = 0 }));
         void Refresh()
@@ -188,32 +188,32 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 
     private void BindBody()
     {
-        ConfigEntry<float> walkHead = Config.Bind("人物", "走路摇头", 0.2f,
+        ConfigEntry<float> walkHead = SettingsLayout.Bind(Config, "人物", "走路摇头", 0.2f,
             new ConfigDescription("走路和跑步时，把头的左右转动收到平均朝向上。镜头仍按原来的固定位置挂在头上，和头一起转。0 是不摇头，1 是游戏原样。站着不动和中键扭头不受影响。",
                 new AcceptableValueRange<float>(0f, 1f), new ConfigurationManagerAttributes { Order = 1 }));
         MoveFrom(walkHead, "新镜头", "走路摇头");
         walkHead.SettingChanged += (_, _) => AimArms.WalkHeadSway = walkHead.Value;
         AimArms.WalkHeadSway = walkHead.Value;
-        ConfigEntry<bool> showHead = Config.Bind("人物", "显示头部", true,
+        ConfigEntry<bool> showHead = SettingsLayout.Bind(Config, "人物", "显示头部", true,
             "画出自己的头。关掉时头只投阴影，画面里看不见。");
-        ConfigEntry<bool> showHeadwear = Config.Bind("人物", "显示头部装备", true,
+        ConfigEntry<bool> showHeadwear = SettingsLayout.Bind(Config, "人物", "显示头部装备", true,
             "画出头盔和帽子。关掉后头部装备不画，但头盔上挂的夜视仪、热成像和它们的支架照常画出（用来对付全封闭头盔挡住视线）。");
-        ConfigEntry<bool> showFaceCover = Config.Bind("人物", "显示面部装备", false,
+        ConfigEntry<bool> showFaceCover = SettingsLayout.Bind(Config, "人物", "显示面部装备", false,
             "画出面罩和头套。关掉后整个面部装备都不画。");
-        ConfigEntry<bool> showEyewear = Config.Bind("人物", "显示眼部装备", false,
+        ConfigEntry<bool> showEyewear = SettingsLayout.Bind(Config, "人物", "显示眼部装备", false,
             "画出眼镜和护目镜。关掉后整个眼部装备都不画。");
-        ConfigEntry<bool> showVisor = Config.Bind("人物", "显示面罩滤镜", false,
+        ConfigEntry<bool> showVisor = SettingsLayout.Bind(Config, "人物", "显示面罩滤镜", false,
             "画出面罩玻璃上的滤镜。关掉后玻璃还在，滤镜画面没有。");
-        ConfigEntry<float> headPitch = Config.Bind("人物", "头部仰俯", 17f,
+        ConfigEntry<float> headPitch = SettingsLayout.Bind(Config, "人物", "头部仰俯", 17f,
             new ConfigDescription("只转头部模型，镜头保持原位。正值把脸往上抬，单位为度。",
                 new AcceptableValueRange<float>(-45f, 45f)));
-        ConfigEntry<float> freeLookYaw = Config.Bind("人物", "中键扭头角度", 80f,
+        ConfigEntry<float> freeLookYaw = SettingsLayout.Bind(Config, "人物", "中键扭头角度", 80f,
             new ConfigDescription("按住鼠标中键自由看时，头最多往左或往右转多少度。",
                 new AcceptableValueRange<float>(30f, 150f)));
-        ConfigEntry<float> freeLookDown = Config.Bind("人物", "中键低头额外角度", 20f,
+        ConfigEntry<float> freeLookDown = SettingsLayout.Bind(Config, "人物", "中键低头额外角度", 20f,
             new ConfigDescription("按住鼠标中键自由看时，在原版能低头的角度上再多低多少度。0 是原版的范围。",
                 new AcceptableValueRange<float>(0f, 60f)));
-        ConfigEntry<float> axisForward = Config.Bind("人物", "中键扭头轴前后倾斜", 5f,
+        ConfigEntry<float> axisForward = SettingsLayout.Bind(Config, "人物", "中键扭头轴前后倾斜", 5f,
             new ConfigDescription("中键左右扭头时绕的那根轴，0 是竖直。正值让轴的上端往前倒，负值往后倒，单位为度。",
                 new AcceptableValueRange<float>(-60f, 60f)));
         void Refresh()
@@ -258,19 +258,19 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 
     private void BindVestibular()
     {
-        ConfigEntry<bool> balance = Config.Bind("前庭平衡", "总开关", true,
+        ConfigEntry<bool> balance = SettingsLayout.Bind(Config, "前庭平衡", "总开关", true,
             new ConfigDescription("像内耳前庭带着眼球那样，镜头位置不动，只把镜头转回玩家想看的方向，抵消走路、跑步时头的晃动。注视点取视线上实际看到的东西的距离；切枪、换弹、打药、翻背包、搜刮、开门等动作时，动画让头转去看手或包的部分会保留。开镜时也起作用。（物理后坐力带来的转动不经过这里：上身后仰由眼睛立刻完全抵消；头被枪托带偏的部分见下面两项“开枪时头偏转的眼球回正”。）架枪、固定武器、翻越、攀爬时不起作用；中键自由看保留。关闭后镜头完全按头部原样晃动。",
                 null, new ConfigurationManagerAttributes { Order = 3 }));
-        ConfigEntry<float> strength = Config.Bind("前庭平衡", "强度", 0.7f,
+        ConfigEntry<float> strength = SettingsLayout.Bind(Config, "前庭平衡", "强度", 0.7f,
             new ConfigDescription("左右和上下平衡多少。0 是不平衡（原样），1 是完全平衡。",
                 new AcceptableValueRange<float>(0f, 1f), new ConfigurationManagerAttributes { Order = 2 }));
-        ConfigEntry<float> headEyeShare = Config.Bind("前庭平衡", "开枪时头偏转的眼球回正比例", 0.5f,
+        ConfigEntry<float> headEyeShare = SettingsLayout.Bind(Config, "前庭平衡", "开枪时头偏转的眼球回正比例", 0.5f,
             new ConfigDescription("物理后坐力：开枪时脸贴着枪托，头会被带着往右偏。眼睛随后反向转回来，但转不回全部。这是转回来的比例：1 是全部转回（画面最终不偏），0 是完全不转（画面跟着头偏）。上身绕腰的后仰不受这项影响，眼睛总是立刻完全抵消。",
                 new AcceptableValueRange<float>(0f, 1f), new ConfigurationManagerAttributes { Order = 0 }));
-        ConfigEntry<float> headEyeSeconds = Config.Bind("前庭平衡", "开枪时头偏转的眼球回正时间（秒）", 0.3f,
+        ConfigEntry<float> headEyeSeconds = SettingsLayout.Bind(Config, "前庭平衡", "开枪时头偏转的眼球回正时间（秒）", 0.3f,
             new ConfigDescription("同上，眼睛转回来要多久。数越大，越能看到画面先被头带偏、再被眼睛拉回来。",
                 new AcceptableValueRange<float>(0.3f, 1f), new ConfigurationManagerAttributes { Order = -1 }));
-        ConfigEntry<float> torsion = Config.Bind("前庭平衡", "扭转补偿", 0.25f,
+        ConfigEntry<float> torsion = SettingsLayout.Bind(Config, "前庭平衡", "扭转补偿", 0.25f,
             new ConfigDescription("头绕视线歪斜（翻滚）时，镜头反向扭回多少。人眼只能反向扭回头部歪斜的一小部分（约一到三成），所以默认 0.25。0 是完全不管翻滚，1 是歪斜全部扭回。探头的歪斜也按这个比例减小。最终效果再乘上强度。",
                 new AcceptableValueRange<float>(0f, 1f), new ConfigurationManagerAttributes { Order = 1 }));
         void Refresh()
@@ -313,14 +313,14 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         ConfigEntry<float> horizontal = BindMeters("镜头位置", "水平", 0f, "沿镜头右方向移动，单位为米。");
         ConfigEntry<float> vertical = BindMeters("镜头位置", "垂直", 0.05f, "沿镜头上方向移动，单位为米。");
         ConfigEntry<float> forward = BindMeters("镜头位置", "前后", 0.13f, "沿镜头前方向移动，单位为米。");
-        ConfigEntry<bool> aimEye = Config.Bind("镜头位置", "瞄准时移到瞄准眼", true,
+        ConfigEntry<bool> aimEye = SettingsLayout.Bind(Config, "镜头位置", "瞄准时移到瞄准眼", true,
             "开镜时，镜头的水平位置平滑移到瞄准用的那只眼：右肩时到右眼，换到左肩时到左眼，枪跟着一起过去；胸口抵肩时镜头不动，枪的姿势仍按移到那只眼时摆；退出瞄准时回到上面设的水平位置。");
-        ConfigEntry<float> near = Config.Bind("镜头位置", "近裁剪面（米）", 0.01f,
+        ConfigEntry<float> near = SettingsLayout.Bind(Config, "镜头位置", "近裁剪面（米）", 0.01f,
             new ConfigDescription("离镜头比这个距离还近的东西不画。游戏在地图里是 0.03 米（藏身处 0.01 米），镜头挂在头上、贴着头盔帽檐，帽檐靠近镜头的一截会被切掉，从切口透出后面的景物。调小可以把更近的东西也画出来。不会比游戏原来的距离更远。",
                 new AcceptableValueRange<float>(0.005f, 0.03f)));
         near.SettingChanged += (_, _) => CameraNear.Near = near.Value;
         CameraNear.Near = near.Value;
-        ConfigEntry<float> eye = Config.Bind("镜头位置", "瞄准眼离中线（米）", 0.03f,
+        ConfigEntry<float> eye = SettingsLayout.Bind(Config, "镜头位置", "瞄准眼离中线（米）", 0.03f,
             new ConfigDescription("开镜时镜头离头部中线多远：右眼是正值这么远，左眼是负值这么远。", new AcceptableValueRange<float>(0f, 0.06f)));
         void Refresh()
         {
@@ -342,12 +342,12 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 
     private void BindAimDistance()
     {
-        _aimDistance = Config.Bind("瞄准", "前后距离", -0.05f,
+        _aimDistance = SettingsLayout.Bind(Config, "瞄准", "前后距离", -0.05f,
             new ConfigDescription("瞄准后沿镜头前方向移动枪，单位为米。负值让枪离镜头更近。",
                 new AcceptableValueRange<float>(AimDistanceMin, AimDistanceMax)));
-        _aimDistanceFarther = Config.Bind("瞄准", "前后距离调远快捷键", new KeyboardShortcut(KeyCode.Equals),
+        _aimDistanceFarther = SettingsLayout.Bind(Config, "瞄准", "前后距离调远快捷键", new KeyboardShortcut(KeyCode.Equals),
             "瞄准时按住，瞄准的前后距离慢慢变大，枪离镜头更远。不瞄准时这个键不起作用（腰射时同样的键调夜视仪挂架）。");
-        _aimDistanceCloser = Config.Bind("瞄准", "前后距离调近快捷键", new KeyboardShortcut(KeyCode.Minus),
+        _aimDistanceCloser = SettingsLayout.Bind(Config, "瞄准", "前后距离调近快捷键", new KeyboardShortcut(KeyCode.Minus),
             "瞄准时按住，瞄准的前后距离慢慢变小，枪离镜头更近。不瞄准时这个键不起作用（腰射时同样的键调夜视仪挂架）。");
         _aimDistance.SettingChanged += (_, _) => AimArms.ForwardDistance = _aimDistance.Value;
         AimArms.ForwardDistance = _aimDistance.Value;
@@ -400,19 +400,19 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
     private void BindChestStance()
     {
         const string section = "胸口抵肩";
-        ConfigEntry<bool> enabled = Config.Bind(section, "启用", true,
+        ConfigEntry<bool> enabled = SettingsLayout.Bind(Config, section, "启用", true,
             "按住瞄准键不放时，不把瞄具对到眼前，而是枪托抵在胸口正中、枪放低并向内倾斜，枪管和视线平行，靠激光指示器瞄准（戴夜视仪时的常用姿势）。点一下瞄准键仍是正常开镜（松开时开镜）；按住超过下面的时间就直接进入胸口抵肩，松开就退出瞄准。摆动、呼吸、后坐力和开镜时一样，走路速度不按开镜减慢，鼠标灵敏度和红点、全息开镜时一样，前庭平衡照常起作用。");
-        ConfigEntry<KeyCode> key = Config.Bind(section, "瞄准键", KeyCode.Mouse1,
+        ConfigEntry<KeyCode> key = SettingsLayout.Bind(Config, section, "瞄准键", KeyCode.Mouse1,
             "游戏里绑定的瞄准键（默认鼠标右键 Mouse1），用来判断是否还按着。改了游戏里的瞄准键时这里也要改。");
-        ConfigEntry<float> hold = Config.Bind(section, "按住多久算按住（秒）", 0.15f,
+        ConfigEntry<float> hold = SettingsLayout.Bind(Config, section, "按住多久算按住（秒）", 0.15f,
             new ConfigDescription("瞄准键按下后，这个时间内松开算点一下（松开时正常开镜），超过这个时间还按着算按住（直接进入胸口抵肩）。越短按住时等得越少，但慢一点的点击可能被当成按住。", new AcceptableValueRange<float>(0.1f, 1f)));
-        ConfigEntry<float> drop = Config.Bind(section, "比开镜时低（米）", 0.05f,
+        ConfigEntry<float> drop = SettingsLayout.Bind(Config, section, "比开镜时低（米）", 0.05f,
             new ConfigDescription("胸口抵肩时，枪比正常开镜时的位置低多少（负数是更高）。", new AcceptableValueRange<float>(-0.1f, 0.3f)));
-        ConfigEntry<float> side = Config.Bind(section, "比开镜时偏右（米）", 0f,
+        ConfigEntry<float> side = SettingsLayout.Bind(Config, section, "比开镜时偏右（米）", 0f,
             new ConfigDescription("胸口抵肩时，枪比正常开镜时的位置往右多少（负数是往左）。", new AcceptableValueRange<float>(-0.15f, 0.15f)));
-        ConfigEntry<float> ahead = Config.Bind(section, "比开镜时靠前（米）", 0f,
+        ConfigEntry<float> ahead = SettingsLayout.Bind(Config, section, "比开镜时靠前（米）", 0f,
             new ConfigDescription("胸口抵肩时，枪比正常开镜时的位置往前多少（负数是往后）。", new AcceptableValueRange<float>(-0.15f, 0.15f)));
-        ConfigEntry<float> cant = Config.Bind(section, "倾斜（度）", 20f,
+        ConfigEntry<float> cant = SettingsLayout.Bind(Config, section, "倾斜（度）", 20f,
             new ConfigDescription("胸口抵肩时，枪绕着瞄准线转多少度，正数是枪的上面往左倒（向内），负数往右。", new AcceptableValueRange<float>(-60f, 60f)));
         // Two decimals: the slider's value rounded to hundredths of a second.
         float rounded = Mathf.Round(hold.Value * 100f) / 100f;
@@ -470,19 +470,19 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 
     private ConfigEntry<float> BindAmount(string section, string key, float defaultValue, string description)
     {
-        return Config.Bind(section, key, defaultValue,
+        return SettingsLayout.Bind(Config, section, key, defaultValue,
             new ConfigDescription(description, new AcceptableValueRange<float>(0f, 1f)));
     }
 
     private ConfigEntry<float> BindDegrees(string section, string key, float defaultValue, string description)
     {
-        return Config.Bind(section, key, defaultValue,
+        return SettingsLayout.Bind(Config, section, key, defaultValue,
             new ConfigDescription(description, new AcceptableValueRange<float>(-180f, 360f)));
     }
 
     private ConfigEntry<float> BindMeters(string section, string key, float defaultValue, string description)
     {
-        return Config.Bind(section, key, defaultValue,
+        return SettingsLayout.Bind(Config, section, key, defaultValue,
             new ConfigDescription(description, new AcceptableValueRange<float>(-0.05f, 1f)));
     }
 
