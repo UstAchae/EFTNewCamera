@@ -15,7 +15,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "justachae.thirdpersoncamera";
     public const string PluginName = "Justachae's Third-Person Skeleton and Camera";
-    public const string PluginVersion = "1.4.0";
+    public const string PluginVersion = "1.4.1";
 
     internal static BepInEx.Logging.ManualLogSource? Log;
     private const string SkeletonThird = "第三人称骨架", SkeletonFirst = "第一人称骨架";
@@ -38,6 +38,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         FirstPersonAudio.Install();
         AimFieldOfView.Install();
         NightVisionEyepieces.Install();
+        HideoutEscape.Install();
         NewCameraSwitch.Enabled = enabled.Value;
         NewCameraSwitch.FirstPersonSkeleton = skeleton.Value == SkeletonFirst;
         enabled.SettingChanged += (_, _) => NewCameraSwitch.Enabled = enabled.Value;
