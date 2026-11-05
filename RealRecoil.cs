@@ -159,18 +159,24 @@ internal static class RealRecoil
     // A pistol held in the hands, with nothing on the shoulder: a model of its own. The body hardly takes part; the gun
     // turns about the wrists, the bore some centimetres over them, and the arms give back along their length. Its
     // coordinates: 0 pitch about the wrists (up +, rad), 1 yaw (left +, rad), 2 back along the arms (m). Set so a 9 mm
-    // shot (about 3 N·s) climbs some 7 degrees, highest at about 75 ms and back by about 0.3 s without dipping under, as
-    // two-handed shooting of a service pistol is measured (5 to 10 degrees); the arms give some 3 cm. Neither the climb
+    // shot (about 3 N·s) snaps up some 8 degrees (two-handed shooting of a service pistol is measured at 5 to 10),
+    // highest at about 36 ms, and comes straight back, under 1.5 degrees at 150 ms: critically damped, never swinging
+    // past (at 2 Hz and 0.8 it rose over 80 ms and looked acted). The arms give some 2 cm, as fast. Neither the climb
     // nor the slide back is drawn larger (RecoilRiseScale, RecoilTravelScale): this is already the pistol as it moves.
     internal static bool Pistol => _pistol;
     private static bool _pistol;
     private static readonly double[] _pq = new double[3], _pqd = new double[3];
     private const double PistolBoreOverWrist = 0.07;   // m
-    private const double PistolInertia = 0.05;          // kg·m², gun, hands and forearms about the wrists
-    private const double PistolPitchHz = 2.0, PistolPitchDamping = 0.8;
-    private const double PistolYawHz = 2.8, PistolYawDamping = 0.8;
+    private const double PistolInertia = 0.022;         // kg·m², gun and hands about the wrists
+    private const double PistolPitchHz = 4.5, PistolPitchDamping = 1.0;
+    private const double PistolYawHz = 6.0, PistolYawDamping = 1.0;
     private const double PistolArmMass = 2.0;           // kg, gun and forearms along the arms
-    private const double PistolBackHz = 3.0, PistolBackDamping = 0.9;
+    private const double PistolBackHz = 5.0, PistolBackDamping = 1.0;
+    // The slide's run back and home, whatever the game's fire rate (a pistol's is set low, which spread the slide's two
+    // knocks 60 and 170 ms after the shot: two phantom shots).
+    private const double PistolCycle = 0.04;
+    // A rifle's carrier likewise runs back and home within this, even at a low fire rate (a semi-automatic's).
+    private const double MaxCarrierCycle = 0.08;
     // The hold's scatter, as torque impulse per unit of the shot's: a fraction of the climb's lever.
     private const double PistolScatterPitch = 0.15 * PistolBoreOverWrist, PistolScatterYaw = 0.12 * PistolBoreOverWrist;
     internal static bool Resting => _resting;
@@ -217,7 +223,7 @@ internal static class RealRecoil
         impulse *= 1.0 - taken;
         double climbTaken = Math.Max(0.0, Math.Min(MaxClimbTaken, _climbTaken));
 
-        double cycle = 60.0 / Math.Max(300, weapon.FireRate);
+        double cycle = _pistol ? PistolCycle : Math.Min(MaxCarrierCycle, 60.0 / Math.Max(300, weapon.FireRate));
         // Two shots inside one frame (a fast gun at a low frame rate) are a cycle apart, not on top of each other. A
         // shot is never put behind the model's clock: the game can fire on a clock that lags the frame's (a fixed
         // step), and a push that started in the past would lose the gas and keep only the carrier's forward slam.
