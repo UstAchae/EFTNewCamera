@@ -675,7 +675,7 @@ internal static class AimArms
             * Quaternion.AngleAxis(-RealRecoil.GunYawLeft * Mathf.Rad2Deg, cameraRotation * Vector3.up)
             * Quaternion.AngleAxis(-RealRecoil.GunPitch * Mathf.Rad2Deg, cameraRotation * Vector3.right);
         // Sliding back along the line of sight hardly shows from the eye (8 mm is a few pixels), so the slide is drawn
-        // larger: along the bore only, the muzzle's direction (and the bullet's) unchanged.
+        // larger: a move back along the line of sight only, the muzzle's direction (and the bullet's) unchanged.
         Vector3 back = -(cameraRotation * Vector3.forward) * (RealRecoil.GunBack * RecoilTravelScale);
         Vector3 recoilPivot = cameraPosition - cameraRotation * new Vector3(0f, PocketBelowEye, PocketBehindEye);
         displacement = recoilPivot + kick * (pivot + displacement - recoilPivot) - pivot + back;
