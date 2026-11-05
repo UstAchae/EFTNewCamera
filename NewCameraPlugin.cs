@@ -15,7 +15,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "justachae.thirdpersoncamera";
     public const string PluginName = "Justachae's Third-Person Skeleton and Camera";
-    public const string PluginVersion = "1.4.2";
+    public const string PluginVersion = "1.4.3";
 
     internal static BepInEx.Logging.ManualLogSource? Log;
     private const string SkeletonThird = "第三人称骨架", SkeletonFirst = "第一人称骨架";
@@ -315,6 +315,11 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         ConfigEntry<float> forward = BindMeters("镜头位置", "前后", 0.13f, "沿镜头前方向移动，单位为米。");
         ConfigEntry<bool> aimEye = Config.Bind("镜头位置", "瞄准时移到瞄准眼", true,
             "开镜时，镜头的水平位置平滑移到瞄准用的那只眼：右肩时到右眼，换到左肩时到左眼，枪跟着一起过去；胸口抵肩时镜头不动，枪的姿势仍按移到那只眼时摆；退出瞄准时回到上面设的水平位置。");
+        ConfigEntry<float> near = Config.Bind("镜头位置", "近裁剪面（米）", 0.01f,
+            new ConfigDescription("离镜头比这个距离还近的东西不画。游戏在地图里是 0.03 米（藏身处 0.01 米），镜头挂在头上、贴着头盔帽檐，帽檐靠近镜头的一截会被切掉，从切口透出后面的景物。调小可以把更近的东西也画出来。不会比游戏原来的距离更远。",
+                new AcceptableValueRange<float>(0.005f, 0.03f)));
+        near.SettingChanged += (_, _) => CameraNear.Near = near.Value;
+        CameraNear.Near = near.Value;
         ConfigEntry<float> eye = Config.Bind("镜头位置", "瞄准眼离中线（米）", 0.03f,
             new ConfigDescription("开镜时镜头离头部中线多远：右眼是正值这么远，左眼是负值这么远。", new AcceptableValueRange<float>(0f, 0.06f)));
         void Refresh()
@@ -567,6 +572,7 @@ internal static class NewCameraSwitch
             VestibularView.Reset();
         }
         ChooseSkeleton(player);
+        CameraNear.Apply();
         ChestStance.Update(player);
         CameraPosition.UpdateAimEye(player);
         AimArms.Apply(player);
@@ -598,6 +604,7 @@ internal static class NewCameraSwitch
     private static void ReleaseAll(Player? player)
     {
         CameraPosition.ResetAimEye();
+        CameraNear.Release();
         NightVisionEyepieces.Release();
         CollimatorHandoff.Release();
         OpticPicture.Release(player);
