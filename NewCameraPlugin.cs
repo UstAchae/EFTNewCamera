@@ -15,7 +15,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "justachae.thirdpersoncamera";
     public const string PluginName = "Justachae's Third-Person Skeleton and Camera";
-    public const string PluginVersion = "1.4.5";
+    public const string PluginVersion = "1.4.6";
 
     internal static BepInEx.Logging.ManualLogSource? Log;
     private const string SkeletonThird = "第三人称骨架", SkeletonFirst = "第一人称骨架";
@@ -350,6 +350,11 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
             "瞄准时按住，瞄准的前后距离慢慢变大，枪离镜头更远。不瞄准时这个键不起作用（腰射时同样的键调夜视仪挂架）。");
         _aimDistanceCloser = SettingsLayout.Bind(Config, "瞄准", "前后距离调近快捷键", new KeyboardShortcut(KeyCode.Minus),
             "瞄准时按住，瞄准的前后距离慢慢变小，枪离镜头更近。不瞄准时这个键不起作用（腰射时同样的键调夜视仪挂架）。");
+        ConfigEntry<float> pocket = SettingsLayout.Bind(Config, "瞄准", "肩窝硬度", 0.2f,
+            new ConfigDescription("物理后坐力：枪托在肩窝里被顶住的硬度，管开枪时枪往后坐多少、在肩窝里翻多少，身体其他部分不受影响。1 是最硬，一发 5.56 枪只往后坐约 5 毫米；0.2 约 8 毫米；越小后坐越明显，回正的快慢差不多，调到 0.1 附近会略微往前过一点再回来。",
+                new AcceptableValueRange<float>(0.1f, 1f)));
+        pocket.SettingChanged += (_, _) => RealRecoil.PocketStiffness = pocket.Value;
+        RealRecoil.PocketStiffness = pocket.Value;
         _aimDistance.SettingChanged += (_, _) => AimArms.ForwardDistance = _aimDistance.Value;
         AimArms.ForwardDistance = _aimDistance.Value;
     }

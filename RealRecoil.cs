@@ -117,6 +117,23 @@ internal static class RealRecoil
     private static double _lastShot = -10.0;
     private static int _burst;
     private static bool _built;
+
+    // How stiff the shoulder pocket holds the gun, back and in pitch, against the body around it (1 the body's own
+    // stiffness, 2.5x the measured). Its damping goes with the square root, so it settles the same way, without a
+    // bounce, only further: a 5.56 shot slides the gun back 4.7 mm at 1, 8.1 mm at 0.2.
+    private static double _pocketStiffness = 0.2;
+    internal static float PocketStiffness
+    {
+        get => (float)_pocketStiffness;
+        set
+        {
+            double v = Math.Max(0.05, Math.Min(1.0, value));
+            if (Math.Abs(v - _pocketStiffness) < 1e-6)
+                return;
+            _pocketStiffness = v;
+            _built = false;
+        }
+    }
     private static bool _resting = true;
 
     // The weapon the model was built for, and what it took from it.
@@ -344,6 +361,11 @@ internal static class RealRecoil
         // The stock's softening, and the hands taking the gun when nothing rests on the shoulder.
         // The pistol grip pulls the stock into the pocket: a firmer spring there.
         k[2] *= _pocketFirm;
+        double pocket = _pocketStiffness, pocketDamping = Math.Sqrt(_pocketStiffness);
+        k[2] *= pocket;
+        d[2] *= pocketDamping;
+        k[3] *= pocket;
+        d[3] *= pocketDamping;
         double soft = _stockSoft;
         d[2] *= 1.0 + 2.0 * soft;
         d[3] *= 1.0 + soft;
