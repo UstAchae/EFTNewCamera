@@ -1,6 +1,7 @@
 using System.Reflection;
 using EFT;
 using EFT.Animations;
+using EFT.Animations.NewRecoil;
 using HarmonyLib;
 
 namespace EFTNewCamera;
@@ -67,6 +68,8 @@ internal static class AimPatches
             prefix: Hook(typeof(RealRecoil), nameof(RealRecoil.ProcessPrefix)));
         Patch(harmony, AccessTools.Method(typeof(ShotEffector), nameof(ShotEffector.OnWeaponParametersChanged)),
             postfix: Hook(typeof(RealRecoil), nameof(RealRecoil.WeaponChanged)));
+        Patch(harmony, AccessTools.Method(typeof(NewRecoilShotEffect), nameof(NewRecoilShotEffect.RecalculateRecoilParamsOnChangeWeapon)),
+            postfix: Hook(typeof(RecoilMode), nameof(RecoilMode.RecalculatePostfix), Priority.First));
     }
 
     private static HarmonyMethod Hook(System.Type owner, string name, int priority = -1)

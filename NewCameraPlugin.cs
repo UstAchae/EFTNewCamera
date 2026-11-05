@@ -11,6 +11,7 @@ namespace EFTNewCamera;
 
 [BepInPlugin(PluginGuid, PluginName, PluginVersion)]
 [BepInDependency("com.borkel.nvgmasks", BepInDependency.DependencyFlags.SoftDependency)]   // BRNVG makes the eyepiece picture
+[BepInDependency("com.pein.camerarecoilmod", BepInDependency.DependencyFlags.SoftDependency)]   // SPTRecoilReworkLegacy, switched by RecoilMode
 public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "justachae.thirdpersoncamera";
@@ -41,7 +42,11 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         HideoutEscape.Install();
         NewCameraSwitch.Enabled = enabled.Value;
         NewCameraSwitch.FirstPersonSkeleton = skeleton.Value == SkeletonFirst;
-        enabled.SettingChanged += (_, _) => NewCameraSwitch.Enabled = enabled.Value;
+        enabled.SettingChanged += (_, _) =>
+        {
+            NewCameraSwitch.Enabled = enabled.Value;
+            RecoilMode.Refresh();
+        };
         skeleton.SettingChanged += (_, _) => NewCameraSwitch.FirstPersonSkeleton = skeleton.Value == SkeletonFirst;
         BindFisheye();
         BindDirection();
@@ -347,6 +352,12 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 
     private void BindAimDistance()
     {
+        RecoilMode.Find();
+        ConfigEntry<string> recoil = SettingsLayout.Bind(Config, "瞄准", "后坐力", RecoilMode.Physical,
+            new ConfigDescription("开枪时用谁的后坐力。物理后坐力：本 mod 的，按子弹和火药的冲量推动身体的弹簧和阻尼（腰、肩窝、头；手枪是手腕和手臂），下面三项只管它。原版：游戏自己的后坐力。Recoil Rework：别人的后坐力 mod SPTRecoilReworkLegacy，装了它才有这一项；不选它时它的改动全部撤下，选它时再装回去。它的服务端部分改了一些枪的后坐数值，那部分在这里关不掉，选“原版”时也带着。局内可以随时切换；切到或切离 Recoil Rework 后，换一次枪才完全生效。",
+                new AcceptableValueList<string>(RecoilMode.Choices)));
+        recoil.SettingChanged += (_, _) => RecoilMode.Set(recoil.Value);
+        RecoilMode.Set(recoil.Value);
         _aimDistance = SettingsLayout.Bind(Config, "瞄准", "前后距离", -0.05f,
             new ConfigDescription("瞄准后沿镜头前方向移动枪，单位为米。负值让枪离镜头更近。",
                 new AcceptableValueRange<float>(AimDistanceMin, AimDistanceMax)));
