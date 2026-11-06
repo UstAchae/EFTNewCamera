@@ -215,13 +215,19 @@ internal static partial class NightVisionEyepieces
         Vector3 placeB = FromCamera(_lensNodes[CentreLensB], position).GetColumn(3);
         float a = Vector3.Dot(placeA, right);
         float b = Vector3.Dot(placeB, right);
-        // The device's own left to right, across the view: the line from one centre lens to the other. Leaning, or the
-        // balance turning the view about its line of sight (VestibularView's torsion), turns the view against the head;
-        // the eyes, in the head, stay along the device, and the two views meet along the line square to it.
-        Vector3 across = Vector3.ProjectOnPlane(a <= b ? placeB - placeA : placeA - placeB, forward);
+        // The device's own left to right: the line from one centre lens to the other, as it stands, not as the view is
+        // turned. The balance (VestibularView) turns the view against the head as one walks and looks about, and leaning
+        // rolls it; the eyes turn in place in the head and do not move in it, so each stays the same way along the device
+        // whatever the view does (worked out along the view's right, the eyes swung about the camera with every turn of
+        // the head, one of them right up to its eyecup). The device's up, square to that line and to the lenses' axis,
+        // gives how the device is rolled in the view: the two views meet along it.
+        Vector3 across = a <= b ? placeB - placeA : placeA - placeB;
         if (across.sqrMagnitude < 1e-8f)
             across = right;
         across.Normalize();
+        Vector3 deviceUp = Vector3.Cross(_lensNodes[CentreLensA].forward + _lensNodes[CentreLensB].forward, across);
+        if (Vector3.Dot(deviceUp, up) < 0f)
+            deviceUp = -deviceUp;
         // A monocular is before one eye only: that eye's view covers the whole frame, the further over the further it
         // moves to the eyepiece, and over the other eye's half the device fades out toward the edge, that eye seeing past it.
         int monocular = _device.Monocular && BinocularOn ? (a >= 0f ? 1 : 0) : -1;
@@ -247,8 +253,10 @@ internal static partial class NightVisionEyepieces
         Vector2 middle = monocular >= 0 ? new Vector2(0.5f, 0.5f)
             : 0.5f * (ScreenAt(camera, position, leftShift, leftLens) + ScreenAt(camera, position, rightShift, rightLens));
         middle.x = Mathf.Clamp(middle.x, 0.2f, 0.8f);
-        Vector2 slant = new Vector2(Vector3.Dot(across, right), Vector3.Dot(across, up));
-        if (monocular >= 0 || slant.x < 0.2f)
+        // Square to the device's up as seen (only its roll about the line of sight: looking off to the side or up and
+        // down leaves the line upright), toward the right eye.
+        Vector2 slant = new Vector2(Vector3.Dot(deviceUp, up), -Vector3.Dot(deviceUp, right));
+        if (monocular >= 0 || slant.sqrMagnitude < 1e-8f || slant.normalized.x < 0.2f)
             slant = new Vector2(1f, 0f);
         slant.Normalize();
         float aspect = Mathf.Max(camera.aspect, 0.01f);
