@@ -37,27 +37,16 @@ internal static class FirstPersonAudio
 
         string[] playerAudioMethods =
         {
-            "method_31",
             nameof(Player.PlaySpeechFromTime),
             nameof(Player.UpdateMuffledState),
-            "method_34",
-            "method_40",
             nameof(Player.CreateNestedSource),
             nameof(Player.CreateSpeechSource),
             nameof(Player.CreateGearSource),
-            "method_43",
-            "method_44",
-            "method_46",
             nameof(Player.PlayInteractionSound),
             nameof(Player.StopInteractionSound),
-            "method_55",
             nameof(Player.DefaultPlay),
             nameof(Player.PlayStepSound),
-            "method_61",
             nameof(Player.PlaySoundBank),
-            "method_64",
-            "method_67",
-            "method_80",
             nameof(Player.SpawnInHands)
         };
 
@@ -69,13 +58,14 @@ internal static class FirstPersonAudio
         {
             MethodInfo? target = AccessTools.Method(typeof(Player), methodName);
             if (target == null)
+            {
+                NewCameraPlugin.Log?.LogWarning($"First-person audio: Player.{methodName} not found; its sounds stay as the game has them.");
                 continue;
+            }
 
             harmony.Patch(target, transpiler: new HarmonyMethod(transpiler));
         }
 
-        PatchIterator(harmony, "method_71", transpiler);
-        PatchIterator(harmony, "method_73", transpiler);
         _installed = true;
     }
 
@@ -129,15 +119,5 @@ internal static class FirstPersonAudio
     private static bool ShouldUseFirstPersonAudio(Player? player)
     {
         return player != null && player.IsYourPlayer && NewCameraSwitch.Enabled;
-    }
-
-    private static void PatchIterator(Harmony harmony, string methodName, MethodInfo transpiler)
-    {
-        MethodInfo? iteratorFactory = AccessTools.Method(typeof(Player), methodName);
-        MethodInfo? moveNext = iteratorFactory == null ? null : AccessTools.EnumeratorMoveNext(iteratorFactory);
-        if (moveNext == null)
-            return;
-
-        harmony.Patch(moveNext, transpiler: new HarmonyMethod(transpiler));
     }
 }
