@@ -35,6 +35,60 @@ internal static partial class NightVisionEyepieces
     private static Material? _stencilMark;
     private static bool _precise;
 
+    // Kept between frames, so that a frame allocates nothing: the roots, the renderers under them, and for each renderer
+    // what does not change while it is worn (its mesh, whether it is the finest level, its materials' G-buffer passes),
+    // worked out again only when its materials do change.
+    private struct PieceSource
+    {
+        internal MeshFilter? Filter;
+        internal bool Finest;
+        internal Material[] Materials;
+        internal int[] Passes;
+        internal bool Any;
+    }
+
+    private static readonly EFT.InventoryLogic.EquipmentSlot[] HeadwearSlots =
+        { EFT.InventoryLogic.EquipmentSlot.Headwear, EFT.InventoryLogic.EquipmentSlot.FaceCover, EFT.InventoryLogic.EquipmentSlot.Eyewear };
+    private static readonly List<Transform> _roots = new List<Transform>();
+    private static readonly List<MeshRenderer> _rootRenderers = new List<MeshRenderer>();
+    private static readonly List<Material> _materialsNow = new List<Material>();
+    private static readonly Dictionary<MeshRenderer, PieceSource> _pieceSources = new Dictionary<MeshRenderer, PieceSource>();
+
+    private static PieceSource SourceOf(MeshRenderer r)
+    {
+        r.GetSharedMaterials(_materialsNow);
+        if (_pieceSources.TryGetValue(r, out PieceSource known) && SameMaterials(known.Materials, _materialsNow))
+            return known;
+        if (_pieceSources.Count > 512)
+            _pieceSources.Clear();   // renderers of headwear long taken off
+        var source = new PieceSource
+        {
+            Filter = r.TryGetComponent(out MeshFilter filter) ? filter : null,
+            Finest = FinestLevel(r),
+            Materials = _materialsNow.ToArray(),
+        };
+        source.Passes = new int[source.Materials.Length];
+        for (int i = 0; i < source.Materials.Length; i++)
+        {
+            source.Passes[i] = GBufferPass(source.Materials[i]);
+            source.Any |= source.Passes[i] >= 0;
+        }
+        _pieceSources[r] = source;
+        return source;
+    }
+
+    private static bool SameMaterials(Material[] known, List<Material> now)
+    {
+        if (known.Length != now.Count)
+            return false;
+        for (int i = 0; i < known.Length; i++)
+        {
+            if (!ReferenceEquals(known[i], now[i]))
+                return false;
+        }
+        return true;
+    }
+
     // The headwear and the device as they stand from the camera this frame; false (the eyes draw them as the game
     // keeps them) away from the player's eyes, where the camera's place from the head is not known.
     private static bool PrepareRelative(Camera camera)
@@ -46,11 +100,12 @@ internal static partial class NightVisionEyepieces
         if (head == null || !NewCameraSwitch.AtEyes(camera) || _stencilMarkShader == null)
             return false;
 
-        var roots = new List<Transform>();
+        List<Transform> roots = _roots;
+        roots.Clear();
         EFT.PlayerBody? body = Comfort.Common.Singleton<EFT.GameWorld>.Instance?.MainPlayer?.PlayerBody;
         if (body != null)
         {
-            foreach (EFT.InventoryLogic.EquipmentSlot slot in new[] { EFT.InventoryLogic.EquipmentSlot.Headwear, EFT.InventoryLogic.EquipmentSlot.FaceCover, EFT.InventoryLogic.EquipmentSlot.Eyewear })
+            foreach (EFT.InventoryLogic.EquipmentSlot slot in HeadwearSlots)
             {
                 if (body.SlotViews.TryGetByKey(slot, out EFT.PlayerBody.SlotView? slotView) && slotView?.Model != null)
                     roots.Add(slotView.Model.transform);
@@ -75,27 +130,20 @@ internal static partial class NightVisionEyepieces
 
         foreach (KeyValuePair<Transform, Matrix4x4> root in _rootsFromCamera)
         {
-            foreach (MeshRenderer r in root.Key.GetComponentsInChildren<MeshRenderer>(false))
+            root.Key.GetComponentsInChildren(false, _rootRenderers);
+            foreach (MeshRenderer r in _rootRenderers)
             {
                 // Left to its shadow alone: headwear the player hides (BodyVisibility); not the device, left to its
                 // shadow only while the main camera draws (ShowDevice).
                 bool hidden = r.shadowCastingMode == ShadowCastingMode.ShadowsOnly && System.Array.IndexOf(DeviceRenderers(), r) < 0;
-                if (!r.enabled || hidden || !FinestLevel(r)
-                    || !r.TryGetComponent(out MeshFilter filter) || filter.sharedMesh == null)
+                if (!r.enabled || hidden)
                     continue;
-                Material[] materials = r.sharedMaterials;
-                var passes = new int[materials.Length];
-                bool any = false;
-                for (int i = 0; i < materials.Length; i++)
-                {
-                    passes[i] = GBufferPass(materials[i]);
-                    any |= passes[i] >= 0;
-                }
-                if (!any)
+                PieceSource source = SourceOf(r);
+                if (!source.Finest || !source.Any || source.Filter == null || source.Filter.sharedMesh == null)
                     continue;
                 _headwearPieces.Add(new HeadwearPiece
                 {
-                    Renderer = r, Mesh = filter.sharedMesh, Materials = materials, Passes = passes,
+                    Renderer = r, Mesh = source.Filter.sharedMesh, Materials = source.Materials, Passes = source.Passes,
                     FromCamera = root.Value * Chain(root.Key, r.transform),
                 });
             }
