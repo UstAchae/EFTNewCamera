@@ -74,8 +74,11 @@ internal static class SettingsLayout
             return config.Bind(section, key, defaultValue, description);
         }
         TakeOver(config, new ConfigDefinition(section, key), new ConfigDefinition(place.Section, key));
+        // The layout's order; whether it is shown at all as the caller has it.
+        bool? browsable = description.Tags is object[] tags && System.Array.Find(tags, t => t is ConfigurationManagerAttributes) is ConfigurationManagerAttributes given
+            ? given.Browsable : null;
         return config.Bind(place.Section, key, defaultValue,
-            new ConfigDescription(description.Description, description.AcceptableValues, new ConfigurationManagerAttributes { Order = place.Order }));
+            new ConfigDescription(description.Description, description.AcceptableValues, new ConfigurationManagerAttributes { Order = place.Order, Browsable = browsable }));
     }
 
     // The F12 window lists the groups in the order their first setting was bound, not by name: once everything is
