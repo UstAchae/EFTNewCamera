@@ -10,7 +10,9 @@ float4 _TubeField;                // x cosine of the field's half angle, y of wh
 float4 _Power;                    // z frame
 float4 _TubePower, _TubeMottle;   // each tube's output (0 off, 1 on), and how mottled while it settles
 float _Overscan;                  // how far past the split each eye's view reaches, as a share of the frame
-float _Split;                     // where across the frame the left eye's view gives way to the right's (0.5 with the camera between the eyes)
+float4 _SplitLine;                // where the left eye's view gives way to the right's: xy a point of the line in the frame (0..1),
+                                  // zw its normal toward the right eye, in the frame's units (x across; y up over the aspect):
+                                  // square to the device's left to right, so slanted when the view is turned against the head
 float4 _EyeSpan;                  // x the left eye's view's share of the frame's width, y the right's (1: the whole frame)
 float4 _Monocular;                // x 1 for a monocular, whose one eye (y: 0 left, 1 right) sees the whole frame; the other half fades toward its edge, z as this power (0 not at all)
 float4 _Lamp;                     // x the lenses' brightness, y the glow's, z the eyepieces' distortion, w the field angle it is given at (rad)
@@ -72,12 +74,12 @@ void eyeSide (float2 uv, bool right, out float4 eye, out float4 light, out float
  cover = smoothstep(0, 0.02, dot(lens, 1));
 }
 
-// This pixel's eye: the left eye's on the left half, the right eye's on the right, eased from one to the other across
-// the strip in the middle that both views reach, so the two eyes' slightly different views leave no crease there.
+// This pixel's eye: the left eye's left of the split line, the right eye's right of it, eased from one to the other
+// across the strip along the line that both views reach, so the two eyes' slightly different views leave no crease there.
 // A monocular's one eye everywhere, fading over the other eye's half: that eye sees past the device, and the two
 // views are seen as one, the device the fainter the further out toward that eye's edge.
 void eyeAt (float2 uv, out float4 eye, out float4 light, out float cover) {
- float toRight = smoothstep(_Split - _Overscan * 0.5, _Split + _Overscan * 0.5, uv.x);
+ float toRight = smoothstep(-_Overscan * 0.5, _Overscan * 0.5, dot(uv - _SplitLine.xy, _SplitLine.zw));
  if (_Monocular.x > 0.5) {
   bool right = _Monocular.y > 0.5;
   eyeSide(uv, right, eye, light, cover);
