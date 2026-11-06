@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using System.Reflection.Emit;
 using EFT;
@@ -19,6 +20,9 @@ internal static class FirstPersonAudio
 
     private static readonly MethodInfo EffectiveFirstPersonMethod =
         AccessTools.Method(typeof(FirstPersonAudio), nameof(IsEffectiveFirstPerson));
+
+    private static readonly MethodInfo ProceduralWeaponAnimationGetter =
+        AccessTools.PropertyGetter(typeof(Player), nameof(Player.ProceduralWeaponAnimation));
 
     private static bool _installed;
 
@@ -47,7 +51,18 @@ internal static class FirstPersonAudio
             nameof(Player.DefaultPlay),
             nameof(Player.PlayStepSound),
             nameof(Player.PlaySoundBank),
-            nameof(Player.SpawnInHands)
+            nameof(Player.SpawnInHands),
+            // Named in the game since its obfuscated names (method_31..method_80) went: each read of the point of view in
+            // these only sets up a sound (volume, rolloff, mixer, EQ, occlusion, spatialisation, prewarming).
+            nameof(Player.GetSearchSource),
+            nameof(Player.StateChangedHandler),
+            nameof(Player.CalculateMovementVolumeDefaultMultiplier),
+            nameof(Player.CalculateMovementRolloff),
+            nameof(Player.ProcessPlayPrewarmSound),
+            nameof(Player.PlayPrewarmSound),
+            nameof(Player.SetupSoundsFromFaceShieldComponent),
+            nameof(Player.OnHealthEffectAdded),
+            nameof(Player.InitSeasonStepLayerController)
         };
 
         MethodInfo? transpiler = AccessTools.Method(typeof(FirstPersonAudio), nameof(ReplacePlayerPointOfViewReads));
@@ -65,6 +80,17 @@ internal static class FirstPersonAudio
 
             harmony.Patch(target, transpiler: new HarmonyMethod(transpiler));
         }
+
+        MethodInfo? gearSound = AccessTools.Method(typeof(Player), nameof(Player.PlayGearSound), new[] { typeof(SoundBank), typeof(float) });
+        if (gearSound != null)
+            harmony.Patch(gearSound, transpiler: new HarmonyMethod(transpiler));
+        else
+            NewCameraPlugin.Log?.LogWarning("First-person audio: Player.PlayGearSound(SoundBank, float) not found; its sounds stay as the game has them.");
+
+        // Coroutines: the reads are in the state machine's MoveNext. The sprint's last read sets the first-person weapon's
+        // step frequency, not a sound, and keeps the game's point of view (SprintTranspiler).
+        PatchCoroutine(harmony, nameof(Player.SupportAudioSourceCoroutine), transpiler);
+        PatchCoroutine(harmony, nameof(Player.Sprint), AccessTools.Method(typeof(FirstPersonAudio), nameof(SprintTranspiler)));
 
         _installed = true;
     }
@@ -114,6 +140,47 @@ internal static class FirstPersonAudio
 
             yield return instruction;
         }
+    }
+
+    private static void PatchCoroutine(Harmony harmony, string methodName, MethodInfo? transpiler)
+    {
+        MethodInfo? factory = AccessTools.Method(typeof(Player), methodName);
+        MethodInfo? moveNext = factory == null ? null : AccessTools.EnumeratorMoveNext(factory);
+        if (moveNext == null || transpiler == null)
+        {
+            NewCameraPlugin.Log?.LogWarning($"First-person audio: Player.{methodName} coroutine not found; its sounds stay as the game has them.");
+            return;
+        }
+        harmony.Patch(moveNext, transpiler: new HarmonyMethod(transpiler));
+    }
+
+    // Player.Sprint: every read of the point of view is for the sprint's sounds, except the one guarding the weapon's
+    // step frequency (ProceduralWeaponAnimation.Walk), which is left as the game reads it.
+    private static IEnumerable<CodeInstruction> SprintTranspiler(IEnumerable<CodeInstruction> instructions)
+    {
+        List<CodeInstruction> list = instructions.ToList();
+        for (int i = 0; i < list.Count; i++)
+        {
+            CodeInstruction instruction = list[i];
+            bool pointOfView = instruction.Calls(PlayerPointOfViewGetter), firstPerson = instruction.Calls(PlayerFirstPersonGetter);
+            if (!pointOfView && !firstPerson)
+                continue;
+            bool forWeapon = false;
+            for (int j = i + 1; j < list.Count && j <= i + 8; j++)
+            {
+                if (list[j].Calls(ProceduralWeaponAnimationGetter))
+                {
+                    forWeapon = true;
+                    break;
+                }
+            }
+            if (forWeapon)
+                continue;
+            list[i] = new CodeInstruction(OpCodes.Call, pointOfView ? EffectivePointOfViewMethod : EffectiveFirstPersonMethod)
+                .MoveLabelsFrom(instruction)
+                .MoveBlocksFrom(instruction);
+        }
+        return list;
     }
 
     private static bool ShouldUseFirstPersonAudio(Player? player)
