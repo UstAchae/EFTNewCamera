@@ -167,8 +167,11 @@ internal static class ChestStance
             Weight = Mathf.Min(1f, Weight + Time.deltaTime / EnterSeconds);
     }
 
-    // The gun's own up, in its frame: the axis across its bore (its bore is its -Y) that most of its sights stand up
-    // along, a canted one being the odd one out. Found once a gun (and its set of sights).
+    // The gun's own up, in its frame: the axis across its bore (its bore is its -Y) that most of its sights sit above
+    // it along, a canted one (off to the side) being the odd one out. Taken from where the sights are, over the bore
+    // through the muzzle, not from how their bones are turned: the bones do not agree on it (an "aim_camera" bone's
+    // forward pointed up on one gun and down on another, which turned the gun over in the stance and lifted the
+    // arms over the shoulders). Found once a gun (and its set of sights).
     private static int _upWeapon = -1, _upSights = -1;
     private static Vector3 _upLocal = Vector3.forward;
     private static Transform? _uprightSight;
@@ -189,12 +192,18 @@ internal static class ChestStance
         var votes = new int[Across.Length];
         var first = new Transform?[Across.Length];
         int firstAxis = -1;
+        // The bore's line, across it: the muzzle's place in the gun's frame (else the gun's own origin).
+        Transform? muzzle = (Comfort.Common.Singleton<GameWorld>.Instance?.MainPlayer?.HandsController as Player.FirearmController)?.CurrentFireport?.Original;
+        Vector3 bore = muzzle != null ? weapon.InverseTransformPoint(muzzle.position) : Vector3.zero;
         for (int i = 0; i < count; i++)
         {
             Transform? bone = sights[i]?.Bone;
             if (bone == null)
                 continue;
-            Vector3 up = weapon.InverseTransformDirection(bone.name == "aim_camera" ? bone.forward : bone.up);
+            Vector3 place = weapon.InverseTransformPoint(bone.position);
+            Vector3 up = new Vector3(place.x - bore.x, 0f, place.z - bore.z);
+            if (up.sqrMagnitude < 0.0001f)   // within a centimetre of the bore's line: no side to it
+                continue;
             int best = 0;
             for (int a = 1; a < Across.Length; a++)
                 if (Vector3.Dot(up, Across[a]) > Vector3.Dot(up, Across[best]))
@@ -206,12 +215,13 @@ internal static class ChestStance
             if (firstAxis < 0)
                 firstAxis = best;
         }
+        // No sight clearly over the bore: the gun's usual up (forward in its frame) is kept.
+        if (firstAxis < 0)
+            return;
         int pick = firstAxis;
         for (int a = 0; a < Across.Length; a++)
-            if (pick < 0 || votes[a] > votes[pick])
+            if (votes[a] > votes[pick])
                 pick = a;
-        if (pick < 0)
-            return;
         _upLocal = Across[pick];
         _uprightSight = first[pick];
     }
