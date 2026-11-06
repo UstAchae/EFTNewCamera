@@ -16,6 +16,8 @@ internal static class LimbIk
         internal float UpperLength;
         internal float LowerLength;
         internal Vector3 Bend;
+        internal Vector3 Root;        // where the shoulder (hip) and the hand (foot) were as the animation left them
+        internal Vector3 Start;
         internal Vector3 TargetPosition;
         internal Quaternion TargetRotation;
         internal bool Leg;
@@ -93,6 +95,8 @@ internal static class LimbIk
             UpperLength = Vector3.Distance(upper.position, lower.position),
             LowerLength = Vector3.Distance(lower.position, end.position),
             Bend = lower.position,
+            Root = upper.position,
+            Start = end.position,
             TargetPosition = position,
             TargetRotation = rotation,
             Leg = leg
@@ -109,8 +113,11 @@ internal static class LimbIk
         return false;
     }
 
-    // Bend each limb so its end reaches the target pose (two-bone IK by the law of cosines). An elbow keeps to
-    // the side it was on, moved by armMove; a knee likewise, moved by legMove (the hips).
+    // Bend each limb so its end reaches the target pose (two-bone IK by the law of cosines). An elbow keeps the side of
+    // the arm it was on in the animation: that side swung with the arm, from the shoulder-to-hand line as animated to
+    // the one to the target, but not rolled with the gun about its line of sight. Carried with the gun instead, the
+    // stance at the chest (the gun lower, canted 30 degrees) put it above the arm and the elbow went up to the shoulder.
+    // A knee keeps to the side it was on, moved by legMove (the hips).
     internal static void Reach(System.Func<Vector3, Vector3> armMove, System.Func<Vector3, Vector3>? legMove = null)
     {
         foreach (Limb limb in Limbs)
@@ -125,7 +132,9 @@ internal static class LimbIk
                 continue;
             Vector3 along = toEnd / reach;
             float distance = Mathf.Clamp(reach, Mathf.Abs(limb.UpperLength - limb.LowerLength) + 0.001f, limb.UpperLength + limb.LowerLength - 0.001f);
-            Vector3 side = Vector3.ProjectOnPlane((limb.Leg && legMove != null ? legMove : armMove)(limb.Bend) - root, along);
+            Vector3 side = limb.Leg ? Vector3.ProjectOnPlane((legMove ?? armMove)(limb.Bend) - root, along) : ElbowSide(limb, along);
+            if (side.sqrMagnitude < 0.00000001f && !limb.Leg)
+                side = Vector3.ProjectOnPlane(armMove(limb.Bend) - root, along);
             if (side.sqrMagnitude < 0.00000001f)
                 side = Vector3.ProjectOnPlane(limb.Lower.position - root, along);
             if (side.sqrMagnitude < 0.00000001f)
@@ -140,5 +149,15 @@ internal static class LimbIk
             limb.End.SetPositionAndRotation(limb.TargetPosition, limb.TargetRotation);
         }
         Limbs.Clear();
+    }
+
+    // The elbow's side of the arm as animated, swung from the arm's animated direction to the one it reaches along.
+    private static Vector3 ElbowSide(Limb limb, Vector3 along)
+    {
+        Vector3 animated = limb.Start - limb.Root;
+        if (animated.sqrMagnitude < 0.000001f)
+            return Vector3.zero;
+        Vector3 side = Vector3.ProjectOnPlane(limb.Bend - limb.Root, animated);
+        return Vector3.ProjectOnPlane(Quaternion.FromToRotation(animated, along) * side, along);
     }
 }
