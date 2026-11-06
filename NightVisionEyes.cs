@@ -54,7 +54,7 @@ internal static partial class NightVisionEyepieces
     private static readonly int EyeId = Shader.PropertyToID("_Eye");
     private static readonly int OverscanId = Shader.PropertyToID("_Overscan");
     private static readonly int MonocularId = Shader.PropertyToID("_Monocular");
-    private static readonly int SplitLineId = Shader.PropertyToID("_SplitLine");
+    private static readonly int SplitId = Shader.PropertyToID("_Split");
     private static readonly int EyeSpanId = Shader.PropertyToID("_EyeSpan");
     private static readonly int LensClearId = Shader.PropertyToID("_LensClear");
     private static readonly int OpticsId = Shader.PropertyToID("_Optics");
@@ -211,10 +211,8 @@ internal static partial class NightVisionEyepieces
     private static void RenderEyes(Camera camera, Material binocular, Transform view, Vector3 position)
     {
         Vector3 right = view.right;
-        Vector3 placeA = FromCamera(_lensNodes[CentreLensA], position).GetColumn(3);
-        Vector3 placeB = FromCamera(_lensNodes[CentreLensB], position).GetColumn(3);
-        float a = Vector3.Dot(placeA, right);
-        float b = Vector3.Dot(placeB, right);
+        float a = Vector3.Dot(FromCamera(_lensNodes[CentreLensA], position).GetColumn(3), right);
+        float b = Vector3.Dot(FromCamera(_lensNodes[CentreLensB], position).GetColumn(3), right);
         // A monocular is before one eye only: that eye's view covers the whole frame, the further over the further it
         // moves to the eyepiece, and over the other eye's half the device fades out toward the edge, that eye seeing past it.
         int monocular = _device.Monocular && BinocularOn ? (a >= 0f ? 1 : 0) : -1;
@@ -224,23 +222,19 @@ internal static partial class NightVisionEyepieces
         binocular.SetVector(MonocularId, new Vector4(monocular >= 0 ? 1f : 0f, monocular, fade, 0f));
         binocular.SetFloat(LensClearId, LensReflections ? 0f : 1f);
         _eyesFrame = Time.frameCount;
-        // The eyes where they are in the head: each the set distance from the head's middle (CameraPosition.AimEye, the
-        // same eye the camera goes over to when aiming), along the head's own left to right, not the view's (the balance
-        // turns the view against the head as one walks; the eyes turn in place and do not move in it) and not the
-        // device's (nothing of where the two views meet comes from the device). From the camera, wherever it stands from
-        // the head's middle (CameraPosition.Horizontal), and coming apart as the device comes down (_split). They stay
-        // back of the camera when it has come forward to a sight (NightVisionScope.cs).
-        Transform? head = NewCameraSwitch.PoseHead;
-        Vector3 headRight = head != null ? CameraDirection.Resolve(head.rotation) * Vector3.right : right;
+        // Each eye the set share of the way from the camera to its lens: the camera gone over to the aiming eye
+        // (CameraPosition) is that eye, its eyepiece straight ahead in the middle of the frame, the other off to its
+        // side. They stay back of the camera when it has come forward to a sight (NightVisionScope.cs).
         Vector3 back = view.forward * ScopePullback;
-        Vector3 EyeShiftOf(float fromMiddle) => headRight * ((fromMiddle - CameraPosition.Horizontal) * _split) - back;
-        Vector3 leftShift = EyeShiftOf(-CameraPosition.AimEye), rightShift = EyeShiftOf(CameraPosition.AimEye);
+        Vector3 EyeShiftOf(float lens) => right * (lens * EyeShift * _split) - back;
+        Vector3 leftShift = EyeShiftOf(a <= b ? a : b), rightShift = EyeShiftOf(a <= b ? b : a);
         Transform leftLens = _lensNodes[a <= b ? CentreLensA : CentreLensB], rightLens = _lensNodes[a <= b ? CentreLensB : CentreLensA];
-        // The two views meet down the middle of the frame, where the camera looks: upright, and not moved over when
-        // aiming takes the camera to the aiming eye.
-        float leftSpan = monocular >= 0 ? 1f : HeldSpan(0, 0.5f + 0.5f * Overscan);
-        float rightSpan = monocular >= 0 ? 1f : HeldSpan(1, 0.5f + 0.5f * Overscan);
-        binocular.SetVector(SplitLineId, new Vector4(0.5f, 0.5f, 1f, 0f));
+        // The two views meet halfway between where each eye sees its own eyepiece, not at the frame's middle: with the
+        // camera over at one eye, its eyepiece is in the middle and the other's off to the side.
+        float split = monocular >= 0 ? 0.5f
+            : Mathf.Clamp(0.5f * (Across(camera, position, leftShift, leftLens) + Across(camera, position, rightShift, rightLens)), 0.2f, 0.8f);
+        float leftSpan = monocular >= 0 ? 1f : HeldSpan(0, split + 0.5f * Overscan), rightSpan = monocular >= 0 ? 1f : HeldSpan(1, 1f - split + 0.5f * Overscan);
+        binocular.SetFloat(SplitId, split);
         binocular.SetVector(EyeSpanId, new Vector4(leftSpan, rightSpan, 0f, 0f));
         for (int side = 0; side < 2; side++)
         {
@@ -261,6 +255,17 @@ internal static partial class NightVisionEyepieces
         if (needed > held || needed < held - 2f * SpanStep)
             held = _heldSpans[side] = Mathf.Min(1f, Mathf.Ceil(needed / SpanStep) * SpanStep);
         return held;
+    }
+
+    // Where across the frame (0 left, 1 right) an eye standing at shift from the camera sees a lens straight on.
+    private static float Across(Camera camera, Vector3 cameraPlace, Vector3 shift, Transform lens)
+    {
+        Vector3 to = (Vector3)FromCamera(lens, cameraPlace).GetColumn(3) - shift;
+        Transform view = camera.transform;
+        float z = Vector3.Dot(to, view.forward);
+        if (z <= 1e-4f)
+            return 0.5f;
+        return 0.5f + 0.5f * camera.projectionMatrix.m00 * Vector3.Dot(to, view.right) / z;
     }
 
     // Where a transform stands from the head along the world's axes, by the local offsets between them: up from each
