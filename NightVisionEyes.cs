@@ -15,6 +15,11 @@ namespace EFTNewCamera;
 // The device goes over the main camera's half; elsewhere the scene is the main camera's. The scene a few metres
 // off looks the same from either eye (they are centimetres apart), so the main camera's single picture of it
 // serves both. With one camera both eyes stay where it is.
+//
+// The eyes see only the layers the device and the headwear are on (EyeLayers): every camera works out its own shadow
+// maps, and with the whole scene in view each eye drew again every caster that could shadow its half metre (whole
+// buildings), 2.5 to 5 ms a frame measured. The shadows the player's own headwear, body and the device cast on it stay;
+// those the world would cast on the device are left out, which in play could not be told.
 internal static partial class NightVisionEyepieces
 {
     private const float EyeNear = 0.01f;          // the eyecups are a couple of centimetres away
@@ -280,6 +285,19 @@ internal static partial class NightVisionEyepieces
         return sharedTurn.MultiplyVector(offset);
     }
 
+    // The layers the device and the headwear are on, for the eyes (from lists already kept: nothing searched or made).
+    private static int EyeLayers()
+    {
+        int mask = 0;
+        foreach (Renderer r in DeviceRenderers())
+            if (r != null)
+                mask |= 1 << r.gameObject.layer;
+        foreach (HeadwearPiece piece in _headwearPieces)
+            if (piece.Renderer != null)
+                mask |= 1 << piece.Renderer.gameObject.layer;
+        return mask;
+    }
+
     // A transform's place and turn within an ancestor's frame, from the local offsets between them.
     private static Matrix4x4 Chain(Transform ancestor, Transform t)
     {
@@ -311,6 +329,7 @@ internal static partial class NightVisionEyepieces
         Matrix4x4 projection = crop * Matrix4x4.Perspective(main.fieldOfView, main.aspect, EyeNear, EyeFar);
 
         camera.CopyFrom(main);
+        camera.cullingMask = EyeLayers();
         camera.transform.position = position;
         camera.rect = new Rect(0f, 0f, 1f, 1f);
         camera.nearClipPlane = EyeNear;
