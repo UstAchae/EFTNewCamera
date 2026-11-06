@@ -17,10 +17,12 @@ namespace EFTNewCamera;
 // serves both. With one camera both eyes stay where it is.
 internal static partial class NightVisionEyepieces
 {
-    // The eyes' near plane, the eyes' own drawing and the lenses' picture alike: the one set for the camera (F12 「镜头位置」
-    // 近裁剪面, CameraNear.Near). At a fixed centimetre, an eye coming that close to an eyecup lost the picture on that
-    // side: the card the lenses' picture is worked out on, just above the rim, was cut off by the near plane.
-    private static float EyeNear => Mathf.Clamp(CameraNear.Near, 0.001f, 0.05f);
+    // The eyes' near plane, the eyes' own drawing and the lenses' picture alike (F12 「头戴式成像装备」 双眼近裁剪面). At a
+    // fixed centimetre, an eye coming that close to an eyecup lost the picture on that side: the card the lenses'
+    // picture is worked out on, just above the rim, was cut off by the near plane. The eyes see only half a metre, so
+    // it can go far below the main camera's without the depth suffering.
+    internal static float EyeNearPlane = 0.001f;
+    private static float EyeNear => Mathf.Clamp(EyeNearPlane, 0.0001f, 0.05f);
     private const float EyeFar = 0.5f;            // the eyes draw only what is close; the scene is the main camera's
     private const float BehindLens = 0.1f;        // through a lens, what is further from the eye than this is beyond it
     private static readonly int LensMapId = Shader.PropertyToID("_LensMap");
