@@ -147,8 +147,8 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
             new ConfigDescription("近处虚化最多糊开多大（模糊圆斑的半径，单位为度）。越近越接近这个值，但不是一刀切：整把枪从后到前仍是越近越虚。0.5 到 1 比较合适；越大，离眼睛近的部分糊得越厉害。",
                 new AcceptableValueRange<float>(0.2f, 3f), new ConfigurationManagerAttributes { Order = 0 }));
         ConfigEntry<float> eyeNear = SettingsLayout.Bind(Config, "头戴式成像装备", "双眼近裁剪面（米）", 0.001f,
-            new ConfigDescription("夜视仪翻下时两个眼睛相机（画夜视仪本体和镜片里的画面）的近裁剪面：离眼睛比这更近的东西不画。太大时眼睛贴近目镜，那一侧的镜片就不成像。眼睛相机只看半米以内，调到 0.0001（0.1 毫米）也不会有深度问题。和「镜头位置」里主镜头的近裁剪面互不影响。",
-                new AcceptableValueRange<float>(0.0001f, 0.02f), new ConfigurationManagerAttributes { Order = 0 }));
+            new ConfigDescription("夜视仪翻下时两个眼睛相机（画夜视仪本体和镜片里的画面）的近裁剪面：离眼睛比这更近的东西不画。太大时眼睛贴近目镜，那一侧的镜片就不成像。眼睛相机只看半米以内，调到 0.00001（0.01 毫米）也不会有深度问题。和「镜头位置」里主镜头的近裁剪面互不影响。",
+                new AcceptableValueRange<float>(0.00001f, 0.02f), new ConfigurationManagerAttributes { Order = 0 }));
         eyeNear.SettingChanged += (_, _) => NightVisionEyepieces.EyeNearPlane = eyeNear.Value;
         NightVisionEyepieces.EyeNearPlane = eyeNear.Value;
         ConfigEntry<float> tritium = SettingsLayout.Bind(Config, "头戴式成像装备", "氚光亮度", 0.6f,

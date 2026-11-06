@@ -22,7 +22,7 @@ internal static partial class NightVisionEyepieces
     // picture is worked out on, just above the rim, was cut off by the near plane. The eyes see only half a metre, so
     // it can go far below the main camera's without the depth suffering.
     internal static float EyeNearPlane = 0.001f;
-    private static float EyeNear => Mathf.Clamp(EyeNearPlane, 0.0001f, 0.05f);
+    private static float EyeNear => Mathf.Clamp(EyeNearPlane, 0.00001f, 0.05f);
     private const float EyeFar = 0.5f;            // the eyes draw only what is close; the scene is the main camera's
     private const float BehindLens = 0.1f;        // through a lens, what is further from the eye than this is beyond it
     private static readonly int LensMapId = Shader.PropertyToID("_LensMap");
@@ -308,7 +308,9 @@ internal static partial class NightVisionEyepieces
         float middle = span >= 1f ? 0f : side == 0 ? span - 1f : 1f - span;
         int width = Mathf.Max(Mathf.CeilToInt(Screen.width * span), 1), height = Mathf.Max(Screen.height, 1);
         RenderTexture view = Target(_eyeViews, side, width, height, 24, RenderTextureFormat.ARGBHalf, "Justachae NVG eye");
-        RenderTexture lensMap = Target(_lensMaps, side, Mathf.Max((int)(width * LensMapScale), 8), Mathf.Max((int)(height * LensMapScale), 8), 16,
+        // 24-bit depth: with the near plane down to a hundredth of a millimetre a 16-bit one told the housing from the
+        // card before it only to some millimetres.
+        RenderTexture lensMap = Target(_lensMaps, side, Mathf.Max((int)(width * LensMapScale), 8), Mathf.Max((int)(height * LensMapScale), 8), 24,
             RenderTextureFormat.ARGB32, "Justachae NVG lens map");
         RenderTexture glassMap = Target(_glassMaps, side, lensMap.width, lensMap.height, 0, RenderTextureFormat.RG16, "Justachae NVG glass map");
 
