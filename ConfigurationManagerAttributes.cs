@@ -5,4 +5,5 @@ internal sealed class ConfigurationManagerAttributes
 {
     // Place within the section; higher comes first.
     public int? Order;
+    public bool? Browsable;   // false: kept in the config file, not shown in F12
 }
