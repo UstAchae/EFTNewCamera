@@ -8,7 +8,9 @@
 // lens the light falls off toward its rim, as an eyepiece's does, and a line of sight only finds the picture where it
 // passes through the eyepiece's exit pupil (a disc on the axis, an eye relief out): seen from off to one side, part of
 // the lens goes dark. The pass is drawn on a card over the opening, just above the rim, so the rim's own low-poly edge
-// does not cut it but anything in front of it still hides it.
+// does not cut it but anything in front of it still hides it. A second target takes the glass alone: where a line of
+// sight meets a lens through the opening, before the rim's falloff and the exit pupil darken it, so that the composite
+// can tell glass that is dark (the eye off the pupil) from no glass at all.
 Shader "Justachae/NVG/LensMask" {
  SubShader {
   Cull Off
@@ -17,8 +19,9 @@ Shader "Justachae/NVG/LensMask" {
    #pragma vertex vert
    #pragma fragment frag
    #include "UnityCG.cginc"
+   struct targets { float4 light : SV_Target0; float4 glass : SV_Target1; };
    float4 vert (float4 v : POSITION) : SV_POSITION { return UnityObjectToClipPos(v); }
-   float4 frag () : SV_Target { return 0; }
+   targets frag () { targets o; o.light = 0; o.glass = 0; return o; }
    ENDCG
   }
   Pass {
@@ -43,7 +46,8 @@ Shader "Justachae/NVG/LensMask" {
     float length2 = dot(ab, ab);
     return distance(p, a + ab * (length2 > 1e-12 ? saturate(dot(p - a, ab) / length2) : 0));
    }
-   float4 frag (v2f i) : SV_Target {
+   struct targets { float4 light : SV_Target0; float4 glass : SV_Target1; };
+   targets frag (v2f i) {
     float3 ray = normalize(i.world - _Eye.xyz);
     float4 d = float4(on_floor(ray, _LensFloor0, _Axis0), on_floor(ray, _LensFloor1, _Axis1), on_floor(ray, _LensFloor2, _Axis2), on_floor(ray, _LensFloor3, _Axis3));
     // How far inside each lens's edge (the lenses of an "8" may differ in size); the deepest one is seen.
@@ -62,9 +66,13 @@ Shader "Justachae/NVG/LensMask" {
      * saturate((_Opening.x - atPlate) / max(fwidth(atPlate), 1e-7) + 0.5) * saturate((_Opening.y - atRim) / max(fwidth(atRim), 1e-7) + 0.5);
     clip(cover - 0.001);
     float rim = smoothstep(0.55, 1.0, dot(tube, d) / lens.w);
+    float rimLight = cover * lerp(1, _Optics.w, rim * rim);
     float pupil = distance(cross_plane(ray, lens.xyz + axis * _Optics.x, axis), lens.xyz + axis * _Optics.x);
-    cover *= lerp(1, _Optics.w, rim * rim) * smoothstep(_Optics.y + _Optics.z, _Optics.y - _Optics.z, pupil);
-    return tube * cover;
+    targets o;
+    // r the glass; g the light it would let through with the eye on the pupil (its rim's falloff only).
+    o.glass = float4(cover, rimLight, 0, 0);
+    o.light = tube * rimLight * smoothstep(_Optics.y + _Optics.z, _Optics.y - _Optics.z, pupil);
+    return o;
    }
    ENDCG
   }

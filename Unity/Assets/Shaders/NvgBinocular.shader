@@ -27,14 +27,16 @@ Shader "Justachae/NVG/Binocular" {
    float4 frag (v2f_img i) : SV_Target {
     float4 scene = tex2D(_MainTex, i.uv);
     if (_Mode < 0.5) return scene;
-    float4 eye; float4 light; float cover;
-    eyeAt(i.uv, eye, light, cover);
+    float4 eye; float4 light; float cover, dark;
+    eyeAt(i.uv, eye, light, cover, dark);
     // The glow falls on the eyecups and the housing about the lenses, not on the lenses' own picture (over it, it
     // only greyed the picture).
     float3 glow = tex2D(_Glow, i.uv).rgb * _Lamp.y * (1 - light.w);
     // The lenses' own surface as the eye drew it (the room reflected in it, highlights) over their picture, unless left
-    // out: then all of the glass, to its rim, where the tube's field has faded the picture out.
-    float3 device = eye.rgb * (1 - cover * _LensClear);
+    // out: then all of the glass, to its rim, where the tube's field has faded the picture out. Where the line of sight
+    // misses the exit pupil the glass has no picture behind it and is dark, as an eyepiece is seen from off its pupil:
+    // the game's own glass (its green glow) is left out there too, as much as the light is missing.
+    float3 device = eye.rgb * (1 - saturate(cover * _LensClear + (1 - _LensClear) * dark));
     return float4(device + light.rgb * _Lamp.x + glow + (1 - saturate(eye.a)) * scene.rgb, scene.a);
    }
    ENDCG

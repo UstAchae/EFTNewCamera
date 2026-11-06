@@ -1,6 +1,6 @@
 // Shared by NvgBinocular.shader and NvgGlow.shader: one eye's view of the eyepieces at a pixel of the main frame.
 #include "UnityCG.cginc"
-sampler2D _MainTex, _NightVision, _LeftEye, _RightEye, _LeftLens, _RightLens, _Glow;
+sampler2D _MainTex, _NightVision, _LeftEye, _RightEye, _LeftLens, _RightLens, _LeftGlass, _RightGlass, _Glow;
 float4 _MainTex_TexelSize;
 float4x4 _NightVisionVP;          // the main camera's view-projection (not jittered)
 float4x4 _EyeInvVP0, _EyeInvVP1;  // each eye's half view, normalised device coordinates to world directions (its view turned, not moved)
@@ -51,9 +51,9 @@ float blotches (float2 uv) {
 
 // One eye's view at a pixel of the main frame: the device it drew, and the light reaching it through the lenses (its
 // w how much of the pixel a lens lets light through, less toward the edge of the tube's field); cover how much of the
-// pixel the lenses' glass covers, out to where its light ends.
+// pixel the lenses' glass covers (its own map: the glass whether or not light reaches it through the exit pupil).
 // Each eye's view reaches a little past the split (_Overscan), so the two can be blended there.
-void eyeSide (float2 uv, bool right, out float4 eye, out float4 light, out float cover) {
+void eyeSide (float2 uv, bool right, out float4 eye, out float4 light, out float cover, out float dark) {
  float span = right ? _EyeSpan.y : _EyeSpan.x;
  float2 local = float2((uv.x - (right ? 1 - span : 0)) / span, uv.y);
  eye = right ? tex2D(_RightEye, local) : tex2D(_LeftEye, local);
@@ -69,33 +69,42 @@ void eyeSide (float2 uv, bool right, out float4 eye, out float4 light, out float
  if (through.z > 0) picture += through.z * nightVision(through_eyepiece(ray, _TubeAxis2, strength));
  if (through.w > 0) picture += through.w * nightVision(through_eyepiece(ray, _TubeAxis3, strength));
  light = float4(picture / max(dot(open, 1), 1), saturate(dot(open, 1)));
- // The lens map's light falls off toward each lens's rim and where a line of sight misses the exit pupil; the glass
- // reaches out as far as any of it does.
- cover = smoothstep(0, 0.02, dot(lens, 1));
+ float4 glass = right ? tex2D(_RightGlass, local) : tex2D(_LeftGlass, local);
+ cover = smoothstep(0, 0.02, glass.r);
+ // The light the glass would let through with the eye on the exit pupil (g): what is missing of it is the glass gone
+ // dark, the eye off the pupil or looking too far off the tube's axis.
+ dark = saturate(glass.g - light.w);
 }
 
 // This pixel's eye: the left eye's left of the split line, the right eye's right of it, eased from one to the other
 // across the strip along the line that both views reach, so the two eyes' slightly different views leave no crease there.
 // A monocular's one eye everywhere, fading over the other eye's half: that eye sees past the device, and the two
 // views are seen as one, the device the fainter the further out toward that eye's edge.
-void eyeAt (float2 uv, out float4 eye, out float4 light, out float cover) {
+void eyeAt (float2 uv, out float4 eye, out float4 light, out float cover, out float dark) {
  float toRight = smoothstep(-_Overscan * 0.5, _Overscan * 0.5, dot(uv - _SplitLine.xy, _SplitLine.zw));
  if (_Monocular.x > 0.5) {
   bool right = _Monocular.y > 0.5;
-  eyeSide(uv, right, eye, light, cover);
+  eyeSide(uv, right, eye, light, cover, dark);
   float shown = smoothstep(0, 0.5 + _Overscan * 0.5, right ? uv.x : 1 - uv.x);
   shown = _Monocular.z > 0 ? pow(max(shown, 1e-5), _Monocular.z) : 1;
   eye *= shown;
   light *= shown;
   cover *= shown;
+  dark *= shown;
   return;
  }
- if (toRight <= 0) { eyeSide(uv, false, eye, light, cover); return; }
- if (toRight >= 1) { eyeSide(uv, true, eye, light, cover); return; }
- float4 leftEye, rightEye; float4 leftLight, rightLight; float leftCover, rightCover;
- eyeSide(uv, false, leftEye, leftLight, leftCover);
- eyeSide(uv, true, rightEye, rightLight, rightCover);
+ if (toRight <= 0) { eyeSide(uv, false, eye, light, cover, dark); return; }
+ if (toRight >= 1) { eyeSide(uv, true, eye, light, cover, dark); return; }
+ float4 leftEye, rightEye; float4 leftLight, rightLight; float leftCover, rightCover, leftDark, rightDark;
+ eyeSide(uv, false, leftEye, leftLight, leftCover, leftDark);
+ eyeSide(uv, true, rightEye, rightLight, rightCover, rightDark);
  eye = lerp(leftEye, rightEye, toRight);
  light = lerp(leftLight, rightLight, toRight);
  cover = lerp(leftCover, rightCover, toRight);
+ dark = lerp(leftDark, rightDark, toRight);
+}
+
+void eyeAt (float2 uv, out float4 eye, out float4 light, out float cover) {
+ float dark;
+ eyeAt(uv, eye, light, cover, dark);
 }

@@ -60,6 +60,7 @@ internal static partial class NightVisionEyepieces
     private static readonly int OpticsId = Shader.PropertyToID("_Optics");
     private static readonly int[] EyeIds = { Shader.PropertyToID("_LeftEye"), Shader.PropertyToID("_RightEye") };
     private static readonly int[] LensIds = { Shader.PropertyToID("_LeftLens"), Shader.PropertyToID("_RightLens") };
+    private static readonly int[] GlassIds = { Shader.PropertyToID("_LeftGlass"), Shader.PropertyToID("_RightGlass") };
     private static readonly int[] EyeInvVpIds = { Shader.PropertyToID("_EyeInvVP0"), Shader.PropertyToID("_EyeInvVP1") };
     private static readonly int[] EyePosIds = { Shader.PropertyToID("_EyePos0"), Shader.PropertyToID("_EyePos1") };
 
@@ -69,6 +70,10 @@ internal static partial class NightVisionEyepieces
     private static readonly RenderTexture?[] _eyeHistory = new RenderTexture?[2];
     private static readonly int[] _historyFrame = { -100, -100 };
     private static readonly RenderTexture?[] _lensMaps = new RenderTexture?[2];
+    // Each eye's glass: where it looks at a lens at all, whether or not light reaches it through the exit pupil (the
+    // lens map's own value is the light, dark where the line of sight misses the pupil).
+    private static readonly RenderTexture?[] _glassMaps = new RenderTexture?[2];
+    private static readonly RenderTargetIdentifier[] _lensTargets = new RenderTargetIdentifier[2];
     private static Material? _lensMapMaterial;
     private static Mesh? _card;
     private static CommandBuffer? _lensMapBuffer;
@@ -326,6 +331,7 @@ internal static partial class NightVisionEyepieces
         RenderTexture view = Target(_eyeViews, side, width, height, 24, RenderTextureFormat.ARGBHalf, "Justachae NVG eye");
         RenderTexture lensMap = Target(_lensMaps, side, Mathf.Max((int)(width * LensMapScale), 8), Mathf.Max((int)(height * LensMapScale), 8), 16,
             RenderTextureFormat.ARGB32, "Justachae NVG lens map");
+        RenderTexture glassMap = Target(_glassMaps, side, lensMap.width, lensMap.height, 0, RenderTextureFormat.RG16, "Justachae NVG glass map");
 
         Camera camera = _eyeCameras[side]!;
 
@@ -358,9 +364,12 @@ internal static partial class NightVisionEyepieces
         // Which lens each pixel of this eye looks through, past the housing: the device's own meshes drawn as
         // blockers and each lens into its own channel, from this eye. Until the device is on, no light comes through.
         if (Active)
-            DrawLensMap(lensMap, cameraPlace, shift, turned, crop * Matrix4x4.Perspective(main.fieldOfView, main.aspect, EyeNear, LensMapRange));
+            DrawLensMap(lensMap, glassMap, cameraPlace, shift, turned, crop * Matrix4x4.Perspective(main.fieldOfView, main.aspect, EyeNear, LensMapRange));
         else
+        {
             ClearLensMap(lensMap);
+            ClearLensMap(glassMap);
+        }
 
         camera.targetTexture = view;
         LightEye(camera);
@@ -394,6 +403,7 @@ internal static partial class NightVisionEyepieces
         binocular.SetFloat(OverscanId, Overscan);
         binocular.SetTexture(EyeIds[side], view);
         binocular.SetTexture(LensIds[side], lensMap);
+        binocular.SetTexture(GlassIds[side], glassMap);
         binocular.SetMatrix(EyeInvVpIds[side], inverse);
         // w: how strongly this eye sees the eyepieces' distortion, growing as it stands further back from them.
         float back = Mathf.InverseLerp(DistortionNear, DistortionFar, (centreLens.position - position).magnitude / centreLens.lossyScale.x);
@@ -467,7 +477,7 @@ internal static partial class NightVisionEyepieces
     // Which tube each pixel looks into: the device's own opaque meshes drawn black, then a card over each eyecup's
     // opening, just above its rim, on which each line of sight is followed to the lenses (NvgLensMask.shader).
     // Everything as it stands from the eye (the eye at zero, its view turned but not moved; see NightVisionPrecise).
-    private static void DrawLensMap(RenderTexture target, Vector3 cameraPlace, Vector3 shift, Matrix4x4 view, Matrix4x4 projection)
+    private static void DrawLensMap(RenderTexture target, RenderTexture glass, Vector3 cameraPlace, Vector3 shift, Matrix4x4 view, Matrix4x4 projection)
     {
         _lensMapMaterial ??= new Material(_lensMaskShader) { name = "Justachae NVG lens map", hideFlags = HideFlags.DontSave };
         _card ??= CardMesh();
@@ -490,7 +500,10 @@ internal static partial class NightVisionEyepieces
         _lensMapBuffer ??= new CommandBuffer { name = "Justachae NVG lens map" };
         CommandBuffer buffer = _lensMapBuffer;
         buffer.Clear();
-        buffer.SetRenderTarget(target);
+        // Both maps at once (the light through the lenses, and the glass), on the lens map's depth.
+        _lensTargets[0] = target;
+        _lensTargets[1] = glass;
+        buffer.SetRenderTarget(_lensTargets, target.depthBuffer);
         buffer.ClearRenderTarget(true, true, Color.clear);
         buffer.SetViewProjectionMatrices(view, projection);
         // Meshes at their transforms as they are now: a renderer hidden from the main camera keeps the pose it had
