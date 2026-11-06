@@ -160,6 +160,11 @@ internal static partial class NightVisionEyepieces
     private static Transform[] _hingeChildren = System.Array.Empty<Transform>();
     private static Vector3[] _hingeChildRest = System.Array.Empty<Vector3>();
     private static Quaternion _hingeRestRotation;
+    // What the adjustment set on the game's own transforms (the hinge, the shoe, the hinge's children), so that the
+    // next frame can tell its own setting, put back before it is worked out afresh, from the game moving them itself.
+    private static Vector3 _hingeSetPosition, _shoeSetPosition;
+    private static Quaternion _hingeSetRotation, _shoeSetRotation;
+    private static Vector3[] _hingeChildSet = System.Array.Empty<Vector3>();
     private static float _leverOpen;                 // a G24's lock lever: 0 shut, 1 open
     private static float _buttonPress;               // the release button: 0 out, 1 pressed
     private static int _slot = -1;                   // the slot the goggle is in or going to
@@ -392,7 +397,7 @@ internal static partial class NightVisionEyepieces
             {
                 string? path = item.Prefab?.path;
                 if (path != null && path.IndexOf(mount.Prefix, System.StringComparison.OrdinalIgnoreCase) >= 0)
-                    return item.Id.ToString();
+                    return EquipmentIds.Kept(item, slot);
             }
         }
         return null;
@@ -424,23 +429,81 @@ internal static partial class NightVisionEyepieces
 
     // The carriage, and the arm on it, up the track, the knob turned to match; the arm tilted on its pins, and the
     // slide, with the goggle, along the slot.
+    // The adjustment is the mount's real state, not a pose for the main camera alone: it stays from one frame to the
+    // next, for every camera and for the frame's motion vectors (put back after each render, a moved mount went back
+    // and forth every frame, and a motion blur smeared it). Before it is worked out again, the game's transforms it set
+    // go back to where the game had them, those the game has not moved itself since.
     private static void AdjustMount(Camera camera)
     {
         FindMount();
         if (_mount == null || _mountHinge == null || _mountShoe == null)
             return;
+        TakeBackOwnSetting();
         if (_mount.G24)
-        {
             AdjustG24(_mount, _mountHinge);
-            return;
-        }
-        if (_mount.L4)
-        {
+        else if (_mount.L4)
             AdjustL4(_mount, _mountHinge, _mountShoe);
+        else
+            AdjustArm();
+        NoteOwnSetting();
+    }
+
+    private static void TakeBackOwnSetting()
+    {
+        if (!_mountMoved)
             return;
+        _mountMoved = false;
+        if (_mountHinge != null)
+        {
+            if (_mountHinge.localPosition == _hingeSetPosition)
+                _mountHinge.localPosition = _hingeRestPosition;
+            if (_mountHinge.localRotation == _hingeSetRotation)
+                _mountHinge.localRotation = _hingeRestRotation;
         }
+        if (_mountShoe != null)
+        {
+            if (_mountShoe.localPosition == _shoeSetPosition)
+                _mountShoe.localPosition = _shoeRestPosition;
+            if (_mountShoe.localRotation == _shoeSetRotation)
+                _mountShoe.localRotation = _shoeRestRotation;
+        }
+        for (int i = 0; _mount != null && _mount.G24 && i < _hingeChildren.Length && i < _hingeChildSet.Length; i++)
+        {
+            if (_hingeChildren[i] != null && _hingeChildren[i].localPosition == _hingeChildSet[i])
+                _hingeChildren[i].localPosition = _hingeChildRest[i];
+        }
+    }
+
+    private static void NoteOwnSetting()
+    {
+        if (!_mountMoved)
+            return;
+        if (_mountHinge != null)
+        {
+            _hingeSetPosition = _mountHinge.localPosition;
+            _hingeSetRotation = _mountHinge.localRotation;
+        }
+        if (_mountShoe != null)
+        {
+            _shoeSetPosition = _mountShoe.localPosition;
+            _shoeSetRotation = _mountShoe.localRotation;
+        }
+        if (_mount == null || !_mount.G24)
+            return;
+        if (_hingeChildSet.Length != _hingeChildren.Length)
+            _hingeChildSet = new Vector3[_hingeChildren.Length];
+        for (int i = 0; i < _hingeChildren.Length; i++)
+            _hingeChildSet[i] = _hingeChildren[i] != null ? _hingeChildren[i].localPosition : Vector3.zero;
+    }
+
+    // An arm mount's carriage, arm and slide.
+    private static void AdjustArm()
+    {
+        if (_mount == null || _mountHinge == null || _mountShoe == null)
+            return;
         _mountMoved = true;
         _hingeRestPosition = _mountHinge.localPosition;
+        _hingeRestRotation = _mountHinge.localRotation;
         _shoeRestPosition = _mountShoe.localPosition;
         _shoeRestRotation = _mountShoe.localRotation;
         float height = 0f, tilt = 0f, slide = 0f;
@@ -484,6 +547,11 @@ internal static partial class NightVisionEyepieces
         _mountMoved = true;
         _hingeRestPosition = hinge.localPosition;
         _hingeRestRotation = hinge.localRotation;
+        if (_mountShoe != null)
+        {
+            _shoeRestPosition = _mountShoe.localPosition;
+            _shoeRestRotation = _mountShoe.localRotation;
+        }
         if (_hingeChildren.Length != hinge.childCount)
         {
             _hingeChildren = new Transform[hinge.childCount];

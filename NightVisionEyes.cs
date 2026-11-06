@@ -179,7 +179,6 @@ internal static partial class NightVisionEyepieces
     {
         if (camera != Camera.main)
             return;
-        RestoreMount();
         if (!_deviceHidden)
             return;
         _deviceHidden = false;
