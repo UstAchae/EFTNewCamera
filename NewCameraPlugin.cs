@@ -265,17 +265,11 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
     private void BindVestibular()
     {
         ConfigEntry<bool> balance = SettingsLayout.Bind(Config, "前庭平衡", "总开关", true,
-            new ConfigDescription("像内耳前庭带着眼球那样，镜头位置不动，只把镜头转回玩家想看的方向，抵消走路、跑步时头的晃动。注视点取视线上实际看到的东西的距离；切枪、换弹、打药、翻背包、搜刮、开门等动作时，动画让头转去看手或包的部分会保留。开镜时也起作用。（物理后坐力带来的转动不经过这里：上身后仰由眼睛立刻完全抵消；头被枪托带偏的部分见下面两项“开枪时头偏转的眼球回正”。）架枪、固定武器、翻越、攀爬时不起作用；中键自由看保留。关闭后镜头完全按头部原样晃动。",
+            new ConfigDescription("像内耳前庭带着眼球那样，镜头位置不动，只把镜头转回玩家想看的方向，抵消走路、跑步时头的晃动。注视点取视线上实际看到的东西的距离；切枪、换弹、打药、翻背包、搜刮、开门等动作时，动画让头转去看手或包的部分会保留。开镜时也起作用。（物理后坐力带来的转动不经过这里：腰射时上身后仰、头被枪托带偏，都由眼睛立刻完全抵消；瞄准开枪时头跟着枪一起动，眼睛留在瞄准线上，画面随每一枪跳起再落回。）架枪、固定武器、翻越、攀爬时不起作用；中键自由看保留。关闭后镜头完全按头部原样晃动。",
                 null, new ConfigurationManagerAttributes { Order = 3 }));
         ConfigEntry<float> strength = SettingsLayout.Bind(Config, "前庭平衡", "强度", 0.7f,
             new ConfigDescription("左右和上下平衡多少。0 是不平衡（原样），1 是完全平衡。",
                 new AcceptableValueRange<float>(0f, 1f), new ConfigurationManagerAttributes { Order = 2 }));
-        ConfigEntry<float> headEyeShare = SettingsLayout.Bind(Config, "前庭平衡", "开枪时头偏转的眼球回正比例", 0.5f,
-            new ConfigDescription("物理后坐力：开枪时脸贴着枪托，头会被带着往右偏。眼睛随后反向转回来，但转不回全部。这是转回来的比例：1 是全部转回（画面最终不偏），0 是完全不转（画面跟着头偏）。上身绕腰的后仰不受这项影响，眼睛总是立刻完全抵消。",
-                new AcceptableValueRange<float>(0f, 1f), new ConfigurationManagerAttributes { Order = 0 }));
-        ConfigEntry<float> headEyeSeconds = SettingsLayout.Bind(Config, "前庭平衡", "开枪时头偏转的眼球回正时间（秒）", 0.3f,
-            new ConfigDescription("同上，眼睛转回来要多久。数越大，越能看到画面先被头带偏、再被眼睛拉回来。",
-                new AcceptableValueRange<float>(0.3f, 1f), new ConfigurationManagerAttributes { Order = -1 }));
         ConfigEntry<float> torsion = SettingsLayout.Bind(Config, "前庭平衡", "扭转补偿", 0.25f,
             new ConfigDescription("头绕视线歪斜（翻滚）时，镜头反向扭回多少。人眼只能反向扭回头部歪斜的一小部分（约一到三成），所以默认 0.25。0 是完全不管翻滚，1 是歪斜全部扭回。探头的歪斜也按这个比例减小。最终效果再乘上强度。",
                 new AcceptableValueRange<float>(0f, 1f), new ConfigurationManagerAttributes { Order = 1 }));
@@ -284,19 +278,11 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
             VestibularView.Enabled = balance.Value;
             VestibularView.Strength = strength.Value;
             VestibularView.Torsion = torsion.Value;
-            AimArms.HeadEyeShare = headEyeShare.Value;
-            AimArms.HeadEyeSeconds = headEyeSeconds.Value;
         }
 
-        ConfigEntry<bool> followSight = SettingsLayout.Bind(Config, "前庭平衡", "开枪时头跟着枪走", true,
-            "瞄准开枪时，脸贴着枪托，头跟着枪一起动：镜头的位置和方向随枪的后坐一起转，眼睛始终留在瞄准线上，准星在画面上基本不动，整个画面随每一枪跳起、再随回正落回来。这时头不再被枪托单独推偏，上面两项“开枪时头偏转的眼球回正”不起作用。关掉时头不跟枪，画面不动，看到的是准星和枪在画面里跳，连射时瞄准线会跑到眼睛上面。只在瞄准、物理后坐力起作用时有效，子弹方向不受影响（子弹始终沿枪口）。手枪不贴脸，不受这一项影响。");
-        followSight.SettingChanged += (_, _) => AimArms.FollowSightOnShot = followSight.Value;
-        AimArms.FollowSightOnShot = followSight.Value;
         balance.SettingChanged += (_, _) => Refresh();
         strength.SettingChanged += (_, _) => Refresh();
         torsion.SettingChanged += (_, _) => Refresh();
-        headEyeShare.SettingChanged += (_, _) => Refresh();
-        headEyeSeconds.SettingChanged += (_, _) => Refresh();
         Refresh();
     }
 

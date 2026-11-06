@@ -44,8 +44,7 @@ internal static class AimArms
     internal static readonly SwayAmounts Exhausted = new() { GunMove = 1f, GunTurn = 1f, ArmMove = 1f, ArmTurn = 1f, HeadFollow = 1f, Breath = 1f };
     private const float BreathCenterSeconds = 6f;
     private static readonly SwayAmounts Now = new() { GunMove = 0.05f, GunTurn = 0.05f, ArmMove = 0.05f, ArmTurn = 0.05f, HeadFollow = 0.1f, Breath = 1f };
-    internal static bool Chase = true;
-    internal static float FollowDelay = 0.1f;   // seconds the gun trails the view when swinging the mouse
+    private const float FollowDelay = 0.1f;   // seconds the gun trails the view when swinging the mouse
     internal static float WalkHeadSway;
     internal static float HeadModelPitch;
     private const float MaxDelayDegrees = 15f;
@@ -622,26 +621,23 @@ internal static class AimArms
     // milliseconds) and the eyes counter it in full, as the vestibulo-ocular reflex does: the view stays on the target
     // and the sight and the gun move in it. The view still moves with the head.
     //
-    // The head turned by the cheek on the stock is another matter (HeadRecoil): there the eyes are seen to come back.
-    internal static float HeadEyeShare = 0.8f;     // how much of the head's turn the eyes take back
-    internal static float HeadEyeSeconds = 0.08f;  // how long they take
-    private static Quaternion _eyesHead = Quaternion.identity;
-    private static int _eyesHeadFrame = -10;
+    // The head turned by the cheek on the stock (HeadRecoil) is countered the same way.
 
     internal static Quaternion EyesAgainstRecoil(Quaternion cameraRotation)
     {
         return _torsoFrame == Time.frameCount ? Quaternion.Inverse(_torsoTurn) * cameraRotation : cameraRotation;
     }
 
-    // RealRecoil: the head against the upper body (the neck and the cheek on the stock). After the gun has been
-    // placed at the eye. The head turns; the eyes turn back against it (EyesAgainstRecoil), so the view only moves.
+    // RealRecoil: the head against the upper body (the neck and the cheek on the stock), from the hip. After the gun has
+    // been placed at the eye. The head turns and the eye goes with it; the eyes counter the turn in full, as they do
+    // the upper body's (EyesAgainstRecoil), so the view only moves.
     internal static void HeadRecoil(Player player, ref Vector3 cameraPosition, ref Quaternion cameraRotation)
     {
         if (!RealRecoil.Active || RealRecoil.Resting)
             return;
-        // Aimed with the head going with the gun (SightKick): the head moves as the gun does, not pushed off it by the
-        // stock on its own, which put the eye beside and under the sight's line.
-        if (FollowSightOnShot && _sightKickFrame == Time.frameCount)
+        // Aimed, the head goes with the gun (SightKick): moved as the gun is, not pushed off it by the stock on its own,
+        // which put the eye beside and under the sight's line.
+        if (_sightKickFrame == Time.frameCount)
             return;
         Transform? neck = player.PlayerBones?.Neck;
         if (neck == null)
@@ -653,15 +649,6 @@ internal static class AimArms
         Vector3 pivot = neck.position;
         Carry(neck, pivot, Vector3.zero, turn);
         cameraPosition = pivot + turn * (cameraPosition - pivot);
-        // The view turns with the head (to the right, with the stock); the eyes come back after it, visibly, and not all
-        // the way: a share of the head's turn, over HeadEyeSeconds.
-        if (Time.frameCount - _eyesHeadFrame > 1)
-            _eyesHead = Quaternion.identity;
-        _eyesHeadFrame = Time.frameCount;
-        Quaternion wanted = Scale(turn, Mathf.Clamp01(HeadEyeShare));
-        _eyesHead = HeadEyeSeconds <= 0.0001f ? wanted
-            : Quaternion.Slerp(_eyesHead, wanted, 1f - Mathf.Exp(-Time.deltaTime / HeadEyeSeconds));
-        cameraRotation = Quaternion.Inverse(_eyesHead) * turn * cameraRotation;
     }
 
     // How much larger the gun's slide back in the shoulder is drawn than the physical recoil works it out (F12).
@@ -920,16 +907,13 @@ internal static class AimArms
             ApplyLook(player, bones, _smoothedHead);
     }
 
-    internal static float RecoilChest = 2f;
-    internal static float RecoilHead = 1f;
+    private const float RecoilChest = 2f;
+    private const float RecoilHead = 1f;
 
     // The first-person camera kick of a shot goes into the chest and on into the head, which carries
     // the camera. The gun and hands keep their place in the world; only the body and view are pushed.
     internal static void BodyRecoil(Player player, ref Vector3 cameraPosition, ref Quaternion cameraRotation)
     {
-        if (RecoilChest <= 0f && RecoilHead <= 0f)
-            return;
-
         ProceduralWeaponAnimation? animation = player.ProceduralWeaponAnimation;
         PlayerBones? bones = player.PlayerBones;
         if (animation?.Shootingg?.CurrentRecoilEffect == null || bones == null || !(player.HandsController is Player.FirearmController))
@@ -1107,17 +1091,16 @@ internal static class AimArms
 
     // Aimed, while a shot's physical recoil plays: the head goes with the gun, the cheek on the stock. The camera is
     // carried as the gun is (the upper body's turn about the waist and the gun's in the shoulder, about the shoulder
-    // pocket), so the eye stays on the line of the sight and the scene jumps with the shot (F12). Turning the view alone
+    // pocket), so the eye stays on the line of the sight and the scene jumps with the shot. Turning the view alone
     // about the eye left the sight's line passing over it, a few millimetres per degree of climb. After the balance
     // (VestibularView), which would turn it back.
-    internal static bool FollowSightOnShot = true;
     private static Quaternion _sightKick = Quaternion.identity;
     private static Vector3 _sightKickPivot;
     private static int _sightKickFrame = -1;
 
     internal static void SightKick(ref Vector3 cameraPosition, ref Quaternion cameraRotation)
     {
-        if (!FollowSightOnShot || _sightKickFrame != Time.frameCount || Settled(_sightKick))
+        if (_sightKickFrame != Time.frameCount || Settled(_sightKick))
             return;
         cameraPosition = _sightKickPivot + _sightKick * (cameraPosition - _sightKickPivot);
         cameraRotation = _sightKick * cameraRotation;
@@ -1186,8 +1169,8 @@ internal static class AimArms
         Vector3 sway = armMoveScale * (armMove - _armMoveMean) + gunMoveScale * (gunMove - _gunMoveMean);
         Vector3 pinned = toCamera * (cameraPosition + cameraRotation * (aimPoint + sway) - smoothSight);
         float side = 1f;
-        bool chasing = Chase && _hasChase && (_handAction || _chaseCatching);
-        if (Chase && _hasChase)
+        bool chasing = _hasChase && (_handAction || _chaseCatching);
+        if (_hasChase)
         {
             float speed = animation.AimingSpeed * animation.CameraSmoothBlender.Value;
             if (speed <= 0f)
