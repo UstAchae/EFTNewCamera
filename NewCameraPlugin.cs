@@ -631,6 +631,8 @@ internal static class NewCameraSwitch
         ChestStance.Update(player);
         CameraPosition.UpdateAimEye(player);
         AimArms.Apply(player);
+        HideoutCinemachine.Update(player);
+        HideoutGear.Update(player);
         NightVisionEyepieces.Update(player);
         BodyVisibility.Apply(player);
         _applied = true;
@@ -666,6 +668,8 @@ internal static class NewCameraSwitch
         AimArms.Release(player);
         BodyVisibility.Restore();
         HeadwearTilt.Release();
+        HideoutGear.Release(player);
+        HideoutCinemachine.Release();
         _skeletonOf = null;
         if (player == null || Enabled)
             return;

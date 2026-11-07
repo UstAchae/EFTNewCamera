@@ -277,6 +277,7 @@ internal static partial class NightVisionEyepieces
                     Release();
                 _device = now;
                 Attach(found);
+                HideoutNightVision.Refresh(player);
             }
             _searchedFrame = Time.frameCount;
         }
@@ -286,8 +287,10 @@ internal static partial class NightVisionEyepieces
         NightVisionDevice? device = _body != null && !thermal ? _body.GetComponentInParent<NightVisionDevice>() : null;
         ThermalVisionDevice? thermalDevice = thermal ? _body!.GetComponentInParent<ThermalVisionDevice>() : null;
         ThermalVisionComponent? thermalItem = thermal ? player.ThermalVisionObserver?.Component : null;
-        bool brnvg = !thermal && UseBrnvg;
-        Behaviour? renderer = brnvg ? NightRenderer(cameras?.NightVision) : null;
+        Behaviour? renderer = !thermal && UseBrnvg ? NightRenderer(cameras?.NightVision) : null;
+        // BRNVG draws no filter in the hideout (it puts no renderer on the camera there): set to choose by itself, the
+        // lenses then show the game's picture, as without BRNVG.
+        bool brnvg = !thermal && UseBrnvg && (renderer != null || Picture == PictureBrnvg || player is not HideoutPlayer);
         bool present = _body != null && _body.gameObject.activeInHierarchy;
         bool worn = present && EyepieceImageReady(cameras) && (thermal ? EnsureThermalCamera() : !brnvg || renderer != null);
         bool switchedOn = worn && (thermal ? thermalItem?.Togglable != null && thermalItem.Togglable.On : device != null && SwitchedOn(device));

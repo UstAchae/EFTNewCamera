@@ -96,8 +96,8 @@ internal static class HeadwearTilt
                 _restPosition = model.localPosition;
                 _restRotation = model.localRotation;
                 // This helmet's own tilt.
-                Item? helmet = player.Inventory?.Equipment?.GetSlot(EquipmentSlot.Headwear).ContainedItem;
-                _helmetId = helmet != null ? EquipmentIds.Kept(helmet, EquipmentSlot.Headwear) : null;
+                Item? helmet = EquipmentIds.Worn(player)?.GetSlot(EquipmentSlot.Headwear).ContainedItem;
+                _helmetId = helmet?.Id.ToString();
                 Degrees = Mathf.Clamp(SavedFor(_helmetId), 0f, Range);
             }
             _model = model;

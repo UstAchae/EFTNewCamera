@@ -24,6 +24,17 @@ internal static partial class NightVisionEyepieces
     internal static float EyeNearPlane = 0.001f;
     private static float EyeNear => Mathf.Clamp(EyeNearPlane, 0.00001f, 0.05f);
     private const float EyeFar = 0.5f;            // the eyes draw only what is close; the scene is the main camera's
+    // How deep the eyes' view is, past what they draw (EyeFar, their culling): a light is laid on in deferred shading by
+    // drawing its volume, and with the eye inside it, by the volume's far side, metres off. At a far plane of half a
+    // metre that side was cut away and no lamp lit what the eyes drew (only the game's ambient light did): the device
+    // stood black in the lit hideout, which has none. The view runs this deep; only what is within EyeFar is drawn.
+    private const float EyeLightFar = 100f;
+    // The eyes' own drawing kept to this ratio of depth: at a near plane of a hundredth of a millimetre against the
+    // hundred metres, the depth no longer told the lamps' light and shadow apart from frame to frame and the device
+    // flickered (steady from 0.3 mm). The device is never nearer the eye than the floor this gives (0.5 mm); the
+    // lenses' picture keeps the set near plane (its own, short projection: DrawLensMap).
+    private const float EyeDepthRatio = 2e5f;
+    private static float EyeDrawNear => Mathf.Max(EyeNear, EyeLightFar / EyeDepthRatio);
     private const float BehindLens = 0.1f;        // through a lens, what is further from the eye than this is beyond it
     private static readonly int LensMapId = Shader.PropertyToID("_LensMap");
     private static readonly int BehindLensId = Shader.PropertyToID("_BehindLens");
@@ -320,14 +331,17 @@ internal static partial class NightVisionEyepieces
         Matrix4x4 crop = Matrix4x4.identity;
         crop.m00 = 1f / span;
         crop.m03 = -middle / span;
-        Matrix4x4 projection = crop * Matrix4x4.Perspective(main.fieldOfView, main.aspect, EyeNear, EyeFar);
+        Matrix4x4 projection = crop * Matrix4x4.Perspective(main.fieldOfView, main.aspect, EyeDrawNear, EyeLightFar);
 
         camera.CopyFrom(main);
         camera.transform.position = position;
         camera.rect = new Rect(0f, 0f, 1f, 1f);
-        camera.nearClipPlane = EyeNear;
-        camera.farClipPlane = EyeFar;
+        camera.nearClipPlane = EyeDrawNear;
+        camera.farClipPlane = EyeLightFar;
         camera.projectionMatrix = projection;
+        // Culled to what is within EyeFar, as before; shadows received only there too (the game's shadow distance
+        // would otherwise spread its cascades over the deeper view).
+        camera.cullingMatrix = crop * Matrix4x4.Perspective(main.fieldOfView, main.aspect, EyeDrawNear, EyeFar) * camera.worldToCameraMatrix;
         camera.depthTextureMode |= DepthTextureMode.Depth;
         camera.clearFlags = CameraClearFlags.SolidColor;
         camera.backgroundColor = Color.clear;
@@ -365,8 +379,10 @@ internal static partial class NightVisionEyepieces
             PutPieces(side, camera, shift, turned, projection);
         // Which of its pixels are the device's: only those go over the frame (NightVisionSelf).
         PutSelfMask(side, camera, width, height, shift, turned, projection);
+        float shadowDistance = QualitySettings.shadowDistance;
         try
         {
+            QualitySettings.shadowDistance = Mathf.Min(shadowDistance, EyeFar);
             camera.Render();
         }
         finally
@@ -376,6 +392,8 @@ internal static partial class NightVisionEyepieces
                 TakePieces(side, camera);
             ShowDevice(false);
             camera.ResetProjectionMatrix();
+            camera.ResetCullingMatrix();
+            QualitySettings.shadowDistance = shadowDistance;
             camera.targetTexture = null;
         }
 

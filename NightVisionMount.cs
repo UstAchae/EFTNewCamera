@@ -385,7 +385,7 @@ internal static partial class NightVisionEyepieces
     // The id of the mount item on the local player's head, by its prefab.
     private static string? MountItemId(Mount mount)
     {
-        var equipment = Singleton<GameWorld>.Instance?.MainPlayer?.Inventory?.Equipment;
+        var equipment = EquipmentIds.Worn(Singleton<GameWorld>.Instance?.MainPlayer);
         if (equipment == null)
             return null;
         foreach (EquipmentSlot slot in new[] { EquipmentSlot.Headwear, EquipmentSlot.FaceCover, EquipmentSlot.Eyewear })
@@ -397,7 +397,7 @@ internal static partial class NightVisionEyepieces
             {
                 string? path = item.Prefab?.path;
                 if (path != null && path.IndexOf(mount.Prefix, System.StringComparison.OrdinalIgnoreCase) >= 0)
-                    return EquipmentIds.Kept(item, slot);
+                    return item.Id.ToString();
             }
         }
         return null;

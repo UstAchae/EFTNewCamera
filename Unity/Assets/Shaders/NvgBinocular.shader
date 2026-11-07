@@ -37,7 +37,9 @@ Shader "Justachae/NVG/Binocular" {
     // misses the exit pupil the glass has no picture behind it and is dark, as an eyepiece is seen from off its pupil:
     // the game's own glass (its green glow) is left out there too, as much as the light is missing.
     float3 device = eye.rgb * (1 - saturate(cover * _LensClear + (1 - _LensClear) * dark));
-    return float4(device + light.rgb * _Lamp.x + glow + (1 - saturate(eye.a)) * scene.rgb, scene.a);
+    // The scene only past the device and never through a lens: behind the glass is the tube, so where its picture
+    // falls short (the line of sight off the pupil, between the two eyes' views) the glass is dark, not a window.
+    return float4(device + light.rgb * _Lamp.x + glow + (1 - saturate(eye.a)) * (1 - cover) * scene.rgb, scene.a);
    }
    ENDCG
   }
