@@ -16,7 +16,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "justachae.thirdpersoncamera";
     public const string PluginName = "Justachae's Third-Person Skeleton and Camera";
-    public const string PluginVersion = "1.5.0";
+    public const string PluginVersion = "1.5.1";
 
     internal static BepInEx.Logging.ManualLogSource? Log;
     private const string SkeletonThird = "第三人称骨架", SkeletonFirst = "第一人称骨架";
@@ -432,7 +432,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
             new ConfigDescription("瞄准键按下后，这个时间内松开算点一下（松开时正常开镜），超过这个时间还按着算按住（直接进入胸口抵肩；游戏里设成长按瞄准时反过来）。越短按住时等得越少，但慢一点的点击可能被当成按住。", new AcceptableValueRange<float>(0.1f, 1f)));
         ConfigEntry<float> drop = SettingsLayout.Bind(Config, section, "比开镜时低（米）", 0.05f,
             new ConfigDescription("胸口抵肩时，枪比正常开镜时的位置低多少（负数是更高）。", new AcceptableValueRange<float>(-0.1f, 0.3f)));
-        ConfigEntry<float> side = SettingsLayout.Bind(Config, section, "比开镜时偏右（米）", 0f,
+        ConfigEntry<float> side = SettingsLayout.Bind(Config, section, "比开镜时偏右（米）", -0.05f,
             new ConfigDescription("胸口抵肩时，枪比正常开镜时的位置往右多少（负数是往左）。", new AcceptableValueRange<float>(-0.15f, 0.15f)));
         ConfigEntry<float> ahead = SettingsLayout.Bind(Config, section, "比开镜时靠前（米）", 0f,
             new ConfigDescription("胸口抵肩时，枪比正常开镜时的位置往前多少（负数是往后）。", new AcceptableValueRange<float>(-0.15f, 0.15f)));

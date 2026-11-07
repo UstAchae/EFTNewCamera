@@ -73,28 +73,18 @@ internal static class HideoutNightVision
         return NewCameraSwitch.Enabled ? Singleton<GameWorld>.Instance?.MainPlayer as HideoutPlayer : null;
     }
 
-    private static readonly FieldInfo? NightVisionOf = AccessTools.Field(typeof(EFT.Visual.NightVisionDevice), "_nightVision");
-    private static readonly FieldInfo? ThermalOf = AccessTools.Field(typeof(EFT.Visual.ThermalVisionDevice), "_thermalVision");
-
-    // The component the player model's goggles are bound to: what flips and lights as seen.
-    private static NightVisionComponent? ModelNightVision(Player player)
+    // The goggles (or thermal) on the headwear the model wears, as the game finds what N flips in a raid
+    // (Player.ToggleGoggles: the headwear's items): their models are bound to these, and flip and light with them. Not
+    // looked for on the models (a T-7 worn in the hideout flipped nothing on N when they were).
+    // Asked only when the observers look again (gear changed), not each frame.
+    private static T? Worn<T>(Player player) where T : class, IItemComponent
     {
-        UnityEngine.Transform? model = HeadwearModel(player);
-        EFT.Visual.NightVisionDevice? device = model != null ? model.GetComponentInChildren<EFT.Visual.NightVisionDevice>(true) : null;
-        return device != null ? NightVisionOf?.GetValue(device) as NightVisionComponent : null;
-    }
-
-    private static ThermalVisionComponent? ModelThermal(Player player)
-    {
-        UnityEngine.Transform? model = HeadwearModel(player);
-        EFT.Visual.ThermalVisionDevice? device = model != null ? model.GetComponentInChildren<EFT.Visual.ThermalVisionDevice>(true) : null;
-        return device != null ? ThermalOf?.GetValue(device) as ThermalVisionComponent : null;
-    }
-
-    private static UnityEngine.Transform? HeadwearModel(Player player)
-    {
-        return player.PlayerBody != null && player.PlayerBody.SlotViews.TryGetByKey(EquipmentSlot.Headwear, out PlayerBody.SlotView? view)
-            && view?.Model != null ? view.Model.transform : null;
+        Item? headwear = EquipmentIds.Worn(player)?.GetSlot(EquipmentSlot.Headwear).ContainedItem;
+        if (headwear is not CompoundItem compound)
+            return null;
+        foreach (T component in compound.GetItemComponentsInChildren<T>())
+            return component;
+        return null;
     }
 
     private static bool NightVisionPrefix(NightVisionComponent? __0, ref NightVisionComponent? __result)
@@ -103,7 +93,7 @@ internal static class HideoutNightVision
         if (hideout == null)
             return true;
         // The model's goggles; none (no hideout filter) when it wears none, or wears thermal ones.
-        __result = ModelNightVision(hideout);
+        __result = Worn<NightVisionComponent>(hideout);
         return false;
     }
 
@@ -112,7 +102,7 @@ internal static class HideoutNightVision
         HideoutPlayer? hideout = Hideout();
         if (hideout == null)
             return true;
-        __result = ModelThermal(hideout);
+        __result = Worn<ThermalVisionComponent>(hideout);
         return false;
     }
 
