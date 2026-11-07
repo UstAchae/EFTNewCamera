@@ -16,7 +16,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "justachae.thirdpersoncamera";
     public const string PluginName = "Justachae's Third-Person Skeleton and Camera";
-    public const string PluginVersion = "1.4.7";
+    public const string PluginVersion = "1.5.0";
 
     internal static BepInEx.Logging.ManualLogSource? Log;
     private const string SkeletonThird = "第三人称骨架", SkeletonFirst = "第一人称骨架";
@@ -425,11 +425,11 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
     {
         const string section = "胸口抵肩";
         ConfigEntry<bool> enabled = SettingsLayout.Bind(Config, section, "启用", true,
-            "按住瞄准键不放时，不把瞄具对到眼前，而是枪托抵在胸口正中、枪放低并向内倾斜，枪管和视线平行，靠激光指示器瞄准（戴夜视仪时的常用姿势）。点一下瞄准键仍是正常开镜（松开时开镜）；按住超过下面的时间就直接进入胸口抵肩，松开就退出瞄准。摆动、呼吸、后坐力和开镜时一样，走路速度不按开镜减慢，鼠标灵敏度和红点、全息开镜时一样，前庭平衡照常起作用。");
+            "按住瞄准键不放时，不把瞄具对到眼前，而是枪托抵在胸口正中、枪放低并向内倾斜，枪管和视线平行，靠激光指示器瞄准（戴夜视仪时的常用姿势）。点一下瞄准键仍是正常开镜（松开时开镜）；按住超过下面的时间就直接进入胸口抵肩，松开就退出瞄准。摆动、呼吸、后坐力和开镜时一样，走路速度不按开镜减慢，鼠标灵敏度和红点、全息开镜时一样，前庭平衡照常起作用。游戏里瞄准键设成长按瞄准时两者对换：按住是正常开镜（松开退出），点一下进入胸口抵肩并保持，再点一下退出，保持中按住则转为正常开镜，松开回到胸口抵肩。设成双击瞄准时：双击是正常开镜，按住进入胸口抵肩，松开退出（和点击瞄准时一样）。");
         ConfigEntry<KeyCode> key = SettingsLayout.Bind(Config, section, "瞄准键", KeyCode.Mouse1,
             "游戏里绑定的瞄准键（默认鼠标右键 Mouse1），用来判断是否还按着。改了游戏里的瞄准键时这里也要改。");
         ConfigEntry<float> hold = SettingsLayout.Bind(Config, section, "按住多久算按住（秒）", 0.15f,
-            new ConfigDescription("瞄准键按下后，这个时间内松开算点一下（松开时正常开镜），超过这个时间还按着算按住（直接进入胸口抵肩）。越短按住时等得越少，但慢一点的点击可能被当成按住。", new AcceptableValueRange<float>(0.1f, 1f)));
+            new ConfigDescription("瞄准键按下后，这个时间内松开算点一下（松开时正常开镜），超过这个时间还按着算按住（直接进入胸口抵肩；游戏里设成长按瞄准时反过来）。越短按住时等得越少，但慢一点的点击可能被当成按住。", new AcceptableValueRange<float>(0.1f, 1f)));
         ConfigEntry<float> drop = SettingsLayout.Bind(Config, section, "比开镜时低（米）", 0.05f,
             new ConfigDescription("胸口抵肩时，枪比正常开镜时的位置低多少（负数是更高）。", new AcceptableValueRange<float>(-0.1f, 0.3f)));
         ConfigEntry<float> side = SettingsLayout.Bind(Config, section, "比开镜时偏右（米）", 0f,

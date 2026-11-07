@@ -13,6 +13,12 @@ namespace EFTNewCamera;
 // moment, it is a hold, and the aim is taken straight into this stance, which lasts while the key is held and ends the
 // aim when it is let go. The game's aim stays on throughout, so the sway, breath and recoil are the aimed ones
 // (AimArms places the gun); only its slowdown is lifted, and the mouse turns as when walking.
+// With the game's aim key set to hold (its press type Continuous: aimed while held), the two change places: a hold is
+// the game's aim, held, and a click takes the stance and keeps it (a click again ends it; a hold turns it into the aim,
+// held, and back to the stance on its release; an aim ended by a move of the body ends it). The release the game sends
+// after that click, or after that hold, is not let end the aim. With it set to a double click (the game's aim comes on
+// the second click's release, and a hold gives the game nothing), a hold takes the stance as with a click: the hold is
+// watched here, not held back from the game, and the double click left to the game.
 internal static class ChestStance
 {
     internal static bool Enabled = true;
@@ -35,6 +41,40 @@ internal static class ChestStance
     private static bool _fromAim;        // the held-back press came while aimed
     private static bool _heldFromAim;    // the stance now was taken from the aim, and goes back to it
     private static bool _easingBack;
+    private static bool _pendingHolds;   // the held-back press came with the game's aim key set to hold
+    private static bool _latched;        // in the stance by a click (aim key set to hold), kept until clicked again
+    private static bool _peeking;        // held up to the eye from that stance, back to it on the key's release
+
+    private static readonly AccessTools.FieldRef<InputPreset> CurrentPreset = AccessTools.StaticFieldRefAccess<InputPreset>(AccessTools.Field(typeof(InputManager), "_currentPreset"));
+
+    private static bool _toldHolds;
+
+    // The game's aim key set to aim while held, not to toggle. Read from the combinations the game works with: the
+    // settings' press type is given to copies of the preset's own (InputPreset.UpdateBindings), which keep the default.
+    private static EPressType AimType()
+    {
+        InputCombination[]? working = CurrentPreset()?._workingKeyCombinations;
+        if (working == null)
+            return EPressType.Press;
+        for (int i = 0; i < working.Length; i++)
+            if (working[i] is InputKeyCombination key && key.GameKey == EGameKey.Aim)
+            {
+                if (key.Type == EPressType.Continuous && !_toldHolds)
+                {
+                    _toldHolds = true;
+                    NewCameraPlugin.Log?.LogInfo("Chest stance: the game's aim key is set to hold, the stance is taken by a click");
+                }
+                else if (key.Type == EPressType.DoubleClick && !_toldDouble)
+                {
+                    _toldDouble = true;
+                    NewCameraPlugin.Log?.LogInfo("Chest stance: the game's aim key is set to a double click, the stance is taken by a hold");
+                }
+                return key.Type;
+            }
+        return EPressType.Press;
+    }
+    private static bool _toldDouble;
+    private static bool _pendingWatched;  // a press watched here (aim key set to a double click), not held back
     private const float LeftSeconds = 0.4f;   // past the carry's blend back to the hip
     private const float EnterSeconds = 0.25f; // from the aim into the stance
     private const float RetrySeconds = 0.1f;
@@ -53,13 +93,23 @@ internal static class ChestStance
         // tactical device's next mode.
         if ((Active || _pending) && command == ECommand.ToggleTacticalDevice && (Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl)))
             command = ECommand.NextTacticalDevice;
-        if (!Enabled || command != ECommand.ToggleAlternativeShooting || _pending || Active)
+        // Aim key set to hold: its release, after a click held back or in the stance it took, is not let end the aim.
+        if (command == ECommand.EndAlternativeShooting && (_pending && _pendingHolds || _latched))
+        {
+            __result = default;
+            return false;
+        }
+        if (!Enabled || command != ECommand.ToggleAlternativeShooting || _pending || Active && !_latched)
             return true;
+        if (!_latched && AimType() == EPressType.DoubleClick)
+            return true;   // the double click's aim, the game's own
         // From the hip a click aims and a hold takes the stance; aimed, a click ends the aim and a hold turns it into the
         // stance.
         if (Comfort.Common.Singleton<GameWorld>.Instance?.MainPlayer?.HandsController is not Player.FirearmController firearm)
             return true;
         _fromAim = firearm.IsAiming;
+        _pendingHolds = _latched || AimType() == EPressType.Continuous;
+        _pendingWatched = false;
         _pending = true;
         _pressTime = Time.time;
         __result = default;
@@ -70,10 +120,56 @@ internal static class ChestStance
     internal static void Update(Player player)
     {
         var hands = player.HandsController;
+        // Aim key set to a double click: a press of it watched for a hold (the game gives none for it).
+        if (Enabled && !_pending && !Active && Input.GetKeyDown(Key) && hands is Player.FirearmController && AimType() == EPressType.DoubleClick)
+        {
+            _fromAim = hands.IsAiming;
+            _pendingHolds = false;
+            _pendingWatched = _pending = true;
+            _pressTime = Time.time;
+        }
         if (_pending)
         {
             if (hands is not Player.FirearmController firearm || hands.IsAiming != _fromAim)
                 _pending = false;              // the aim changed under it (a move of the body, a weapon switch)
+            else if (!Input.GetKey(Key) && _pendingHolds)
+            {
+                // A click, the aim key set to hold: the stance taken and kept, or, in it, ended.
+                _pending = false;
+                if (_latched)
+                {
+                    _latched = _held = Active = false;
+                    _leftTime = Time.time;
+                    firearm.SetAim(false);
+                }
+                else
+                {
+                    Active = _held = _latched = true;
+                    _heldFromAim = false;
+                    Weight = 1f;
+                    firearm.ToggleAim();
+                    if (!firearm.IsAiming)
+                        Active = _held = _latched = false;
+                }
+            }
+            else if (Time.time - _pressTime >= HoldSeconds && _pendingHolds)
+            {
+                // A hold, the aim key set to hold: the game's aim while held (its release ends it); from the stance, the
+                // gun eases up to the eye, and back down to the stance on the release.
+                _pending = false;
+                if (_latched)
+                {
+                    _held = Active = false;
+                    _peeking = _easingBack = true;
+                    float buff = 0f;
+                    try { buff = Traverse.Create(firearm).Field("_buffInfo").Field("AimMovementSpeed").GetValue<float>(); } catch { }
+                    player.MovementContext?.SetAimingSlowdown(true, 0.33f + buff);
+                }
+                else
+                    firearm.ToggleAim();
+            }
+            else if (!Input.GetKey(Key) && _pendingWatched)
+                _pending = false;              // a click, aim key set to a double click: the game's to take
             else if (!Input.GetKey(Key))
             {
                 _pending = false;
@@ -107,7 +203,14 @@ internal static class ChestStance
         }
         bool aiming = hands != null && hands.IsAiming;
         bool down = Input.GetKey(Key);
-        if (_held && !down)
+        if (_peeking && aiming && !down)
+        {
+            // Let go after a hold from the stance kept by a click: back down to it, the aim's slowdown off.
+            _peeking = _easingBack = false;
+            Active = _held = true;
+            player.MovementContext?.SetAimingSlowdown(false, 0f);
+        }
+        if (_held && !down && !_latched)
         {
             _held = false;
             bool was = Active;
@@ -126,6 +229,20 @@ internal static class ChestStance
                 else
                     letGo.SetAim(false);
             }
+            return;
+        }
+        if (!aiming && _latched && hands is Player.FirearmController walled && walled.AimingInterruptedByOverlap)
+        {
+            // The gun against a wall: the game lets the aim go and takes it again once clear (FirearmController's
+            // overlap); the stance is kept for that, and taken back with the aim, not left as the aim.
+            Active = false;
+            return;
+        }
+        if (!aiming && _latched)
+        {
+            // A stance kept by a click, its aim ended (a move of the body, a weapon switch): ended with it.
+            _latched = _peeking = _held = Active = false;
+            _leftTime = Time.time;
             return;
         }
         if (!aiming && !_held)
