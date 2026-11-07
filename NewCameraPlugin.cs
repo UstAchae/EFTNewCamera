@@ -147,7 +147,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
             new ConfigDescription("近处虚化最多糊开多大（模糊圆斑的半径，单位为度）。越近越接近这个值，但不是一刀切：整把枪从后到前仍是越近越虚。0.5 到 1 比较合适；越大，离眼睛近的部分糊得越厉害。",
                 new AcceptableValueRange<float>(0.2f, 3f), new ConfigurationManagerAttributes { Order = 0 }));
         ConfigEntry<float> eyeNear = SettingsLayout.Bind(Config, "头戴式成像装备", "双眼近裁剪面（米）", 0.001f,
-            new ConfigDescription("夜视仪翻下时两个眼睛相机（画夜视仪本体和镜片里的画面）的近裁剪面：离眼睛比这更近的东西不画。太大时眼睛贴近目镜，那一侧的镜片就不成像。眼睛相机只看半米以内，调到 0.00001（0.01 毫米）也不会有深度问题。和「镜头位置」里主镜头的近裁剪面互不影响。",
+            new ConfigDescription("夜视仪翻下时镜片里成像的近裁剪面：离眼睛比这更近的不算。太大时眼睛贴近目镜，那一侧的镜片就不成像；可以调到最小。眼睛画夜视仪外壳时最小按 0.5 毫米算（更近时灯光和阴影不稳，外壳会闪）。和「镜头位置」里主镜头的近裁剪面互不影响。",
                 new AcceptableValueRange<float>(0.00001f, 0.02f), new ConfigurationManagerAttributes { Order = 0 }));
         eyeNear.SettingChanged += (_, _) => NightVisionEyepieces.EyeNearPlane = eyeNear.Value;
         NightVisionEyepieces.EyeNearPlane = eyeNear.Value;
@@ -313,7 +313,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
     {
         ConfigEntry<float> horizontal = BindMeters("镜头位置", "水平", 0f, "沿镜头右方向移动，单位为米。");
         ConfigEntry<float> vertical = BindMeters("镜头位置", "垂直", 0.05f, "沿镜头上方向移动，单位为米。");
-        ConfigEntry<float> forward = BindMeters("镜头位置", "前后", 0.13f, "沿镜头前方向移动，单位为米。");
+        ConfigEntry<float> forward = BindMeters("镜头位置", "前后", 0.115f, "沿镜头前方向移动，单位为米。");
         ConfigEntry<bool> aimEye = SettingsLayout.Bind(Config, "镜头位置", "瞄准时移到瞄准眼", true,
             "开镜时，镜头的水平位置平滑移到瞄准用的那只眼：右肩时到右眼，换到左肩时到左眼，枪跟着一起过去；胸口抵肩时镜头不动，枪的姿势仍按移到那只眼时摆；退出瞄准时回到上面设的水平位置。");
         ConfigEntry<float> near = SettingsLayout.Bind(Config, "镜头位置", "近裁剪面（米）", 0.01f,
