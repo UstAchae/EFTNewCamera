@@ -580,6 +580,8 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
     private void LateUpdate()
     {
         NewCameraSwitch.LateUpdate();
+        HeadwearTilt.UpdateShown();
+        NightVisionEyepieces.UpdatePreviewMounts();
         Fisheye.LateUpdate();
     }
 }

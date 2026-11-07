@@ -66,6 +66,8 @@ internal static partial class NightVisionEyepieces
     {
         bool lit = Active && _body != null && !_device.Thermal && (camera == Camera.main || camera == _eyeCameras[0] || camera == _eyeCameras[1]);
         Color color = lit ? PhosphorColor() : Color.black;
+        if (lit)
+            _phosphorOf[_device.Node] = color;    // the player's other models show it so (NightVisionPreviewMounts)
         float scale = _body != null ? _body.lossyScale.x : 1f;
         for (int i = 0; i < _faceLights.Length; i++)
         {

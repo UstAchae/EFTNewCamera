@@ -130,6 +130,61 @@ internal static class HeadwearTilt
         }
     }
 
+    // The player's helmets on models of the player shown elsewhere (the inventory's, the loading screen's), each tilted
+    // as kept for it, as the worn one is; set every frame (the head moves), let go before the model goes back to the
+    // game's pool (NightVisionPreviewMounts).
+    private sealed class Shown
+    {
+        internal Transform Model = null!, Head = null!;
+        internal Vector3 RestPosition;
+        internal Quaternion RestRotation;
+        internal float Degrees;
+    }
+
+    private static readonly List<Shown> _shown = new List<Shown>();
+
+    internal static void Show(PlayerBody body, Transform model, Item? helmet)
+    {
+        Transform? head = body.PlayerBones?.Head?.Original;
+        if (head == null || helmet == null)
+            return;
+        float degrees = Mathf.Clamp(SavedFor(helmet.Id.ToString()), 0f, Range);
+        if (degrees < 0.01f)
+            return;
+        Forget(model);
+        _shown.Add(new Shown { Model = model, Head = head, RestPosition = model.localPosition, RestRotation = model.localRotation, Degrees = degrees });
+    }
+
+    internal static void Forget(Transform model)
+    {
+        for (int i = _shown.Count - 1; i >= 0; i--)
+        {
+            if (_shown[i].Model != model)
+                continue;
+            if (model != null)
+                model.SetLocalPositionAndRotation(_shown[i].RestPosition, _shown[i].RestRotation);
+            _shown.RemoveAt(i);
+        }
+    }
+
+    internal static void UpdateShown()
+    {
+        for (int i = _shown.Count - 1; i >= 0; i--)
+        {
+            Shown s = _shown[i];
+            if (s.Model == null || s.Head == null || !NewCameraSwitch.Enabled)
+            {
+                if (s.Model != null)
+                    s.Model.SetLocalPositionAndRotation(s.RestPosition, s.RestRotation);
+                _shown.RemoveAt(i);
+                continue;
+            }
+            s.Model.SetLocalPositionAndRotation(s.RestPosition, s.RestRotation);
+            Quaternion camera = CameraDirection.Resolve(s.Head.rotation);
+            s.Model.RotateAround(s.Head.position + camera * Vector3.up * SkullMiddle, camera * Vector3.right, -s.Degrees);
+        }
+    }
+
     // The helmet back where the game has it.
     internal static void Release()
     {

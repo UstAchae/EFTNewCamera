@@ -251,11 +251,21 @@ internal static partial class NightVisionEyepieces
         float leftSpan = monocular >= 0 ? 1f : HeldSpan(0, split + 0.5f * Overscan), rightSpan = monocular >= 0 ? 1f : HeldSpan(1, 1f - split + 0.5f * Overscan);
         binocular.SetFloat(SplitId, split);
         binocular.SetVector(EyeSpanId, new Vector4(leftSpan, rightSpan, 0f, 0f));
-        for (int side = 0; side < 2; side++)
+        // The eyes are in the head: shown (F12), its eyelids and brows millimetres before them hid the device's top.
+        // Left to its shadow while they draw, as when it is not shown.
+        BodyVisibility.HeadToShadow(true);
+        try
         {
-            if (monocular >= 0 && side != monocular)
-                continue;
-            RenderEye(side, camera, position, side == 0 ? leftShift : rightShift, side == 0 ? leftLens : rightLens, side == 0 ? leftSpan : rightSpan);
+            for (int side = 0; side < 2; side++)
+            {
+                if (monocular >= 0 && side != monocular)
+                    continue;
+                RenderEye(side, camera, position, side == 0 ? leftShift : rightShift, side == 0 ? leftLens : rightLens, side == 0 ? leftSpan : rightSpan);
+            }
+        }
+        finally
+        {
+            BodyVisibility.HeadToShadow(false);
         }
     }
 
