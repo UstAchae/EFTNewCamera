@@ -472,7 +472,39 @@ internal static partial class NightVisionEyepieces
             if (ambient != null && ambient.isActiveAndEnabled)
                 ambient.ManualOnRenderObject(camera);
         }
+        RedrawAmbient(camera);
     }
+
+    private static readonly AccessTools.FieldRef<AmbientLight, Dictionary<Camera, AmbientLight.CamSettings>> AmbientCamerasOf =
+        AccessTools.FieldRefAccess<AmbientLight, Dictionary<Camera, AmbientLight.CamSettings>>("_cameras");
+    private static readonly AccessTools.FieldRef<AmbientLight, bool> AmbientReady = AccessTools.FieldRefAccess<AmbientLight, bool>("_isInitialized");
+
+    // The game's ambient light lays its indoor shade (StencilShadow: where the sky's light and reflection do not reach)
+    // and its analytic light sources out for each camera in its LateUpdate, from where the camera stands then: the
+    // volumes in its view, and whether it is inside each source. This mod places the camera later, as it culls (at the
+    // eyes, turned by the head): the shade was laid out for the game's own camera place and turn, so turning the head
+    // swept a dark band across the view and the sky's reflection went unshaded where it should not reach. Laid out again
+    // for this camera as it now stands.
+    internal static void RedrawAmbient(Camera camera)
+    {
+        foreach (AmbientLight ambient in _ambientLights)
+        {
+            if (ambient == null || !ambient.isActiveAndEnabled || !AmbientReady(ambient))
+                continue;
+            Dictionary<Camera, AmbientLight.CamSettings>? cameras = AmbientCamerasOf(ambient);
+            if (cameras != null && cameras.TryGetValue(camera, out AmbientLight.CamSettings settings) && settings != null)
+            {
+                ambient.DrawStencil(settings, camera);
+                if (!_toldAmbient && camera == Camera.main)
+                {
+                    _toldAmbient = true;
+                    NewCameraPlugin.Log?.LogInfo("Ambient light: its indoor shade laid out again for the camera where this mod has it");
+                }
+            }
+        }
+    }
+
+    private static bool _toldAmbient;
 
     private static void ClearLensMap(RenderTexture target)
     {

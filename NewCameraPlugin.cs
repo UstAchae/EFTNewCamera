@@ -773,7 +773,10 @@ internal static class NewCameraSwitch
         }
 
         if (main && _poseFrame == Time.frameCount)
+        {
             camera.transform.SetPositionAndRotation(_posePosition, _poseRotation);
+            NightVisionEyepieces.RedrawAmbient(camera);
+        }
         if (optic && _poseFrame == Time.frameCount)
             AimArms.CarryOptic(camera);
 
