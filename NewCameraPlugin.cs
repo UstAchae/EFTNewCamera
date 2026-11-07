@@ -207,7 +207,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         MoveFrom(walkHead, "新镜头", "走路摇头");
         walkHead.SettingChanged += (_, _) => AimArms.WalkHeadSway = walkHead.Value;
         AimArms.WalkHeadSway = walkHead.Value;
-        ConfigEntry<bool> showHead = SettingsLayout.Bind(Config, "人物", "显示头部", true,
+        ConfigEntry<bool> showHead = SettingsLayout.Bind(Config, "人物", "显示头部", false,
             "画出自己的头。关掉时头只投阴影，画面里看不见。");
         ConfigEntry<bool> showHeadwear = SettingsLayout.Bind(Config, "人物", "显示头部装备", true,
             "画出头盔和帽子。关掉后头部装备不画，但头盔上挂的夜视仪、热成像和它们的支架照常画出（用来对付全封闭头盔挡住视线）。");
