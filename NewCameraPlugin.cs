@@ -40,6 +40,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         AimFieldOfView.Install();
         NightVisionEyepieces.Install();
         InteractionRay.Install();
+        CameraBeforePostProcessing.Install();
         HideoutEscape.Install();
         NewCameraSwitch.Enabled = enabled.Value;
         NewCameraSwitch.FirstPersonSkeleton = skeleton.Value == SkeletonFirst;
@@ -511,6 +512,8 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
 
     // The camera callbacks are each one delegate among the game's: one that throws stops the rest for that camera (the
     // game lights lights there, per camera), so each of ours is kept from throwing; a failure is logged once.
+    internal static void GuardedPreCull(Camera camera) => Guarded(NewCameraSwitch.OnCameraPreCull, camera, "pre-cull (camera, before post-processing)");
+
     private static readonly Camera.CameraCallback PreCull = camera =>
     {
         Guarded(Fisheye.Reassert, camera, "pre-cull (fisheye)");
@@ -690,6 +693,8 @@ internal static class NewCameraSwitch
         AimArms.GiveBackAim(player);
     }
 
+    private static int _mainPlacedFrame = -1;
+
     internal static void OnCameraPreCull(Camera camera)
     {
         if (!Enabled || camera == null)
@@ -709,6 +714,17 @@ internal static class NewCameraSwitch
             LaserReplay.Replay(camera);
             return;
         }
+
+        // Once a frame for the FPS camera, at whichever comes first: its post-processing's own OnPreCull, or the
+        // cameras' pre-cull callback (CameraBeforePostProcessing). The second only finds it placed.
+        if (main && _mainPlacedFrame == Time.frameCount)
+        {
+            if (_poseFrame == Time.frameCount)
+                camera.transform.SetPositionAndRotation(_posePosition, _poseRotation);
+            return;
+        }
+        if (main)
+            _mainPlacedFrame = Time.frameCount;
 
         if (main)
             OpticPicture.Apply(player);
