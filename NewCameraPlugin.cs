@@ -39,6 +39,7 @@ public sealed class NewCameraPlugin : BaseUnityPlugin
         FirstPersonAudio.Install();
         AimFieldOfView.Install();
         NightVisionEyepieces.Install();
+        InteractionRay.Install();
         HideoutEscape.Install();
         NewCameraSwitch.Enabled = enabled.Value;
         NewCameraSwitch.FirstPersonSkeleton = skeleton.Value == SkeletonFirst;
@@ -598,6 +599,14 @@ internal static class NewCameraSwitch
     // camera places itself after this mod does).
     internal static bool AtEyes(Camera camera) => _poseFrame == Time.frameCount && (camera.transform.position - _posePosition).sqrMagnitude < 1e-6f;
     private static Quaternion _poseRotation;
+
+    // Where this mod has the camera for this player (last placed: this frame, or the one before if not yet this one).
+    internal static bool CameraOf(Player player, out Vector3 position, out Quaternion rotation)
+    {
+        position = _posePosition;
+        rotation = _poseRotation;
+        return _applied && ReferenceEquals(player, _appliedTo) && _poseFrame >= Time.frameCount - 1;
+    }
 
     // Where the camera was put from the head this frame (along the world's axes), as it was worked out, not as the
     // difference of the two places in the world: far out in a map those are rounded to tens of micrometres.
